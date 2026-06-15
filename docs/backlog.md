@@ -37,3 +37,6 @@ Surfaces come from `docs/specs/0001-recon-app-surface.spec.md`.
 - [ ] Changed-lines-precise coverage gate (PMO had a root-anchored script; dropped here — re-add root-aware version).
 - [ ] Preview env wiring (Neon branch per PR + Vercel).
 - [ ] Storybook for the shared component library (once extracted).
+- [ ] **Auth: rate limiting / lockout on login + signup** (security L2 from I-004 review) — throttle repeated attempts per IP/email to blunt credential stuffing and signup abuse.
+- [ ] **Auth: email verification before activation** (security L4 from I-004 review) — require a verified email before a new MEMBER can transact.
+- [ ] **Auth: org-scoped email uniqueness** (`@@unique([orgId, email])` from I-004 review) — for multi-venue, email should be unique per org rather than globally; revisit `findByEmail`/signup when the org seam goes multi-venue.

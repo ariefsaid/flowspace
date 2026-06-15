@@ -1,6 +1,7 @@
 "use server";
 
 import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
 import { findByEmail, createMember } from "@/lib/db/users";
 
@@ -23,8 +24,11 @@ export async function signupAction(input: {
     return { error: "Kata sandi minimal 6 karakter." };
   }
 
+  // AC-005 — the spec permits revealing account existence at signup (a fresh
+  // user needs to know the email is taken), so the duplicate message is explicit
+  // here. (The login path, by contrast, stays non-enumerating.)
   if (await findByEmail(email)) {
-    return { error: "Email sudah terdaftar." }; // AC-005 — no enumeration: same generic wording
+    return { error: "Email sudah terdaftar." };
   }
 
   const slug = process.env.SEED_ORG_SLUG ?? "flowspace";
@@ -32,12 +36,25 @@ export async function signupAction(input: {
 
   const passwordHash = await bcrypt.hash(input.password, 10); // NFR-001
 
-  await createMember({
-    orgId: org.id,
-    email,
-    name: input.name.trim(),
-    passwordHash,
-  });
+  // TOCTOU: the findByEmail check above can race a concurrent signup. The DB's
+  // unique(email) constraint is the real guard — map its violation (P2002) to
+  // the same duplicate error so both paths are indistinguishable to the caller.
+  try {
+    await createMember({
+      orgId: org.id,
+      email,
+      name: input.name.trim(),
+      passwordHash,
+    });
+  } catch (e) {
+    if (
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === "P2002"
+    ) {
+      return { error: "Email sudah terdaftar." };
+    }
+    throw e;
+  }
 
   return { ok: true };
 }

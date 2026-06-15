@@ -14,6 +14,8 @@ import { signupAction } from "./actions";
 export default function SignupPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  // `phone` is collected for UI parity with the original but intentionally NOT
+  // persisted: there is no phone column in the current AppUser schema scope.
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");

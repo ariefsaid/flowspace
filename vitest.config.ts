@@ -37,6 +37,9 @@ export default defineConfig({
           setupFiles: ["./vitest.setup.int.ts"],
           include: ["**/*.int.test.ts"],
           exclude: ["**/node_modules/**", "**/.next/**"],
+          // Integration files share one throwaway DB; run them serially so
+          // their TRUNCATE/seed lifecycles never interleave across files.
+          poolOptions: { forks: { singleFork: true } },
         },
       },
     ],

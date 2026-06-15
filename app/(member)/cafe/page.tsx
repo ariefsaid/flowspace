@@ -48,7 +48,7 @@ function MenuItemCard({
 
   return (
     <Card className="flex flex-col gap-2">
-      {/* top row: emoji + name (left), category chip (right) */}
+      {/* top row: emoji + name (left), price (right, teal) */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-2xl leading-none">{item.emoji}</span>
@@ -56,20 +56,25 @@ function MenuItemCard({
             {item.name}
           </h3>
         </div>
-        <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
-          {item.category}
-        </span>
+        <p className="shrink-0 text-right text-sm font-bold text-teal-600 leading-tight">
+          {formatRupiah(item.price)}
+          <span className="block text-[11px] font-normal text-gray-400">
+            /{unit}
+          </span>
+        </p>
+      </div>
+
+      {/* category + variant hint */}
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-gray-500">{item.category}</span>
+        {item.hasVariants && (
+          <span className="text-xs font-medium text-teal-600">Pilih Variant</span>
+        )}
       </div>
 
       {/* description */}
       <p className="text-xs text-gray-500 leading-relaxed line-clamp-2">
         {item.description}
-      </p>
-
-      {/* price */}
-      <p className="text-sm font-semibold text-gray-900">
-        {formatRupiah(item.price)}
-        <span className="font-normal text-gray-400"> /{unit}</span>
       </p>
 
       {/* CTA */}
@@ -197,15 +202,15 @@ export default function CafePage() {
         </button>
       </div>
 
-      {/* ── Active-session discount banner ── */}
+      {/* ── Active-session discount banner (solid green gradient bar) ── */}
       {hasActiveSession && (
-        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 flex items-start gap-3">
+        <div className="rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 px-4 py-3 flex items-center gap-3 shadow-sm">
           <span className="text-lg leading-none">🎉</span>
           <div>
-            <p className="text-sm font-semibold text-green-800">
+            <p className="text-sm font-semibold text-white">
               Anda sedang dalam sesi aktif!
             </p>
-            <p className="text-sm text-green-700 mt-0.5">
+            <p className="text-sm text-green-50 mt-0.5">
               Nikmati diskon 5% untuk semua pesanan cafe
             </p>
           </div>

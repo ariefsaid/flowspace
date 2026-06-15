@@ -1,22 +1,48 @@
 'use client';
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Mail, Lock } from "lucide-react";
+import { signIn } from "next-auth/react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    router.push("/dashboard");
+    setError(null);
+    setPending(true);
+
+    try {
+      // signIn with redirect:false so we can handle routing client-side.
+      // callbackUrl "/dashboard" lets the middleware redirect a non-MEMBER
+      // to their own role home (/admin, /barista) — one source of truth (ADR-0004).
+      const result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+        callbackUrl: "/dashboard",
+      });
+
+      if (!result || result.error) {
+        // AC-003: same generic message for unknown email AND wrong password — no enumeration.
+        setError("Email atau kata sandi salah.");
+        return;
+      }
+
+      // Navigate to the URL resolved by NextAuth (respects the callbackUrl).
+      // Middleware will enforce the role-based redirect from there.
+      window.location.href = result.url ?? "/dashboard";
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -33,6 +59,16 @@ export default function LoginPage() {
               </p>
             </div>
           </div>
+
+          {/* Generic auth error (AC-003) */}
+          {error && (
+            <div
+              role="alert"
+              className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+              {error}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Email */}
@@ -85,8 +121,9 @@ export default function LoginPage() {
               variant="primary"
               size="lg"
               className="mt-2 w-full"
+              disabled={pending}
             >
-              Masuk
+              {pending ? "Memproses…" : "Masuk"}
             </Button>
           </form>
 

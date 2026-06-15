@@ -3,11 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Mail, Lock } from "lucide-react";
-import { signIn } from "next-auth/react";
+import { signIn, getSession } from "next-auth/react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { roleHome } from "@/lib/auth/route-policy";
+import type { Role } from "@prisma/client";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -22,13 +24,10 @@ export default function LoginPage() {
 
     try {
       // signIn with redirect:false so we can handle routing client-side.
-      // callbackUrl "/dashboard" lets the middleware redirect a non-MEMBER
-      // to their own role home (/admin, /barista) — one source of truth (ADR-0004).
       const result = await signIn("credentials", {
         email,
         password,
         redirect: false,
-        callbackUrl: "/dashboard",
       });
 
       if (!result || result.error) {
@@ -37,9 +36,10 @@ export default function LoginPage() {
         return;
       }
 
-      // Navigate to the URL resolved by NextAuth (respects the callbackUrl).
-      // Middleware will enforce the role-based redirect from there.
-      window.location.href = result.url ?? "/dashboard";
+      // Read the freshly-minted session to determine the user's role,
+      // then navigate to their role-home (FR-003 / AC-002).
+      const session = await getSession();
+      window.location.href = roleHome((session?.user?.role ?? "MEMBER") as Role);
     } finally {
       setPending(false);
     }

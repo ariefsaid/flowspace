@@ -16,7 +16,7 @@
  *
  * Credentials: seeded dev-fallback values from prisma/seed.ts.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 const MEMBER_EMAIL = "budi@flowspace.test";
 const MEMBER_PW = "dev-member-pw";
@@ -34,11 +34,7 @@ const BARISTA_ONLY_HEADING = "Dashboard Barista";
 // ---------------------------------------------------------------------------
 // Helper: log in as a given user
 // ---------------------------------------------------------------------------
-async function loginAs(
-  page: Parameters<Parameters<typeof test>[1]>[0]["page"],
-  email: string,
-  password: string,
-) {
+async function loginAs(page: Page, email: string, password: string) {
   await page.goto("/login");
   await page.fill('input[type="email"]', email);
   await page.fill('input[type="password"]', password);

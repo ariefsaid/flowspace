@@ -16,11 +16,17 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  // webServer is intentionally disabled so CI does not need a running app.
-  // Enable locally once you want to run server-dependent specs:
-  // webServer: {
-  //   command: "pnpm dev",
-  //   url: "http://localhost:3000",
-  //   reuseExistingServer: !process.env.CI,
-  // },
+  // Task 7.2: enable webServer for e2e runs.
+  // Pre-requisites: `pnpm db:deploy && pnpm db:seed` against the e2e DB, and NEXTAUTH_SECRET set.
+  // AUTH_TRUST_HOST=true is required for NextAuth v5 in production mode on localhost (non-HTTPS).
+  // reuseExistingServer: true locally so an already-running server is reused.
+  webServer: {
+    command: "AUTH_TRUST_HOST=true pnpm start",
+    url: "http://localhost:3000",
+    reuseExistingServer: !process.env.CI,
+    timeout: 60_000,
+    env: {
+      AUTH_TRUST_HOST: "true",
+    },
+  },
 });

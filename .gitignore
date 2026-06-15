@@ -1,0 +1,54 @@
+# Dependencies
+/node_modules
+
+# Next.js
+/.next/
+/out/
+/build
+next-env.d.ts
+
+# Testing / coverage / e2e artifacts
+/coverage
+/playwright-report
+/test-results
+
+# Prisma generated client
+/prisma/generated
+
+# Env / secrets — NEVER commit (this is a PUBLIC repo). brand + DB secrets live in the host env.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+*.keystore
+**/serviceAccount*.json
+secrets.*
+
+# Vendored third-party Claude Code skills — re-create with scripts/vendor-skills.sh
+.claude/skills/
+# Codex-harness vendored skill mirror (regenerated, not committed)
+.agents/skills/
+# Optional Pi project-local generated mirrors
+.pi/agents/
+.pi/skills/
+# Agent worktrees (transient)
+.claude/worktrees/
+
+# Transient recon / design-review artifacts (may contain client branding — keep OUT of the public repo)
+.playwright-mcp/
+/review/
+/*.png
+landing.png
+
+# macOS / editors
+.DS_Store
+*.sw?
+.idea
+*.tsbuildinfo
+
+# Personal local Claude settings
+.claude/settings.local.json

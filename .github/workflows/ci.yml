@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'review/**'
+      - '.claude/**'
+      - '.codex/**'
+      - '**/*.md'
+      - '.gitignore'
+      - 'AGENTS.md'
+      - 'LICENSE'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'review/**'
+      - '.claude/**'
+      - '.codex/**'
+      - '**/*.md'
+      - '.gitignore'
+      - 'AGENTS.md'
+      - 'LICENSE'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Dummy DB env: Prisma needs DATABASE_URL/DIRECT_URL present to generate the client and
+# for `next build` static analysis. The build never connects — no migrations run here.
+env:
+  DATABASE_URL: postgresql://ci:ci@localhost:5432/flowspace?schema=public
+  DIRECT_URL: postgresql://ci:ci@localhost:5432/flowspace?schema=public
+  NEXTAUTH_SECRET: ci-dummy-secret-not-used-in-prod
+  NEXTAUTH_URL: http://localhost:3000
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm typecheck
+      - run: pnpm lint:ci
+      - run: pnpm test:coverage
+      - run: pnpm build
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e

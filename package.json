@@ -24,14 +24,20 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "clsx": "^2.1.1",
+    "date-fns": "^4.4.0",
+    "lucide-react": "^1.18.0",
     "next": "^15.5.4",
     "next-auth": "^5.0.0-beta.29",
+    "qrcode.react": "^4.2.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
     "@eslint/js": "^9.37.0",
+    "@next/eslint-plugin-next": "^16.2.9",
     "@playwright/test": "^1.56.0",
     "@prisma/client": "^6.18.0",
     "@tailwindcss/postcss": "^4.1.16",

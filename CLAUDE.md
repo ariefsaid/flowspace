@@ -64,6 +64,11 @@ code-quality-reviewer (opus) · qa-acceptance (sonnet) · security-auditor (opus
 release-engineer (sonnet) · mechanical (haiku) · design-architect (opus) ·
 ui-implementer (sonnet; opus for hard slices) · design-reviewer (opus).
 
+**Model selection (binding):** delegate to the **minimum capable model** — haiku for mechanical/deterministic work,
+sonnet for normal build/QA/ship, opus only for genuine reasoning (planning, spec/security/design review, hard
+slices). Don't use opus where sonnet suffices, nor sonnet where haiku suffices — but never under-spec: use opus
+when the job needs opus. The per-agent models above are the defaults; pick by task difficulty, not habit.
+
 ## Skill ownership (one owner per concern)
 | Concern | Owner |
 |---|---|

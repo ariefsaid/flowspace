@@ -140,9 +140,14 @@ right side member name + "Keluar".
   client redirect. Admin sub-pages (`/admin/users|bookings|pending|orders|print-reports|settings`) still need a
   full recon pass under a real admin session.
 
+### Guest cafe `/cafe/guest` (public — recon captured, `review/recon/snap-guest-cafe.md`)
+- OBS-140: Back arrow → `/`. Header "{Brand} Cafe — Order sebagai Guest". **Mode Guest** info banner ("pesan tanpa
+  login; masukkan nama saat checkout; untuk booking & print → daftar member" link → `/signup`). Same category tabs +
+  menu item cards (Pilih Variant / Tambah) as member `/cafe` but **no member discount**. Cart titled "Keranjang",
+  empty state "Keranjang masih kosong". Checkout collects guest name.
+
 ## Open recon items (before specing each surface)
 1. Admin sub-pages (`/admin/users|bookings|pending|orders|print-reports|settings`) — capture under a clean admin session.
-2. Guest cafe flow `/cafe/guest` — full ordering/payment journey (no-account path).
 2. Variant modal contents (drink hot/cold + sugar options + price deltas) and cart/checkout flow on `/cafe`.
 3. Booking wizard steps 2–4 (time picker, interactive seat map, confirmation/payment) — capture each step.
 4. Exact design tokens (colors, type scale, spacing, radius, shadows) → `DESIGN.md` (design-architect Foundation, I-002).

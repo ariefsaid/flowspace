@@ -1,5 +1,4 @@
 // Prisma schema for FlowSpace.
-// Generates the client only in scaffold; no migrations are run yet.
 
 generator client {
   provider = "prisma-client-js"
@@ -9,6 +8,18 @@ datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  MEMBER
+  ADMIN
+  BARISTA
+}
+
+enum MembershipTier {
+  REGULAR
+  PREMIUM
+  GOLD
 }
 
 /// A tenant. Every multi-tenant row hangs off an Organization.
@@ -25,13 +36,20 @@ model Organization {
 }
 
 /// A user scoped to a single Organization (the tenancy seam).
+/// FR-021: finalized with role/tier/credits/print/archived columns.
 model AppUser {
-  id        String   @id @default(cuid())
-  orgId     String   @map("org_id")
-  email     String   @unique
-  role      String   @default("member")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id             String         @id @default(cuid())
+  orgId          String         @map("org_id")
+  email          String         @unique
+  name           String
+  passwordHash   String         @map("password_hash")
+  role           Role           @default(MEMBER)
+  membershipTier MembershipTier @default(REGULAR) @map("membership_tier")
+  timeCredits    Int            @default(0) @map("time_credits")
+  printBalance   Int            @default(0) @map("print_balance")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  archivedAt     DateTime?      @map("archived_at")
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 

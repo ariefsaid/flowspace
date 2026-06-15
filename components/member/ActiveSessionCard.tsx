@@ -48,7 +48,9 @@ export function ActiveSessionCard({ session }: ActiveSessionCardProps) {
       {/* header row */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <DoorOpen className="h-7 w-7 shrink-0 text-white/90" />
+          <span className="flex shrink-0 items-center justify-center rounded-full bg-white/15 p-2">
+            <DoorOpen className="h-7 w-7 text-white/90" />
+          </span>
           <div>
             <p className="text-xs font-medium text-teal-50">Walk-in Aktif</p>
             <p className="text-2xl font-bold leading-tight">{session.table}</p>
@@ -65,7 +67,7 @@ export function ActiveSessionCard({ session }: ActiveSessionCardProps) {
       </div>
 
       {/* divider */}
-      <div className="my-4 border-t border-white/20" />
+      <div className="my-4 border-t border-white/30" />
 
       {/* cost row */}
       <div className="flex items-start justify-between gap-3">

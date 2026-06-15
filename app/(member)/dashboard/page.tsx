@@ -7,7 +7,7 @@ import {
   CreditCard,
   Coffee,
   CalendarDays,
-  ChevronRight,
+  ArrowRight,
   TrendingUp,
   MapPin,
   Utensils,
@@ -90,7 +90,7 @@ export default function DashboardPage() {
     <div className="space-y-6">
       {/* ── Greeting ─────────────────────────────────────────── */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">
+        <h1 className="text-3xl font-bold text-gray-900">
           Selamat Datang, {firstName}!
         </h1>
         <p className="mt-1 text-sm text-gray-500">
@@ -122,7 +122,7 @@ export default function DashboardPage() {
             {/* Order Cafe */}
             <Link
               href="/cafe"
-              className="flex items-center gap-3 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3 text-white shadow-md transition-opacity hover:opacity-90"
+              className="flex items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3 text-white shadow-md transition-opacity hover:opacity-90"
             >
               <Coffee className="h-5 w-5 shrink-0" />
               <div>
@@ -136,7 +136,7 @@ export default function DashboardPage() {
             {/* Print */}
             <Link
               href="/print"
-              className="flex items-center gap-3 rounded-xl bg-gradient-to-r from-purple-500 to-purple-600 px-4 py-3 text-white shadow-md transition-opacity hover:opacity-90"
+              className="flex items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-purple-500 to-purple-600 px-4 py-3 text-white shadow-md transition-opacity hover:opacity-90"
             >
               <Printer className="h-5 w-5 shrink-0" />
               <div>
@@ -249,7 +249,7 @@ export default function DashboardPage() {
             className="flex items-center gap-1 text-sm font-medium text-teal-600 hover:text-teal-700"
           >
             Lihat Semua
-            <ChevronRight className="h-4 w-4" />
+            <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
 

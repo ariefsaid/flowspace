@@ -24,15 +24,14 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-slate-50 active:bg-slate-100"
+      className="flex items-center justify-center rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-slate-100 active:bg-slate-200"
       aria-label="Salin"
     >
       {copied ? (
-        <Check className="h-3 w-3 text-green-600" />
+        <Check className="h-3.5 w-3.5 text-green-600" />
       ) : (
-        <Copy className="h-3 w-3" />
+        <Copy className="h-3.5 w-3.5" />
       )}
-      {copied ? "Disalin!" : "Salin"}
     </button>
   );
 }

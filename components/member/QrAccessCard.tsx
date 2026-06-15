@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Key } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 
 const REFRESH_SECONDS = 30;
@@ -35,10 +36,10 @@ export function QrAccessCard({ memberId }: QrAccessCardProps) {
   return (
     <div className="flex flex-col items-center gap-3">
       <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800">
-        <span className="text-teal-600">🔑</span> QR Akses Pintu &amp; Print
+        <Key className="h-4 w-4 text-teal-600" /> QR Akses Pintu &amp; Print
       </h3>
       <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-        <QRCodeSVG value={token} size={148} level="M" />
+        <QRCodeSVG value={token} size={148} level="M" fgColor="#14b8a6" bgColor="#ffffff" />
       </div>
       <p className="text-xs text-gray-500">
         Refreshes in{" "}

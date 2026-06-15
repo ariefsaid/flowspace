@@ -1,15 +1,9 @@
 @import "tailwindcss";
 
+/* FlowSpace is a light-only product (white surfaces on white page). */
 :root {
   --background: #ffffff;
-  --foreground: #0a0a0a;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --foreground: #020817; /* slate-950 */
 }
 
 body {

@@ -1,0 +1,56 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
+import { Card } from "@/components/ui/Card";
+
+const REFRESH_SECONDS = 30;
+
+/** Generates a time-bucketed token so the QR changes every REFRESH_SECONDS. */
+function generateQrToken(memberId: string) {
+  const bucket = Math.floor(Date.now() / (REFRESH_SECONDS * 1000));
+  return `flowspace:access:${memberId}:${bucket}`;
+}
+
+interface QrAccessCardProps {
+  memberId: string;
+}
+
+export function QrAccessCard({ memberId }: QrAccessCardProps) {
+  const [token, setToken] = useState(() => generateQrToken(memberId));
+  const [secondsLeft, setSecondsLeft] = useState(() => {
+    const ms = Date.now();
+    const bucket = Math.floor(ms / (REFRESH_SECONDS * 1000));
+    return REFRESH_SECONDS - Math.floor((ms / 1000) % REFRESH_SECONDS);
+  });
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const ms = Date.now();
+      const remaining = REFRESH_SECONDS - Math.floor((ms / 1000) % REFRESH_SECONDS);
+      setSecondsLeft(remaining);
+      setToken(generateQrToken(memberId));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [memberId]);
+
+  return (
+    <Card className="flex flex-col items-center gap-3 p-5">
+      <h3 className="self-start text-sm font-semibold text-gray-800">
+        QR Akses Pintu &amp; Print
+      </h3>
+      <div className="rounded-xl border border-slate-200 p-3 shadow-sm">
+        <QRCodeSVG value={token} size={148} level="M" />
+      </div>
+      <p className="text-xs text-gray-500">
+        Refreshes in{" "}
+        <span className="font-semibold text-teal-600 tabular-nums">
+          {secondsLeft}s
+        </span>
+      </p>
+      <p className="text-center text-xs text-gray-400">
+        Scan untuk akses pintu &amp; mesin print/fotocopy
+      </p>
+    </Card>
+  );
+}

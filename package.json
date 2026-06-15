@@ -37,6 +37,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
     "@eslint/js": "^9.37.0",
+    "@next/eslint-plugin-next": "^16.2.9",
     "@playwright/test": "^1.56.0",
     "@prisma/client": "^6.18.0",
     "@tailwindcss/postcss": "^4.1.16",

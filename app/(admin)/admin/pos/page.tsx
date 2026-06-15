@@ -20,6 +20,9 @@ const DISPLAY_NAMES: Record<string, string> = {
   "tahu-goreng": "French Fries",
 };
 
+// Items present in mock data but hidden in the original screenshot.
+const HIDDEN_IDS = new Set<string>(["tempe-orek"]);
+
 function getDisplayName(id: string, fallback: string): string {
   return DISPLAY_NAMES[id] ?? fallback;
 }
@@ -45,14 +48,13 @@ const MEMBER_DISCOUNT_RATE = 0.1; // 10 % mock discount
 // ---------------------------------------------------------------------------
 
 interface MenuItemCardProps {
-  id: string;
   name: string;
   price: number;
   isInCart: boolean;
   onAdd: () => void;
 }
 
-function MenuItemCardRow({ id, name, price, isInCart, onAdd }: MenuItemCardProps) {
+function MenuItemCardRow({ name, price, isInCart, onAdd }: MenuItemCardProps) {
   return (
     <div
       className={cn(
@@ -110,11 +112,6 @@ export default function AdminPosPage() {
       if (existing.qty === 1) return prev.filter((l) => l.id !== id);
       return prev.map((l) => l.id === id ? { ...l, qty: l.qty - 1 } : l);
     });
-  }, []);
-
-  // Remove item entirely
-  const removeFromCart = useCallback((id: string) => {
-    setCart((prev) => prev.filter((l) => l.id !== id));
   }, []);
 
   // Customer lookup (mock)
@@ -177,7 +174,9 @@ export default function AdminPosPage() {
           {/* Categories */}
           <div className="space-y-6">
             {CATEGORIES.map((category) => {
-              const items = menuItems.filter((m) => m.category === category);
+              const items = menuItems.filter(
+                (m) => m.category === category && !HIDDEN_IDS.has(m.id),
+              );
               if (items.length === 0) return null;
               return (
                 <div key={category}>
@@ -188,7 +187,6 @@ export default function AdminPosPage() {
                     {items.map((item) => (
                       <MenuItemCardRow
                         key={item.id}
-                        id={item.id}
                         name={getDisplayName(item.id, item.name)}
                         price={item.price}
                         isInCart={cartIds.has(item.id)}
@@ -246,11 +244,6 @@ export default function AdminPosPage() {
               </Button>
             </div>
 
-            {/* Hint */}
-            <p className="mt-2 text-xs text-gray-400">
-              automatic discount detection
-            </p>
-
             {/* Lookup result */}
             {lookupDone && (
               <div className="mt-3">
@@ -285,8 +278,7 @@ export default function AdminPosPage() {
             </div>
 
             {cart.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-gray-400">
-                <ShoppingCart size={32} className="mb-2 opacity-40" />
+              <div className="flex items-center justify-center py-8 text-gray-400">
                 <p className="text-sm">Cart is empty</p>
               </div>
             ) : (

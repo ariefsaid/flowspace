@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Card } from "@/components/ui/Card";
 
 const REFRESH_SECONDS = 30;
 
@@ -20,7 +19,6 @@ export function QrAccessCard({ memberId }: QrAccessCardProps) {
   const [token, setToken] = useState(() => generateQrToken(memberId));
   const [secondsLeft, setSecondsLeft] = useState(() => {
     const ms = Date.now();
-    const bucket = Math.floor(ms / (REFRESH_SECONDS * 1000));
     return REFRESH_SECONDS - Math.floor((ms / 1000) % REFRESH_SECONDS);
   });
 
@@ -35,11 +33,11 @@ export function QrAccessCard({ memberId }: QrAccessCardProps) {
   }, [memberId]);
 
   return (
-    <Card className="flex flex-col items-center gap-3 p-5">
-      <h3 className="self-start text-sm font-semibold text-gray-800">
-        QR Akses Pintu &amp; Print
+    <div className="flex flex-col items-center gap-3">
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800">
+        <span className="text-teal-600">🔑</span> QR Akses Pintu &amp; Print
       </h3>
-      <div className="rounded-xl border border-slate-200 p-3 shadow-sm">
+      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <QRCodeSVG value={token} size={148} level="M" />
       </div>
       <p className="text-xs text-gray-500">
@@ -51,6 +49,6 @@ export function QrAccessCard({ memberId }: QrAccessCardProps) {
       <p className="text-center text-xs text-gray-400">
         Scan untuk akses pintu &amp; mesin print/fotocopy
       </p>
-    </Card>
+    </div>
   );
 }

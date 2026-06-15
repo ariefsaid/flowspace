@@ -2,7 +2,6 @@
 
 import { Zap, Users, Monitor, CalendarDays, Building2 } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { Card } from "@/components/ui/Card";
 
 export type BookingType =
   | "walkin-coworking"
@@ -18,6 +17,7 @@ interface TypeCardProps {
   description: string;
   badge: string;
   badgeClass: string;
+  badgePill?: boolean;
   selected: boolean;
   onClick: () => void;
   variant?: "walkin" | "scheduled";
@@ -30,6 +30,7 @@ function TypeCard({
   description,
   badge,
   badgeClass,
+  badgePill = false,
   selected,
   onClick,
   variant = "scheduled",
@@ -62,7 +63,17 @@ function TypeCard({
       <p className="text-sm text-gray-500 leading-relaxed mb-3">
         {description}
       </p>
-      <span className={cn("text-sm font-medium", badgeClass)}>{badge}</span>
+      <span
+        className={cn(
+          "text-sm font-medium",
+          badgePill
+            ? "inline-flex items-center rounded-full bg-orange-100 px-2.5 py-1 text-xs"
+            : "",
+          badgeClass,
+        )}
+      >
+        {badge}
+      </span>
     </button>
   );
 }
@@ -90,7 +101,8 @@ export function Step1Type({ selected, onSelect }: Step1TypeProps) {
             title="Walk-in Coworking"
             description="Tunjukkan nomor booking ke kasir. Durasi dihitung saat selesai (maks 4 jam biaya)."
             badge="Bayar di kasir saat selesai"
-            badgeClass="text-orange-500"
+            badgeClass="text-orange-600"
+            badgePill
             selected={selected === "walkin-coworking"}
             onClick={() => onSelect("walkin-coworking")}
             variant="walkin"
@@ -101,7 +113,8 @@ export function Step1Type({ selected, onSelect }: Step1TypeProps) {
             title="Walk-in Meeting Room"
             description="Gunakan meeting room sekarang. Pilih durasi yang diinginkan."
             badge="Mulai sekarang"
-            badgeClass="text-orange-500"
+            badgeClass="text-orange-600"
+            badgePill
             selected={selected === "walkin-meeting"}
             onClick={() => onSelect("walkin-meeting")}
             variant="walkin"

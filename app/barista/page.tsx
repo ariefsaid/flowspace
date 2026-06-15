@@ -5,7 +5,7 @@ import { Volume2, VolumeX, RefreshCw, Coffee, ChefHat } from "lucide-react";
 import { brand } from "@/brand.config";
 import { cn } from "@/lib/cn";
 import { Button, Card } from "@/components/ui";
-import { baristaOrders, baristaOrdersSample } from "@/lib/mock/barista";
+import { baristaOrders } from "@/lib/mock/barista";
 import type { BaristaOrder, OrderStatus } from "@/lib/mock/types";
 
 // ---------------------------------------------------------------------------

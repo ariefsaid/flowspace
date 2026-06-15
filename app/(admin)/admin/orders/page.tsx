@@ -5,8 +5,23 @@ import { RefreshCw, User, Clock, Trash2, ShoppingBag } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { formatRupiah, formatDateID } from "@/lib/format";
-import { cn } from "@/lib/cn";
+import { formatRupiah } from "@/lib/format";
+
+// Original uses abbreviated month names ("6 Mei 2026, 11.36" / "30 Apr 2026, 13.54").
+const shortDateFmt = new Intl.DateTimeFormat("id-ID", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+const shortTimeFmt = new Intl.DateTimeFormat("id-ID", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+function formatOrderDate(iso: string): string {
+  const d = new Date(iso);
+  return `${shortDateFmt.format(d)}, ${shortTimeFmt.format(d).replace(/:/g, ".")}`;
+}
 
 // ---------------------------------------------------------------------------
 // Admin orders mock data (exact replica from recon text-admin-orders.txt)
@@ -188,7 +203,7 @@ function OrderCard({
           {/* Timestamp */}
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
             <Clock className="h-3.5 w-3.5 shrink-0" />
-            <span>{formatDateID(order.placedAt)}</span>
+            <span>{formatOrderDate(order.placedAt)}</span>
           </div>
         </div>
 
@@ -222,8 +237,8 @@ function OrderCard({
       {/* Divider */}
       <div className="border-t border-slate-100" />
 
-      {/* Items */}
-      <div className="px-4 pt-3 pb-1">
+      {/* Items — subtle slate band */}
+      <div className="bg-slate-50 px-4 py-3">
         <p className="text-xs font-medium text-gray-500 mb-2">Items:</p>
         <div className="space-y-1">
           {order.lines.map((line, idx) => (
@@ -241,7 +256,7 @@ function OrderCard({
       </div>
 
       {/* Divider */}
-      <div className="border-t border-slate-100 mx-4 mt-3" />
+      <div className="border-t border-slate-100" />
 
       {/* Totals */}
       <div className="px-4 py-3 space-y-1">

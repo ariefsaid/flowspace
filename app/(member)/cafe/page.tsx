@@ -6,7 +6,6 @@ import { formatRupiah, formatDateOnlyID } from "@/lib/format";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
-import { Tabs } from "@/components/ui/Tabs";
 import { menuItems, lastOrder, currentMember } from "@/lib/mock";
 import { VariantModal } from "@/components/member/cafe/VariantModal";
 import { CartPanel } from "@/components/member/cafe/CartPanel";
@@ -42,32 +41,35 @@ function MenuItemCard({
   onAddDirect: (item: MenuItem) => void;
   onPickVariant: (item: MenuItem) => void;
 }) {
+  const unit =
+    item.category === "Food" || item.category === "Snack"
+      ? "porsi"
+      : "cangkir";
+
   return (
-    <Card className="flex flex-col gap-3">
-      {/* emoji + category row */}
+    <Card className="flex flex-col gap-2">
+      {/* top row: emoji + name (left), category chip (right) */}
       <div className="flex items-start justify-between gap-2">
-        <span className="text-3xl leading-none">{item.emoji}</span>
-        <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-2xl leading-none">{item.emoji}</span>
+          <h3 className="text-sm font-semibold text-gray-900 leading-snug truncate">
+            {item.name}
+          </h3>
+        </div>
+        <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
           {item.category}
         </span>
       </div>
 
-      {/* name + price */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-900 leading-snug">
-          {item.name}
-        </h3>
-        {item.hasVariants && (
-          <p className="text-xs text-gray-400 mt-0.5">+pilihan: panas/dingin, gula</p>
-        )}
-        <p className="text-sm font-semibold text-teal-600 mt-1">
-          {formatRupiah(item.price)}
-        </p>
-      </div>
-
       {/* description */}
-      <p className="text-xs text-gray-500 leading-relaxed line-clamp-2 flex-1">
+      <p className="text-xs text-gray-500 leading-relaxed line-clamp-2">
         {item.description}
+      </p>
+
+      {/* price */}
+      <p className="text-sm font-semibold text-gray-900">
+        {formatRupiah(item.price)}
+        <span className="font-normal text-gray-400"> /{unit}</span>
       </p>
 
       {/* CTA */}
@@ -75,7 +77,7 @@ function MenuItemCard({
         <Button
           variant="outline"
           size="sm"
-          className="w-full"
+          className="w-full mt-1"
           onClick={() => onPickVariant(item)}
         >
           Pilih Variant
@@ -84,7 +86,7 @@ function MenuItemCard({
         <Button
           variant="primary"
           size="sm"
-          className="w-full"
+          className="w-full mt-1"
           onClick={() => onAddDirect(item)}
         >
           Tambah
@@ -167,14 +169,14 @@ export default function CafePage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      {/* ── Page header ── */}
-      <div className="flex items-center justify-between">
+    <div className="max-w-6xl mx-auto space-y-5">
+      {/* ── Page header (teal gradient bar) ── */}
+      <div className="flex items-center justify-between gap-4 rounded-xl bg-gradient-to-r from-teal-500 to-teal-600 px-5 py-4 shadow-md">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">
+          <h1 className="text-2xl font-bold text-white">
             {BRAND_NAME} Cafe
           </h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <p className="text-sm text-teal-50 mt-0.5">
             Pesan makanan &amp; minuman favorit Anda
           </p>
         </div>
@@ -184,11 +186,11 @@ export default function CafePage() {
           type="button"
           onClick={() => setCartOpen(true)}
           aria-label="Buka keranjang"
-          className="relative inline-flex items-center justify-center h-11 w-11 rounded-xl border-2 border-teal-500 bg-white text-teal-600 hover:bg-teal-50 transition-colors shadow-sm"
+          className="relative inline-flex items-center justify-center h-11 w-11 rounded-xl bg-white/20 text-white hover:bg-white/30 transition-colors"
         >
           <ShoppingCart className="h-5 w-5" />
           {totalCartQty > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-teal-500 text-[10px] font-bold text-white">
+            <span className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-orange-500 text-[10px] font-bold text-white">
               {totalCartQty > 9 ? "9+" : totalCartQty}
             </span>
           )}
@@ -210,70 +212,90 @@ export default function CafePage() {
         </div>
       )}
 
-      {/* ── Category filter tabs ── */}
-      <Tabs
-        tabs={CATEGORY_TABS}
-        value={activeCategory}
-        onChange={setActiveCategory}
-      />
-
-      {/* ── Menu grid ── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {filteredItems.map((item) => (
-          <MenuItemCard
-            key={item.id}
-            item={item}
-            onAddDirect={(it) => {
-              addToCart(it);
-            }}
-            onPickVariant={(it) => setVariantItem(it)}
-          />
-        ))}
-      </div>
-
-      {/* ── Pesanan Terakhir ── */}
-      <section>
-        <h2 className="text-base font-semibold text-gray-900 mb-3">
-          Pesanan Terakhir
-        </h2>
-        <Card>
-          <div className="flex items-start justify-between gap-4 mb-3">
-            <div>
-              <p className="text-xs text-gray-500">{lastOrder.id}</p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {formatDateOnlyID(lastOrder.date)}
-              </p>
-            </div>
-            <Badge tone="completed">Selesai</Badge>
+      {/* ── Two-column layout: menu + order sidebar ── */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
+        {/* ── Left: filter pills + menu grid ── */}
+        <div className="space-y-4">
+          {/* Category filter pills */}
+          <div className="flex flex-wrap items-center gap-2">
+            {CATEGORY_TABS.map((tab) => {
+              const active = tab.key === activeCategory;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActiveCategory(tab.key)}
+                  className={
+                    active
+                      ? "rounded-full bg-teal-500 px-4 py-1.5 text-sm font-medium text-white shadow-sm"
+                      : "rounded-full border border-slate-200 bg-white px-4 py-1.5 text-sm font-medium text-gray-600 hover:bg-slate-50"
+                  }
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
 
-          <div className="space-y-2">
-            {lastOrder.lines.map((line, idx) => (
-              <div
-                key={idx}
-                className="flex items-center justify-between text-sm"
-              >
-                <span className="text-gray-700">
-                  {line.name}
-                  {line.variant && (
-                    <span className="ml-1 text-gray-400 text-xs">
-                      ({line.variant})
-                    </span>
-                  )}
-                </span>
-                <span className="text-gray-500 text-xs">×{line.qty}</span>
-              </div>
+          {/* Menu grid */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {filteredItems.map((item) => (
+              <MenuItemCard
+                key={item.id}
+                item={item}
+                onAddDirect={(it) => {
+                  addToCart(it);
+                }}
+                onPickVariant={(it) => setVariantItem(it)}
+              />
             ))}
           </div>
+        </div>
 
-          <div className="mt-3 pt-3 border-t border-slate-200 flex items-center justify-between">
-            <span className="text-sm text-gray-600">Total</span>
-            <span className="text-sm font-semibold text-gray-900">
-              {formatRupiah(lastOrder.total)}
-            </span>
-          </div>
-        </Card>
-      </section>
+        {/* ── Right: Pesanan Terakhir ── */}
+        <aside className="lg:sticky lg:top-6 lg:self-start">
+          <h2 className="text-base font-semibold text-gray-900 mb-3">
+            Pesanan Terakhir
+          </h2>
+          <Card>
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <p className="text-xs text-gray-500">{lastOrder.id}</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {formatDateOnlyID(lastOrder.date)}
+                </p>
+              </div>
+              <Badge tone="completed">Selesai</Badge>
+            </div>
+
+            <div className="space-y-2">
+              {lastOrder.lines.map((line, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <span className="text-gray-700">
+                    {line.name}
+                    {line.variant && (
+                      <span className="ml-1 text-gray-400 text-xs">
+                        ({line.variant})
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-gray-500 text-xs">×{line.qty}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-slate-200 flex items-center justify-between">
+              <span className="text-sm text-gray-600">Total</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {formatRupiah(lastOrder.total)}
+              </span>
+            </div>
+          </Card>
+        </aside>
+      </div>
 
       {/* ── Variant modal ── */}
       {variantItem && (

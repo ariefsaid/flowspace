@@ -10,6 +10,7 @@ import {
   Wallet,
   CheckCircle2,
   Play,
+  Sofa,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -141,7 +142,7 @@ function ActiveBookingCard({ booking }: ActiveBookingCardProps) {
         {/* Facility */}
         <div className="flex items-start gap-3">
           <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-100">
-            <CalendarDays size={18} className="text-teal-600" />
+            <Sofa size={18} className="text-teal-600" />
           </div>
           <div>
             <p className="font-semibold text-gray-900 text-sm">{booking.facility}</p>
@@ -315,7 +316,7 @@ export default function AdminBookingsPage() {
             <CalendarDays size={22} className="text-teal-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Booking Management</h1>
+            <h1 className="text-3xl font-bold text-gray-900">Booking Management</h1>
             <p className="text-sm text-gray-500">Kelola booking fasilitas</p>
           </div>
         </div>

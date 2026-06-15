@@ -3,7 +3,6 @@
 import { X, Plus, Minus, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { formatRupiah } from "@/lib/format";
-import { cn } from "@/lib/cn";
 import type { CartItem } from "./types";
 
 interface CartPanelProps {

@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock, MapPin } from "lucide-react";
-import { Card } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
+import { DoorOpen } from "lucide-react";
 import { formatRupiah } from "@/lib/format";
 import type { ActiveSession } from "@/lib/mock/types";
 
@@ -46,62 +44,51 @@ export function ActiveSessionCard({ session }: ActiveSessionCardProps) {
   const runningCost = billed * session.tarifPerHour;
 
   return (
-    <Card variant="highlight" className="p-5">
+    <div className="bg-gradient-to-br from-teal-500 to-teal-600 px-6 py-5 text-white">
       {/* header row */}
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <Badge tone="active">AKTIF</Badge>
-            <span className="text-xs text-gray-500">Sesi Walk-in</span>
-          </div>
-          <div className="mt-1 flex items-center gap-1.5 text-gray-800">
-            <MapPin className="h-4 w-4 text-teal-600" />
-            <span className="text-lg font-semibold">{session.table}</span>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <DoorOpen className="h-7 w-7 shrink-0 text-white/90" />
+          <div>
+            <p className="text-xs font-medium text-teal-50">Walk-in Aktif</p>
+            <p className="text-2xl font-bold leading-tight">{session.table}</p>
           </div>
         </div>
 
         {/* timer */}
         <div className="text-right">
-          <p className="text-xs font-medium text-gray-500">Durasi Sesi</p>
-          <p className="font-mono text-3xl font-bold text-teal-600 tabular-nums">
+          <p className="text-xs font-medium text-teal-50">Durasi Berjalan</p>
+          <p className="font-mono text-3xl font-bold tabular-nums">
             {formatHMS(elapsedSeconds)}
           </p>
         </div>
       </div>
 
+      {/* divider */}
+      <div className="my-4 border-t border-white/20" />
+
       {/* cost row */}
-      <div className="rounded-xl bg-teal-50 p-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs text-gray-500">
-              Biaya sementara (pembulatan per jam)
-            </p>
-            <p className="mt-0.5 text-xl font-bold text-gray-900">
-              {formatRupiah(runningCost)}
-            </p>
-          </div>
-          <div className="text-right text-xs text-gray-500">
-            <p>
-              Tarif:{" "}
-              <span className="font-semibold text-gray-700">
-                {formatRupiah(session.tarifPerHour)}/jam
-              </span>
-            </p>
-            <p>
-              Maks:{" "}
-              <span className="font-semibold text-gray-700">
-                {session.maxHours} jam
-              </span>
-            </p>
-          </div>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm text-teal-50">
+            Biaya sementara (pembulatan per jam):
+          </p>
+          <p className="mt-0.5 text-xs text-teal-100">
+            Tarif: {formatRupiah(session.tarifPerHour)}/jam
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-2xl font-bold">{formatRupiah(runningCost)}</p>
+          <p className="mt-0.5 text-xs text-teal-100">
+            Maks: {session.maxHours} jam
+          </p>
         </div>
       </div>
 
       {/* hint */}
-      <p className="mt-3 flex items-center gap-1.5 text-xs text-gray-500">
-        <Clock className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+      <p className="mt-3 text-center text-xs text-teal-50">
         💡 Menuju kasir untuk menyelesaikan sesi &amp; bayar
       </p>
-    </Card>
+    </div>
   );
 }

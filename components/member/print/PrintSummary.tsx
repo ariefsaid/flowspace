@@ -1,6 +1,6 @@
 "use client";
 
-import { Printer } from "lucide-react";
+import { Printer, Copy } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { formatRupiah } from "@/lib/format";
@@ -51,8 +51,8 @@ export function PrintSummary({
         <SummaryRow
           label="Copy"
           value={
-            <span className="flex items-center gap-1">
-              <span className="text-xs">⧉</span>
+            <span className="flex items-center gap-1.5">
+              <Copy className="h-3.5 w-3.5 text-gray-500" />
               {copies}x
             </span>
           }

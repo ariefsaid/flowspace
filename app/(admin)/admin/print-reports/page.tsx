@@ -217,7 +217,7 @@ export default function AdminPrintReportsPage() {
           value={totalJobs}
           unit="job"
           icon={Printer}
-          accent="purple"
+          accent="teal"
         />
         <StatTile
           label="Total Halaman"
@@ -242,15 +242,15 @@ export default function AdminPrintReportsPage() {
       </div>
 
       {/* Revenue highlight card */}
-      <div className="flex items-center justify-between gap-4 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 p-4 shadow-md text-white">
+      <div className="flex items-center justify-between gap-4 rounded-xl bg-gradient-to-br from-teal-500 to-teal-600 p-4 shadow-md text-white">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-purple-100">
+          <p className="text-sm font-medium text-teal-100">
             Total Pendapatan Print (Selesai)
           </p>
           <p className="mt-1 truncate text-2xl font-bold">
             {formatRupiah(totalRevenue)}
           </p>
-          <p className="mt-0.5 text-xs text-purple-200">
+          <p className="mt-0.5 text-xs text-teal-100">
             dari {adminPrintJobs.filter((j) => j.status === "COMPLETED").length}{" "}
             job selesai
           </p>
@@ -264,7 +264,7 @@ export default function AdminPrintReportsPage() {
       <Card className="p-0 overflow-hidden">
         {/* Card header */}
         <div className="flex items-center gap-2 px-6 py-4 border-b border-slate-200">
-          <Printer className="h-5 w-5 text-purple-500" aria-hidden="true" />
+          <Printer className="h-5 w-5 text-teal-600" aria-hidden="true" />
           <h2 className="text-lg font-semibold text-gray-800">
             Daftar Pekerjaan Print
           </h2>
@@ -276,8 +276,8 @@ export default function AdminPrintReportsPage() {
         {/* Empty state */}
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center px-6">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-purple-50">
-              <Inbox className="h-7 w-7 text-purple-400" aria-hidden="true" />
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-teal-50">
+              <Inbox className="h-7 w-7 text-teal-400" aria-hidden="true" />
             </div>
             <p className="text-sm font-medium text-gray-700">
               Belum ada pekerjaan print

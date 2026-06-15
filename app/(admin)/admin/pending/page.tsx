@@ -27,7 +27,7 @@ const memberBySession: Record<string, { name: string; phone: string }> = {
 };
 
 const pendingItems: PendingItem[] = bookings
-  .filter((b) => b.payment === "WAITING_CASHIER")
+  .filter((b) => b.payment === "WAITING_CASHIER" && b.status !== "CANCELLED")
   .map((b) => {
     // Try to find the member with an active session on this facility
     const matched = members.find(

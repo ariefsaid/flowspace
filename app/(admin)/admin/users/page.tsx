@@ -265,17 +265,9 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-// Deterministic teal/slate avatar tint based on id
-const AVATAR_COLORS = [
-  "bg-teal-100 text-teal-700",
-  "bg-slate-200 text-slate-700",
-  "bg-amber-100 text-amber-700",
-  "bg-blue-100 text-blue-700",
-  "bg-purple-100 text-purple-700",
-];
-function avatarColor(id: string): string {
-  const n = id.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  return AVATAR_COLORS[n % AVATAR_COLORS.length];
+// Uniform teal avatar tint to match the recon
+function avatarColor(): string {
+  return "bg-teal-100 text-teal-700";
 }
 
 // ---------------------------------------------------------------------------
@@ -375,7 +367,7 @@ function UserRow({ user }: { user: AdminUser }) {
       <div
         className={cn(
           "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
-          avatarColor(user.id),
+          avatarColor(),
         )}
         aria-hidden="true"
       >
@@ -433,26 +425,26 @@ function UserRow({ user }: { user: AdminUser }) {
         </div>
       </div>
 
-      {/* Action buttons */}
-      <div className="flex shrink-0 items-center gap-1">
+      {/* Action buttons — outlined icon chips matching the recon */}
+      <div className="flex shrink-0 items-center gap-2">
         <button
           type="button"
           aria-label={`Edit ${user.name}`}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-teal-50 hover:text-teal-600"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-gray-500 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-600"
         >
           <Pencil className="h-4 w-4" aria-hidden="true" />
         </button>
         <button
           type="button"
           aria-label={`Kirim pesan ke ${user.name}`}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-gray-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
         >
           <MessageSquare className="h-4 w-4" aria-hidden="true" />
         </button>
         <button
           type="button"
           aria-label={`Hapus ${user.name}`}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-gray-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
         >
           <Trash2 className="h-4 w-4" aria-hidden="true" />
         </button>

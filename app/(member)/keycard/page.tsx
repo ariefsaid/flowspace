@@ -133,7 +133,7 @@ export default function KeycardPage() {
     <div className="flex flex-col items-center gap-6 py-4">
       {/* Page heading (OBS-090) */}
       <div className="text-center space-y-1">
-        <h1 className="text-2xl font-bold text-gray-900">Digital Key Card</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Digital Key Card</h1>
         <p className="text-sm text-gray-500">
           Scan to access your booked facility
         </p>

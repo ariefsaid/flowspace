@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Clock, Printer, Star } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
 import { formatRupiah } from "@/lib/format";
 import { creditPackages } from "@/lib/mock/packages";
@@ -48,8 +47,6 @@ export default function TopUpPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("time");
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [selectedPrint, setSelectedPrint] = useState<string | null>(null);
-
-  const selectedPackageId = activeTab === "time" ? selectedTime : selectedPrint;
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-6 space-y-6">
@@ -212,32 +209,6 @@ export default function TopUpPage() {
             })}
           </div>
         )}
-
-        {/* Purchase CTA — enabled only when a package is selected */}
-        <div className="pt-2">
-          <Button
-            variant="primary"
-            size="lg"
-            disabled={selectedPackageId === null}
-            className="w-full"
-          >
-            {activeTab === "time" ? (
-              <>
-                <Clock className="h-4 w-4" aria-hidden="true" />
-                {selectedPackageId
-                  ? `Beli Paket ${creditPackages.find((p) => p.id === selectedPackageId)?.hours} Jam`
-                  : "Pilih Paket Waktu"}
-              </>
-            ) : (
-              <>
-                <Printer className="h-4 w-4" aria-hidden="true" />
-                {selectedPackageId
-                  ? `Beli ${printPackages.find((p) => p.id === selectedPackageId)?.pages} Halaman`
-                  : "Pilih Paket Print"}
-              </>
-            )}
-          </Button>
-        </div>
       </Card>
     </div>
   );

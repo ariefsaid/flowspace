@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Wifi, Copy, Check } from "lucide-react";
-import { Card } from "@/components/ui/Card";
 import type { WifiInfo } from "@/lib/mock/types";
 
 interface WifiCardProps {
@@ -40,27 +39,27 @@ function CopyButton({ text }: { text: string }) {
 
 export function WifiCard({ wifi }: WifiCardProps) {
   return (
-    <Card className="p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <Wifi className="h-4 w-4 text-teal-600" />
+    <div className="rounded-xl border border-blue-100 bg-gradient-to-br from-blue-50/60 to-slate-50 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Wifi className="h-4 w-4 text-blue-600" />
         <h3 className="text-sm font-semibold text-gray-800">WiFi Access</h3>
       </div>
 
       <div className="space-y-3">
         {/* SSID */}
-        <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5">
+        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2.5">
           <div>
-            <p className="text-xs text-gray-500">Nama Jaringan (SSID)</p>
+            <p className="text-xs text-gray-500">Nama WiFi (SSID)</p>
             <p className="mt-0.5 font-medium text-gray-900">{wifi.ssid}</p>
           </div>
           <CopyButton text={wifi.ssid} />
         </div>
 
         {/* Voucher */}
-        <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5">
+        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2.5">
           <div>
             <p className="text-xs text-gray-500">Kode Voucher</p>
-            <p className="mt-0.5 font-mono font-semibold tracking-widest text-gray-900">
+            <p className="mt-0.5 font-mono font-semibold tracking-widest text-blue-600">
               {wifi.voucher}
             </p>
           </div>
@@ -68,9 +67,10 @@ export function WifiCard({ wifi }: WifiCardProps) {
         </div>
       </div>
 
-      <p className="mt-3 text-xs text-gray-400">
-        Hubungkan ke WiFi &quot;{wifi.ssid}&quot; lalu masukkan kode voucher di halaman login.
+      <p className="mt-3 text-xs text-gray-500">
+        💡 Hubungkan ke WiFi &quot;{wifi.ssid}&quot;, lalu masukkan kode voucher
+        di halaman login.
       </p>
-    </Card>
+    </div>
   );
 }

@@ -1,4 +1,13 @@
-import { Calendar, Activity, Clock, Users, DollarSign } from "lucide-react";
+import {
+  Calendar,
+  Activity,
+  Clock,
+  Users,
+  DollarSign,
+  TrendingUp,
+  CreditCard,
+  Receipt,
+} from "lucide-react";
 import { StatTile } from "@/components/ui";
 import { Badge } from "@/components/ui";
 import { Card } from "@/components/ui";
@@ -74,7 +83,7 @@ export default function AdminDashboardPage() {
             </p>
           </div>
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/20">
-            <Activity className="h-5 w-5 text-white" aria-hidden="true" />
+            <TrendingUp className="h-5 w-5 text-white" aria-hidden="true" />
           </div>
         </div>
 
@@ -87,14 +96,15 @@ export default function AdminDashboardPage() {
             </p>
           </div>
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/20">
-            <DollarSign className="h-5 w-5 text-white" aria-hidden="true" />
+            <CreditCard className="h-5 w-5 text-white" aria-hidden="true" />
           </div>
         </div>
       </div>
 
       {/* Recent Transactions */}
       <Card className="p-6">
-        <h2 className="mb-4 text-lg font-semibold text-gray-800">
+        <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-gray-800">
+          <Receipt className="h-5 w-5 text-teal-600" aria-hidden="true" />
           Recent Transactions
         </h2>
         <div className="divide-y divide-slate-200">

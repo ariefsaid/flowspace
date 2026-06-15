@@ -5,7 +5,7 @@ Surfaces come from `docs/specs/0001-recon-app-surface.spec.md`.
 
 ## Phase 0 — Foundation (in progress)
 - [x] **I-000** Repo + agentic workflow scaffold (agents, skills vendoring, docs, CI, white-label seam). ← this commit
-- [ ] **I-001** Member-account + guest-cafe recon pass (capture the surfaces the admin session can't see).
+- [x] **I-001** Member + barista recon pass — captured `/dashboard /booking /cafe /print /keycard /topup /history` + `/barista` (KDS). Spec 0001 updated. (Remaining: guest-cafe `/cafe/guest`, cafe variant/checkout, booking steps 2–4.)
 - [ ] **I-002** `DESIGN.md` Foundation — reverse-engineer the original's design tokens + component patterns (design-architect).
 - [ ] **I-003** Data model — `prisma/schema.prisma` for users/memberships/credit-ledger/bookings/rooms/cafe/print/transactions/settings (+ `org_id` seam), first migration.
 - [ ] **I-004** Auth — NextAuth/Auth.js v5 (email+password), session, role gate, `/login` + `/signup` wired.

@@ -191,101 +191,104 @@ export default function BaristaPage() {
   const isEmpty = orders.length === 0;
 
   return (
-    <main className="container mx-auto max-w-6xl px-4 py-6 space-y-6">
+    <main>
       {/* ------------------------------------------------------------------ */}
-      {/* Page header                                                          */}
+      {/* White header band                                                    */}
       {/* ------------------------------------------------------------------ */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        {/* Title block */}
-        <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-100 text-orange-500">
-            <Coffee className="h-5 w-5" aria-hidden="true" />
-          </span>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 leading-tight">
-              Dashboard Barista
-            </h1>
-            <p className="text-sm text-gray-500">{brand.name} Cafe</p>
+      <div className="bg-white border-b border-slate-200">
+        {/* Title row */}
+        <div className="container mx-auto max-w-6xl px-4 py-4 flex items-center justify-between gap-4 flex-wrap border-b border-slate-200">
+          {/* Title block */}
+          <div className="flex items-center gap-3">
+            <span className="text-orange-500">
+              <Coffee className="h-7 w-7" aria-hidden="true" />
+            </span>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 leading-tight">
+                Dashboard Barista
+              </h1>
+              <p className="text-sm text-gray-500">{brand.name} Cafe</p>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSoundOn((v) => !v)}
+              aria-pressed={soundOn}
+              aria-label={soundOn ? "Matikan suara" : "Nyalakan suara"}
+            >
+              {soundOn ? (
+                <Volume2 className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <VolumeX className="h-4 w-4" aria-hidden="true" />
+              )}
+              {soundOn ? "Sound On" : "Sound Off"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              aria-label="Refresh pesanan"
+            >
+              <RefreshCw
+                className={cn("h-4 w-4", spinning && "animate-spin")}
+                aria-hidden="true"
+              />
+              Refresh
+            </Button>
           </div>
         </div>
 
-        {/* Controls */}
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setSoundOn((v) => !v)}
-            aria-pressed={soundOn}
-            aria-label={soundOn ? "Matikan suara" : "Nyalakan suara"}
-          >
-            {soundOn ? (
-              <Volume2 className="h-4 w-4" aria-hidden="true" />
-            ) : (
-              <VolumeX className="h-4 w-4" aria-hidden="true" />
-            )}
-            {soundOn ? "Sound On" : "Sound Off"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            aria-label="Refresh pesanan"
-          >
-            <RefreshCw
-              className={cn("h-4 w-4", spinning && "animate-spin")}
-              aria-hidden="true"
-            />
-            Refresh
-          </Button>
-        </div>
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Live counters bar                                                    */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="flex items-center gap-6 text-sm font-medium text-gray-700">
-        {(
-          [
-            { status: "new" as OrderStatus, count: newCount },
-            { status: "preparing" as OrderStatus, count: preparingCount },
-            { status: "ready" as OrderStatus, count: readyCount },
-          ] as const
-        ).map(({ status, count }) => (
-          <span key={status} className="flex items-center gap-1.5">
-            <span className={cn("h-2.5 w-2.5 rounded-full", COUNTER_DOT[status])} />
-            {count} {STATUS_LABEL[status]}
-          </span>
-        ))}
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* KDS body                                                             */}
-      {/* ------------------------------------------------------------------ */}
-      {isEmpty ? (
-        /* Empty state (OBS-121) */
-        <div className="flex flex-col items-center justify-center py-32 text-center gap-4">
-          <Coffee className="h-14 w-14 text-slate-300" aria-hidden="true" />
-          <div>
-            <p className="text-lg font-semibold text-gray-500">Belum ada pesanan</p>
-            <p className="text-sm text-gray-400 mt-1">
-              Pesanan baru akan muncul di sini
-            </p>
-          </div>
-        </div>
-      ) : (
-        /* Three-column KDS grid */
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-          {(["new", "preparing", "ready"] as OrderStatus[]).map((status) => (
-            <KdsColumn
-              key={status}
-              status={status}
-              orders={orders.filter((o) => o.status === status)}
-              onAdvance={handleAdvance}
-              onComplete={handleComplete}
-            />
+        {/* Live counters bar */}
+        <div className="container mx-auto max-w-6xl px-4 py-3 flex items-center gap-6 text-sm font-medium text-gray-700">
+          {(
+            [
+              { status: "new" as OrderStatus, count: newCount },
+              { status: "preparing" as OrderStatus, count: preparingCount },
+              { status: "ready" as OrderStatus, count: readyCount },
+            ] as const
+          ).map(({ status, count }) => (
+            <span key={status} className="flex items-center gap-1.5">
+              <span className={cn("h-2.5 w-2.5 rounded-full", COUNTER_DOT[status])} />
+              {count} {STATUS_LABEL[status]}
+            </span>
           ))}
         </div>
-      )}
+      </div>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* KDS body — slate-50 surface (inherited from layout bg-slate-50)     */}
+      {/* ------------------------------------------------------------------ */}
+      <div className="container mx-auto max-w-6xl px-4 py-6">
+        {isEmpty ? (
+          /* Empty state (OBS-121) */
+          <div className="flex flex-col items-center justify-center py-32 text-center gap-4">
+            <Coffee className="h-14 w-14 text-slate-300" aria-hidden="true" />
+            <div>
+              <p className="text-lg font-semibold text-gray-500">Belum ada pesanan</p>
+              <p className="text-sm text-gray-400 mt-1">
+                Pesanan baru akan muncul di sini
+              </p>
+            </div>
+          </div>
+        ) : (
+          /* Three-column KDS grid */
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+            {(["new", "preparing", "ready"] as OrderStatus[]).map((status) => (
+              <KdsColumn
+                key={status}
+                status={status}
+                orders={orders.filter((o) => o.status === status)}
+                onAdvance={handleAdvance}
+                onComplete={handleComplete}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </main>
   );
 }

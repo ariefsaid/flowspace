@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { RefreshCw, User, Clock, Trash2, ShoppingBag } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { formatRupiah } from "@/lib/format";
 
@@ -151,7 +150,7 @@ const FILTER_OPTIONS: { value: "all" | AdminOrderStatus; label: string }[] = [
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function OrderCard({
+function OrderRow({
   order,
   onStatusChange,
   onDelete,
@@ -167,124 +166,115 @@ function OrderCard({
   const total = subtotal - discountAmt;
 
   return (
-    <Card className="p-0 overflow-hidden">
-      {/* Header row */}
-      <div className="flex items-start justify-between gap-4 p-4 pb-3">
-        <div className="flex flex-col gap-1.5">
-          {/* Badge + discount chip + code */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <Badge tone={STATUS_BADGE_TONE[order.status]}>
-              {STATUS_LABELS[order.status]}
-            </Badge>
-            {order.discountPct && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                <span>%</span>
-                <span>{order.discountPct}% OFF</span>
-              </span>
-            )}
-            <span className="text-sm font-semibold text-gray-800">
-              {order.code}
+    /* Plain div — dividers come from parent divide-y; no per-row Card border/shadow/rounded */
+    <div data-testid="order-row" className="px-5 py-4 flex items-start justify-between gap-6">
+      {/* LEFT: badge / code / customer / timestamp / items / totals / notes */}
+      <div data-testid="order-left" className="flex-1 min-w-0">
+        {/* Header: badge + discount chip + code */}
+        <div className="flex items-center gap-2 flex-wrap mb-1.5">
+          <Badge tone={STATUS_BADGE_TONE[order.status]}>
+            {STATUS_LABELS[order.status]}
+          </Badge>
+          {order.discountPct && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+              <span>%</span>
+              <span>{order.discountPct}% OFF</span>
+            </span>
+          )}
+          <span className="text-sm font-semibold text-gray-800">
+            {order.code}
+          </span>
+        </div>
+
+        {/* Customer */}
+        {order.customer && (
+          <div className="flex items-center gap-1.5 text-sm text-gray-700 mb-1">
+            <User className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+            <span>
+              {order.customer}
+              {order.email && (
+                <span className="text-gray-500"> ({order.email})</span>
+              )}
             </span>
           </div>
+        )}
 
-          {/* Customer */}
-          {order.customer && (
-            <div className="flex items-center gap-1.5 text-sm text-gray-700">
-              <User className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-              <span>
-                {order.customer}
-                {order.email && (
-                  <span className="text-gray-500"> ({order.email})</span>
-                )}
-              </span>
+        {/* Timestamp */}
+        <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3">
+          <Clock className="h-3.5 w-3.5 shrink-0" />
+          <span>{formatOrderDate(order.placedAt)}</span>
+        </div>
+
+        {/* Items — no grey band */}
+        <div data-testid="order-items" className="py-3">
+          <p className="text-xs font-medium text-gray-500 mb-2">Items:</p>
+          <div className="space-y-1">
+            {order.lines.map((line, idx) => (
+              <div key={idx} className="flex items-center justify-between text-sm">
+                <span className="text-gray-700">
+                  x{line.qty}
+                  {line.variant && (
+                    <span className="ml-1 text-gray-400">({line.variant})</span>
+                  )}
+                </span>
+                <span className="text-gray-700">{formatRupiah(line.price * line.qty)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Totals */}
+        <div className="py-3 space-y-1">
+          <div className="flex items-center justify-between text-sm text-gray-600">
+            <span>Subtotal</span>
+            <span>{formatRupiah(subtotal)}</span>
+          </div>
+          {order.discountPct && discountAmt > 0 && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-teal-600">Discount ({order.discountPct}%)</span>
+              <span className="text-red-500">-{formatRupiah(discountAmt)}</span>
             </div>
           )}
-
-          {/* Timestamp */}
-          <div className="flex items-center gap-1.5 text-xs text-gray-500">
-            <Clock className="h-3.5 w-3.5 shrink-0" />
-            <span>{formatOrderDate(order.placedAt)}</span>
+          <div className="flex items-center justify-between text-sm font-bold">
+            <span className="text-gray-900">Total</span>
+            <span className="text-teal-600">{formatRupiah(total)}</span>
           </div>
         </div>
 
-        {/* Status selector + Hapus */}
-        <div className="flex flex-col items-end gap-2 shrink-0">
-          <select
-            value={order.status}
-            onChange={(e) =>
-              onStatusChange(order.id, e.target.value as AdminOrderStatus)
-            }
-            className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500/40 cursor-pointer"
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {STATUS_LABELS[s]}
-              </option>
-            ))}
-          </select>
-          <Button
-            variant="danger"
-            size="sm"
-            className="gap-1.5 border border-red-200 hover:bg-red-50"
-            onClick={() => onDelete(order.id)}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Hapus
-          </Button>
-        </div>
-      </div>
-
-      {/* Divider */}
-      <div className="border-t border-slate-100" />
-
-      {/* Items — subtle slate band */}
-      <div className="bg-slate-50 px-4 py-3">
-        <p className="text-xs font-medium text-gray-500 mb-2">Items:</p>
-        <div className="space-y-1">
-          {order.lines.map((line, idx) => (
-            <div key={idx} className="flex items-center justify-between text-sm">
-              <span className="text-gray-700">
-                x{line.qty}
-                {line.variant && (
-                  <span className="ml-1 text-gray-400">({line.variant})</span>
-                )}
-              </span>
-              <span className="text-gray-700">{formatRupiah(line.price * line.qty)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Divider */}
-      <div className="border-t border-slate-100" />
-
-      {/* Totals */}
-      <div className="px-4 py-3 space-y-1">
-        <div className="flex items-center justify-between text-sm text-gray-600">
-          <span>Subtotal</span>
-          <span>{formatRupiah(subtotal)}</span>
-        </div>
-        {order.discountPct && discountAmt > 0 && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-teal-600">Discount ({order.discountPct}%)</span>
-            <span className="text-red-500">-{formatRupiah(discountAmt)}</span>
-          </div>
-        )}
-        <div className="flex items-center justify-between text-sm font-bold">
-          <span className="text-gray-900">Total</span>
-          <span className="text-teal-600">{formatRupiah(total)}</span>
-        </div>
-      </div>
-
-      {/* Notes */}
-      {order.notes && (
-        <div className="px-4 pb-3">
-          <p className="text-xs text-gray-500">
+        {/* Notes */}
+        {order.notes && (
+          <p className="text-xs text-gray-500 mt-1">
             <span className="font-medium">Notes:</span> {order.notes}
           </p>
-        </div>
-      )}
-    </Card>
+        )}
+      </div>
+
+      {/* RIGHT: status select + Hapus button */}
+      <div data-testid="order-right" className="w-44 shrink-0 flex flex-col gap-2">
+        <select
+          aria-label={`Status pesanan ${order.code}`}
+          value={order.status}
+          onChange={(e) =>
+            onStatusChange(order.id, e.target.value as AdminOrderStatus)
+          }
+          className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500/40 cursor-pointer"
+        >
+          {STATUS_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {STATUS_LABELS[s]}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => onDelete(order.id)}
+          className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-red-200 bg-white text-red-600 text-sm font-medium h-9 hover:bg-red-50 transition-colors cursor-pointer"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Hapus
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -324,21 +314,27 @@ export default function AdminOrdersPage() {
           <h1 className="text-3xl font-bold text-gray-900">Cafe Orders</h1>
           <p className="mt-1 text-sm text-gray-500">Kelola semua pesanan cafe</p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="shrink-0 mt-1"
+        <button
+          type="button"
           onClick={handleRefresh}
+          className="shrink-0 mt-1 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 h-9 text-sm font-medium text-gray-700 hover:bg-slate-50 transition-colors cursor-pointer shadow-sm"
         >
           <RefreshCw className="h-4 w-4" />
           Refresh
-        </Button>
+        </button>
       </div>
 
       {/* Filter Status */}
       <Card className="p-4">
-        <p className="mb-2 text-sm font-medium text-gray-700">Filter Status</p>
+        <label
+          htmlFor="filter-status"
+          className="mb-2 block text-sm font-medium text-gray-700"
+        >
+          Filter Status
+        </label>
         <select
+          id="filter-status"
+          aria-label="Filter Status"
           value={statusFilter}
           onChange={(e) =>
             setStatusFilter(e.target.value as "all" | AdminOrderStatus)
@@ -353,10 +349,10 @@ export default function AdminOrdersPage() {
         </select>
       </Card>
 
-      {/* Orders list */}
-      <div className="space-y-4">
-        {/* Section heading */}
-        <div className="flex items-center gap-2">
+      {/* Orders — single outer panel */}
+      <Card data-testid="orders-panel" className="p-0 overflow-hidden">
+        {/* Panel header */}
+        <div className="flex items-center gap-2 px-5 pt-5 pb-3">
           <ShoppingBag className="h-5 w-5 text-orange-500" />
           <h2 className="text-base font-semibold text-gray-800">
             Orders ({filtered.length})
@@ -364,8 +360,8 @@ export default function AdminOrdersPage() {
         </div>
 
         {filtered.length === 0 ? (
-          /* Empty state */
-          <Card className="py-16 text-center">
+          /* Empty state — inside the panel */
+          <div className="border-t border-slate-200 py-16 text-center">
             <ShoppingBag className="mx-auto mb-3 h-10 w-10 text-slate-300" />
             <p className="text-sm font-medium text-gray-500">
               Belum ada pesanan
@@ -375,11 +371,12 @@ export default function AdminOrdersPage() {
                 ? "Pesanan cafe akan muncul di sini."
                 : `Tidak ada pesanan dengan status "${STATUS_LABELS[statusFilter as AdminOrderStatus]}".`}
             </p>
-          </Card>
+          </div>
         ) : (
-          <div className="space-y-4">
+          /* Divider-separated rows */
+          <div className="divide-y divide-slate-200 border-t border-slate-200">
             {filtered.map((order) => (
-              <OrderCard
+              <OrderRow
                 key={order.id}
                 order={order}
                 onStatusChange={handleStatusChange}
@@ -388,7 +385,7 @@ export default function AdminOrdersPage() {
             ))}
           </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

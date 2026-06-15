@@ -22,9 +22,11 @@ import type { TransactionKind } from "@/lib/mock";
 function BookingStatusBadge({ status }: { status: string }) {
   switch (status) {
     case "ACTIVE":
-      return <Badge tone="active">ACTIVE</Badge>;
+      // Render green (use "completed" tone which maps to bg-green-100 text-green-700)
+      return <Badge tone="completed">ACTIVE</Badge>;
     case "COMPLETED":
-      return <Badge tone="completed">COMPLETED</Badge>;
+      // Original is grey/neutral, not green
+      return <Badge tone="neutral">COMPLETED</Badge>;
     case "CANCELLED":
       return <Badge tone="cancelled">CANCELLED</Badge>;
     default:
@@ -32,16 +34,20 @@ function BookingStatusBadge({ status }: { status: string }) {
   }
 }
 
+// Neutral outlined pill — matches original (all payment states are same quiet style)
+const paymentPillClass =
+  "inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-medium text-slate-600";
+
 function PaymentBadge({ payment }: { payment: string }) {
   switch (payment) {
     case "WAITING_CASHIER":
-      return <Badge tone="pending">WAITING CASHIER</Badge>;
+      return <span className={paymentPillClass}>WAITING CASHIER</span>;
     case "PAID_CASHIER":
-      return <Badge tone="completed">PAID CASHIER</Badge>;
+      return <span className={paymentPillClass}>PAID CASHIER</span>;
     case "PAID_ONLINE":
-      return <Badge tone="info">PAID ONLINE</Badge>;
+      return <span className={paymentPillClass}>PAID ONLINE</span>;
     default:
-      return <Badge tone="neutral">{payment}</Badge>;
+      return <span className={paymentPillClass}>{payment}</span>;
   }
 }
 

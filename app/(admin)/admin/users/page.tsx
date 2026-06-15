@@ -4,18 +4,17 @@ import { useState } from "react";
 import {
   Search,
   UserPlus,
+  Users,
   Mail,
   Phone,
   CalendarDays,
   Pencil,
-  MessageSquare,
   Trash2,
   ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Input } from "@/components/ui/Input";
-import { cn } from "@/lib/cn";
 
 // ---------------------------------------------------------------------------
 // Local mock — 17 Indonesian users matching the recon screenshot
@@ -256,21 +255,6 @@ function fmtJoin(iso: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Avatar initials
-// ---------------------------------------------------------------------------
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-// Uniform teal avatar tint to match the recon
-function avatarColor(): string {
-  return "bg-teal-100 text-teal-700";
-}
-
-// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -336,7 +320,8 @@ export default function AdminUsersPage() {
 
       {/* ── Member list ── */}
       <section>
-        <h2 className="mb-3 text-sm font-semibold text-gray-700">
+        <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-gray-700">
+          <Users className="h-4 w-4" aria-hidden="true" />
           Members ({filtered.length})
         </h2>
 
@@ -363,17 +348,6 @@ export default function AdminUsersPage() {
 function UserRow({ user }: { user: AdminUser }) {
   return (
     <div className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-      {/* Avatar */}
-      <div
-        className={cn(
-          "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
-          avatarColor(),
-        )}
-        aria-hidden="true"
-      >
-        {initials(user.name)}
-      </div>
-
       {/* Main info */}
       <div className="min-w-0 flex-1">
         {/* Name + tier badge */}
@@ -406,45 +380,29 @@ function UserRow({ user }: { user: AdminUser }) {
 
         {/* Stats row */}
         <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-          <span
-            className={cn(
-              user.bookings > 0 ? "text-teal-600 font-medium" : "text-gray-400",
-            )}
-          >
+          <span className="font-medium text-teal-600">
             {user.bookings} bookings
           </span>
-          <span
-            className={cn(
-              user.transactions > 0
-                ? "text-orange-500 font-medium"
-                : "text-gray-400",
-            )}
-          >
+          <span className="font-medium text-orange-500">
             {user.transactions} transactions
           </span>
         </div>
       </div>
 
-      {/* Action buttons — outlined icon chips matching the recon */}
+      {/* Action buttons — Edit outlined pill + trash icon-only */}
       <div className="flex shrink-0 items-center gap-2">
         <button
           type="button"
           aria-label={`Edit ${user.name}`}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-gray-500 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-600"
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-teal-600 text-teal-600 text-sm font-medium hover:bg-teal-50 transition-colors"
         >
-          <Pencil className="h-4 w-4" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          aria-label={`Kirim pesan ke ${user.name}`}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-gray-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
-        >
-          <MessageSquare className="h-4 w-4" aria-hidden="true" />
+          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+          Edit
         </button>
         <button
           type="button"
           aria-label={`Hapus ${user.name}`}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-gray-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
         >
           <Trash2 className="h-4 w-4" aria-hidden="true" />
         </button>

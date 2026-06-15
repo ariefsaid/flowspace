@@ -11,7 +11,6 @@ import type { MenuItem, MenuCategory } from "@/lib/mock/types";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
-import { Tabs } from "@/components/ui/Tabs";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -150,7 +149,7 @@ function MenuItemCard({ item, onAddDirect, onPickVariant }: MenuItemCardProps) {
                 {item.category}
               </span>
               {item.hasVariants && (
-                <span className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-700">
+                <span className="rounded-full border border-teal-500 bg-white px-2 py-0.5 text-xs font-medium text-teal-600">
                   Pilih Variant
                 </span>
               )}
@@ -158,7 +157,7 @@ function MenuItemCard({ item, onAddDirect, onPickVariant }: MenuItemCardProps) {
           </div>
         </div>
         <div className="shrink-0 text-right">
-          <p className="text-sm font-semibold text-gray-900">{formatRupiah(item.price)}</p>
+          <p className="text-sm font-semibold text-teal-600">{formatRupiah(item.price)}</p>
           {item.hasVariants && (
             <p className="text-xs text-gray-500">+pilihan</p>
           )}
@@ -389,34 +388,34 @@ export default function GuestCafePage() {
     setSuccessName(guestName);
   }
 
-  const tabItems = CATEGORY_TABS.map((t) => ({ key: t.key, label: t.label }));
-
   return (
     <>
       <div className="container mx-auto px-4 py-6">
-        {/* Back arrow + page heading */}
-        <div className="mb-6 flex items-center gap-4">
-          <Link href="/">
-            <button
-              type="button"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-gray-600 shadow-sm hover:bg-slate-50 transition-colors"
-              aria-label="Kembali"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </button>
-          </Link>
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900">
-              ☕ {brand.name} Cafe
-            </h1>
-            <p className="text-sm text-gray-500">Order sebagai Guest</p>
+        {/* Header — full-width teal gradient band */}
+        <div className="-mx-4 mb-6 bg-gradient-to-br from-teal-500 to-teal-600 px-4 py-5">
+          <div className="flex items-center gap-4">
+            <Link href="/">
+              <button
+                type="button"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-white hover:bg-white/10 transition-colors"
+                aria-label="Kembali"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+            </Link>
+            <div>
+              <h1 className="flex items-center gap-2 text-2xl font-bold text-white">
+                ☕ {brand.name} Cafe
+              </h1>
+              <p className="text-sm text-teal-50">Order sebagai Guest</p>
+            </div>
           </div>
         </div>
 
         {/* Mode Guest info banner */}
-        <div className="mb-6 flex gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
+        <div className="mb-6 flex gap-3 rounded-xl border border-orange-200 bg-orange-50 p-4">
           <div className="shrink-0 mt-0.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-blue-600">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-100 text-orange-600">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 className="h-4 w-4"
@@ -433,13 +432,13 @@ export default function GuestCafePage() {
             </div>
           </div>
           <div>
-            <p className="text-sm font-semibold text-blue-800">Mode Guest</p>
-            <p className="mt-0.5 text-sm text-blue-700">
+            <p className="text-sm font-semibold text-orange-800">Mode Guest</p>
+            <p className="mt-0.5 text-sm text-orange-700">
               Anda dapat memesan makanan &amp; minuman tanpa login. Cukup masukkan nama
               Anda saat checkout. Untuk booking ruangan dan layanan print, silakan{" "}
               <Link
                 href="/signup"
-                className="font-medium underline underline-offset-2 hover:text-blue-900"
+                className="font-medium underline underline-offset-2 hover:text-orange-900"
               >
                 daftar member
               </Link>
@@ -452,13 +451,26 @@ export default function GuestCafePage() {
         <div className="flex gap-6 items-start">
           {/* Left: category tabs + menu grid */}
           <div className="min-w-0 flex-1">
-            {/* Category tabs */}
-            <Tabs
-              tabs={tabItems}
-              value={activeTab}
-              onChange={(key) => setActiveTab(key as CategoryTab)}
-              className="mb-6"
-            />
+            {/* Category tabs — inline pill tabs (not the shared underline Tabs) */}
+            <div className="mb-6 flex flex-wrap gap-2" role="tablist" aria-label="Kategori menu">
+              {CATEGORY_TABS.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === t.key}
+                  onClick={() => setActiveTab(t.key)}
+                  className={cn(
+                    "rounded-full border px-4 py-1.5 text-sm font-medium transition-colors",
+                    activeTab === t.key
+                      ? "border-teal-500 bg-teal-500 text-white"
+                      : "border-teal-500 bg-white text-teal-600 hover:bg-teal-50",
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
 
             {/* Menu grid */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">

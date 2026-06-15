@@ -13,14 +13,31 @@ export default defineConfig({
     },
   },
   test: {
-    environment: "jsdom",
     globals: true,
-    setupFiles: ["./vitest.setup.ts"],
-    include: ["**/*.{test,spec}.{ts,tsx}"],
-    exclude: ["**/node_modules/**", "**/.next/**", "e2e/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
     },
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          environment: "jsdom",
+          setupFiles: ["./vitest.setup.ts"],
+          include: ["**/*.{test,spec}.{ts,tsx}"],
+          exclude: ["**/node_modules/**", "**/.next/**", "e2e/**", "**/*.int.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "integration",
+          environment: "node",
+          include: ["**/*.int.test.ts"],
+          exclude: ["**/node_modules/**", "**/.next/**"],
+        },
+      },
+    ],
   },
 });

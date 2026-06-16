@@ -1,4 +1,4 @@
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/db/enums";
 
 /** Paths that require no auth at all. `/cafe/guest` is the public guest-order surface. */
 const PUBLIC_EXACT = ["/", "/login", "/signup"];

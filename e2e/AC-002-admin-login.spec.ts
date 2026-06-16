@@ -7,7 +7,7 @@
  * null-on-no-token) is owned at unit layer (lib/auth/route-policy.test.ts,
  * lib/auth/authorize.test.ts).
  *
- * Credentials: seeded dev-fallback values from prisma/seed.ts.
+ * Credentials: seeded dev-fallback values from scripts/seed-supabase.ts.
  * NEVER include real secrets — these are test-DB dev fallbacks only.
  */
 import { test, expect } from "@playwright/test";

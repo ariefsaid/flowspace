@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { User, Mail, Phone, Lock, CheckCircle2 } from "lucide-react";
-import { signIn } from "next-auth/react";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -41,13 +41,11 @@ export default function SignupPage() {
         return;
       }
 
-      // AC-004: user created → sign in immediately → middleware routes to /dashboard
-      await signIn("credentials", {
-        email,
-        password,
-        callbackUrl: "/dashboard",
-        redirect: true, // allow NextAuth to handle the redirect
-      });
+      // AC-004: auth user + linked MEMBER created → sign in immediately
+      // (email confirmation is disabled in dev/test for parity) → /dashboard.
+      const supabase = createSupabaseBrowserClient();
+      await supabase.auth.signInWithPassword({ email, password });
+      window.location.href = "/dashboard";
     } finally {
       setPending(false);
     }

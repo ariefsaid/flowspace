@@ -16,7 +16,7 @@
  *                               (content-absence assertion).
  *   AC-011  FR-012 (OBS-122) — MEMBER blocked from /barista; redirected.
  *
- * Credentials: seeded dev-fallback values from prisma/seed.ts.
+ * Credentials: seeded dev-fallback values from scripts/seed-supabase.ts.
  */
 import { test, expect, type Page } from "@playwright/test";
 

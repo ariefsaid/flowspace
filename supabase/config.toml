@@ -1,0 +1,28 @@
+project_id = "flowspace"
+
+[api]
+enabled = true
+port = 64321
+schemas = ["public", "storage", "graphql_public"]
+
+[db]
+port = 64322
+
+[studio]
+enabled = true
+port = 64323
+
+[inbucket]
+port = 64324
+
+[analytics]
+port = 64327
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+
+[auth.email]
+enable_signup = true
+# AC-004 parity: signup signs the user straight in (no email round-trip) in dev/test.
+enable_confirmations = false

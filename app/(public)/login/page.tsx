@@ -3,13 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Mail, Lock } from "lucide-react";
-import { signIn, getSession } from "next-auth/react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { roleHome } from "@/lib/auth/route-policy";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/db/enums";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -23,23 +23,25 @@ export default function LoginPage() {
     setPending(true);
 
     try {
-      // signIn with redirect:false so we can handle routing client-side.
-      const result = await signIn("credentials", {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
-        redirect: false,
       });
 
-      if (!result || result.error) {
-        // AC-003: same generic message for unknown email AND wrong password — no enumeration.
+      if (error || !data.session) {
+        // AC-003: Supabase returns the SAME opaque "Invalid login credentials"
+        // for unknown-email and wrong-password; we normalise ANY failure to the
+        // one generic message — no user-enumeration.
         setError("Email atau kata sandi salah.");
         return;
       }
 
-      // Read the freshly-minted session to determine the user's role,
-      // then navigate to their role-home (FR-003 / AC-002).
-      const session = await getSession();
-      window.location.href = roleHome((session?.user?.role ?? "MEMBER") as Role);
+      // Resolve the role from the JWT app-metadata claim set at signup, then
+      // navigate to the role-home (FR-003 / AC-002). The authoritative role for
+      // data access is re-resolved server-side; this is for the redirect only.
+      const role = (data.session.user.app_metadata?.role ?? "MEMBER") as Role;
+      window.location.href = roleHome(role);
     } finally {
       setPending(false);
     }

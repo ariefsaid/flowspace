@@ -31,17 +31,31 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Dummy DB env: Prisma needs DATABASE_URL/DIRECT_URL present to generate the client and
-# for `next build` static analysis. The build never connects — no migrations run here.
+# A non-placeholder secret (the prod guard in lib/auth.ts throws on known placeholders).
 env:
-  DATABASE_URL: postgresql://ci:ci@localhost:5432/flowspace?schema=public
-  DIRECT_URL: postgresql://ci:ci@localhost:5432/flowspace?schema=public
-  NEXTAUTH_SECRET: ci-dummy-secret-not-used-in-prod
+  NEXTAUTH_SECRET: ci-secret-not-a-placeholder-0123456789abcdef
   NEXTAUTH_URL: http://localhost:3000
+  AUTH_TRUST_HOST: 'true'
 
 jobs:
   quality:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: flowspace
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/flowspace?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/flowspace?schema=public
+      # Integration tests truncate between runs, so they can target the same DB.
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/flowspace?schema=public
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -53,11 +67,29 @@ jobs:
       - run: pnpm db:generate
       - run: pnpm typecheck
       - run: pnpm lint:ci
-      - run: pnpm test:coverage
+      - name: Apply migrations
+        run: pnpm db:deploy
+      - run: pnpm test:unit
+      - name: Integration tests (real Postgres)
+        run: pnpm test:int
       - run: pnpm build
 
   e2e:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: flowspace
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/flowspace?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/flowspace?schema=public
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -67,5 +99,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
+      - name: Migrate + seed the e2e DB
+        run: pnpm db:deploy && pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium
+      - name: Build (the webServer runs `pnpm start`)
+        run: pnpm build
       - run: pnpm e2e

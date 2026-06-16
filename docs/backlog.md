@@ -3,18 +3,20 @@
 One issue at a time (Director loop). Each issue: Intake → Spec → Plan → Build → Review → Accept → (design re-review) → Ship.
 Surfaces come from `docs/specs/0001-recon-app-surface.spec.md`.
 
-## CURRENT STATE (2026-06-16) — read this first
+## CURRENT STATE (2026-06-17) — read this first
 - **Stack:** Supabase (Postgres+Auth+Realtime+Storage+RLS) + Drizzle, server-authoritative (ADR-0013/0014/0015). Prisma/Neon/NextAuth removed.
-- **On `main` (CI green):** the **20-route frontend pixel replica** (~95 fidelity) + the **auth/data foundation** (Supabase Auth, `middleware.ts` server-side authz closing OBS-122/131, org_id-scoped Drizzle repo, RLS backstop, Realtime/Storage seams). Tests: unit 52 / integration 19 / e2e 5.
-- **Shelved (NOT on main):** `feat/cafe-domain` branch = the cafe domain built on the OLD Prisma/NextAuth stack (schema/repo/actions/5 surfaces wired + tests, spec `0003-cafe-domain`, plan, `lib/cafe/*` logic). **Rebuild on Supabase+Drizzle** — spec/plan/domain-logic carry over; redo the data/auth wiring. First candidate for the **pi+GLM parallel lane** (`docs/pi-delegation.md`).
+- **On `main` (CI green):** the **20-route frontend pixel replica** (~95 fidelity) + the **auth/data foundation** (Supabase Auth, `middleware.ts` server-side authz closing OBS-122/131, org_id-scoped Drizzle repo, RLS backstop, Realtime/Storage seams).
+- **In review (NOT yet on main):** `feat/cafe-supabase` = **I-022 cafe domain** rebuilt on Supabase+Drizzle+Realtime — PR pending owner approval (see Done below). Tests on the branch: unit 94 / int 38 / e2e 6.
+- **Superseded:** the old `feat/cafe-domain` (Prisma) branch — its spec/plan/`lib/cafe/*` logic carried into `feat/cafe-supabase`; do NOT merge the old branch.
 
 ## Done
 - [x] **I-000** Repo + agentic SDD/TDD/BDD workflow scaffold. · [x] **I-001** Recon (all surfaces → spec 0001). · [x] **I-002** `DESIGN.md` tokens.
 - [x] **Frontend replica** (landing/login/signup/guest-cafe/member×7/barista/admin×8) built + pixel-hardened, merged.
 - [x] **I-003/I-004** auth+data foundation (NextAuth/Prisma) — **superseded by** [x] **I-005** re-platform to Supabase+Drizzle+Supabase Auth, **merged, CI green** (ADR-0013/0014/0015; plan `docs/plans/2026-06-16-replatform-supabase.md`).
+- [x] **I-022 (cafe) — rebuilt on Supabase+Drizzle+Realtime** (branch `feat/cafe-supabase`, **PR pending owner approval**): migration `0005_cafe_domain.sql` (3 tables + 4 enums + org-scoped RLS + realtime publication), Drizzle repo `lib/db/cafe.ts` (server-priced orders, org-scoped), server actions w/ Supabase-session authz, 5 surfaces wired (UI pixel-identical), Supabase Realtime KDS. Plan `docs/plans/2026-06-16-cafe-domain-supabase.md`. Tests: unit 94 / int 38 / e2e 6 (AC-121). 3-lens cross-family review (glm-5.1) done; Director [SEC] verification caught 2 money-path bugs (multi-variant guard, qty manipulation) + the review caught archived-item orderability + a TOCTOU status race + silent checkout errors — all fixed. **Supersedes the shelved `feat/cafe-domain` (Prisma) branch.**
 
 ## OUTSTANDING — next work (domain verticals rebuilt on the Supabase foundation)
-- [ ] **I-022 (cafe) — rebuild on Supabase+Drizzle** (un-shelve `feat/cafe-domain`): menu reads + order lifecycle (member/guest → barista KDS → admin orders/POS), now using **Supabase Realtime** for the live KDS. Spec `docs/specs/0003-cafe-domain.spec.md` (on the shelved branch) carries over.
+- [ ] **I-022 follow-ups (non-blocking, from the cross-family review):** guest-order rate-limit + per-order line-count cap (DoS); `advanceOrderStatusAsActor` test-seam → relocate out of prod `lib/cafe/authz.ts`; `canAdminSetOrderStatus()` helper for authz symmetry; integration test of `createOrder` with `discountEligible:true`; `updated_at` DB trigger (vs manual bump); realtime `orgId` format validation (belt-and-suspenders); AC-id hygiene (guest-name + checkout-error tests reuse AC-114/AC-102).
 - [ ] **I-020** Time-credit packages: list + purchase + ledger debit (Top Up).
 - [ ] **I-021** Booking (seat/room, walk-in vs scheduled, time-window, credit check/debit, payment states). NB: enables the cafe "active-session" 5% discount (dormant until booking exists; ADR-0011 lands with the cafe rebuild from `feat/cafe-domain`).
 - [ ] **I-023** Print billing (PaperCut-style charge model) + member view + **Supabase Storage** for uploads.

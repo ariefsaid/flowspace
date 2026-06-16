@@ -30,7 +30,9 @@ model Organization {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
-  users AppUser[]
+  users          AppUser[]
+  cafeMenuItems  CafeMenuItem[]
+  cafeOrders     CafeOrder[]
 
   @@map("organizations")
 }
@@ -52,7 +54,102 @@ model AppUser {
   archivedAt     DateTime?      @map("archived_at")
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  cafeOrders   CafeOrder[]
 
   @@index([orgId])
   @@map("app_users")
+}
+
+// ---------------------------------------------------------------------------
+// Cafe domain (I-022)
+// ---------------------------------------------------------------------------
+
+enum CafeCategory {
+  COFFEE
+  NON_COFFEE
+  FOOD
+  SNACK
+}
+
+enum CafeOrderStatus {
+  NEW
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+enum DrinkTemperature {
+  HOT
+  COLD
+  ICE_BLENDED
+}
+
+enum SugarLevel {
+  NORMAL
+  LESS
+  NONE
+}
+
+model CafeMenuItem {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  name        String
+  emoji       String
+  category    CafeCategory
+  priceRupiah Int          @map("price_rupiah")
+  description String
+  hasVariants Boolean      @default(false) @map("has_variants")
+  available   Boolean      @default(true)
+  archivedAt  DateTime?    @map("archived_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  organization Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orderItems   CafeOrderItem[]
+
+  @@index([orgId])
+  @@index([orgId, category])
+  @@map("cafe_menu_items")
+}
+
+model CafeOrder {
+  id             String          @id @default(cuid())
+  orgId          String          @map("org_id")
+  code           String
+  customerUserId String?         @map("customer_user_id")
+  guestName      String?         @map("guest_name")
+  status         CafeOrderStatus @default(NEW)
+  subtotalRupiah Int             @map("subtotal_rupiah")
+  discountRupiah Int             @default(0) @map("discount_rupiah")
+  totalRupiah    Int             @map("total_rupiah")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  organization Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  customer     AppUser?        @relation(fields: [customerUserId], references: [id], onDelete: SetNull)
+  items        CafeOrderItem[]
+
+  @@unique([orgId, code])
+  @@index([orgId])
+  @@index([orgId, status])
+  @@index([orgId, createdAt])
+  @@map("cafe_orders")
+}
+
+model CafeOrderItem {
+  id              String            @id @default(cuid())
+  orderId         String            @map("order_id")
+  menuItemId      String?           @map("menu_item_id")
+  nameSnapshot    String            @map("name_snapshot")
+  qty             Int
+  unitPriceRupiah Int               @map("unit_price_rupiah")
+  temperature     DrinkTemperature?
+  sugar           SugarLevel?
+
+  order    CafeOrder     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem CafeMenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@map("cafe_order_items")
 }

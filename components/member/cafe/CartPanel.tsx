@@ -12,6 +12,10 @@ interface CartPanelProps {
   onIncrement: (key: string) => void;
   onDecrement: (key: string) => void;
   onCheckout: () => void;
+  /** Indonesian error message to display above the CTA; cleared by the parent on next submit. */
+  checkoutError?: string | null;
+  /** Whether the checkout action is in flight. */
+  checkoutPending?: boolean;
 }
 
 const CAFE_DISCOUNT = 0.05;
@@ -23,6 +27,8 @@ export function CartPanel({
   onIncrement,
   onDecrement,
   onCheckout,
+  checkoutError,
+  checkoutPending,
 }: CartPanelProps) {
   const subtotal = items.reduce((sum, it) => sum + it.price * it.qty, 0);
   const discountAmt = hasActiveSession ? subtotal * CAFE_DISCOUNT : 0;
@@ -145,13 +151,22 @@ export function CartPanel({
                 <span>{formatRupiah(total)}</span>
               </div>
             </div>
+            {checkoutError && (
+              <div
+                role="alert"
+                className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+              >
+                {checkoutError}
+              </div>
+            )}
             <Button
               variant="primary"
               size="lg"
               className="w-full"
               onClick={onCheckout}
+              disabled={checkoutPending}
             >
-              Pesan Sekarang
+              {checkoutPending ? "Memproses…" : "Pesan Sekarang"}
             </Button>
           </div>
         )}

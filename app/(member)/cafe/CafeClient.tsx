@@ -184,6 +184,8 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
   // ---- cart ----
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [checkoutPending, setCheckoutPending] = useState(false);
 
   const totalCartQty = cartItems.reduce((s, i) => s + i.qty, 0);
 
@@ -226,7 +228,25 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
     );
   }
 
+  /** Map server-action error sentinels to user-facing Indonesian copy. */
+  function toCheckoutErrorMessage(err: unknown): string {
+    const sentinel =
+      err instanceof Error ? err.message : String(err);
+    const map: Record<string, string> = {
+      INVALID_MENU_ITEMS: "Sebagian item tidak tersedia. Perbarui keranjang Anda.",
+      INVALID_QUANTITY: "Jumlah pesanan tidak valid.",
+      EMPTY_ORDER: "Keranjang masih kosong.",
+      GUEST_NAME_REQUIRED: "Nama wajib diisi.",
+      ORG_NOT_FOUND: "Pesanan gagal diproses. Coba lagi.",
+      CODE_GENERATION_FAILED: "Pesanan gagal diproses. Coba lagi.",
+    };
+    return map[sentinel] ?? "Pesanan gagal diproses. Coba lagi.";
+  }
+
   async function handleCheckout() {
+    setCheckoutError(null);
+    setCheckoutPending(true);
+
     const lines: OrderLineInput[] = cartItems.map((ci) => ({
       menuItemId: ci.id,
       qty: ci.qty,
@@ -236,11 +256,13 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
 
     try {
       await placeOrder({ lines });
-    } catch {
-      // If error, keep cart open so user can retry
+    } catch (err) {
+      setCheckoutError(toCheckoutErrorMessage(err));
+      setCheckoutPending(false);
       return;
     }
 
+    setCheckoutPending(false);
     setCartItems([]);
     setCartOpen(false);
     startTransition(() => {
@@ -400,10 +422,12 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
         <CartPanel
           items={cartItems}
           hasActiveSession={discountEligible}
-          onClose={() => setCartOpen(false)}
+          onClose={() => { setCartOpen(false); setCheckoutError(null); }}
           onIncrement={incrementCart}
           onDecrement={decrementCart}
           onCheckout={handleCheckout}
+          checkoutError={checkoutError}
+          checkoutPending={checkoutPending}
         />
       )}
     </div>

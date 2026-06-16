@@ -236,9 +236,13 @@ interface CheckoutModalProps {
   total: number;
   onClose: () => void;
   onConfirm: (guestName: string) => void;
+  /** Indonesian error message to display when placeOrder rejects. */
+  error?: string | null;
+  /** Whether the order submission is in flight. */
+  pending?: boolean;
 }
 
-function CheckoutModal({ cart, total, onClose, onConfirm }: CheckoutModalProps) {
+function CheckoutModal({ cart, total, onClose, onConfirm, error, pending }: CheckoutModalProps) {
   const [guestName, setGuestName] = useState("");
 
   function handleSubmit(e: React.FormEvent) {
@@ -301,6 +305,15 @@ function CheckoutModal({ cart, total, onClose, onConfirm }: CheckoutModalProps) 
                 Nama akan dipanggil saat pesanan siap.
               </p>
             </div>
+            {/* Server-action error (AC-102) */}
+            {error && (
+              <div
+                role="alert"
+                className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+              >
+                {error}
+              </div>
+            )}
           </div>
           <div className="flex gap-2 border-t border-slate-200 p-4">
             <Button type="button" variant="ghost" className="flex-1" onClick={onClose}>
@@ -310,9 +323,9 @@ function CheckoutModal({ cart, total, onClose, onConfirm }: CheckoutModalProps) 
               type="submit"
               variant="accent"
               className="flex-1"
-              disabled={!guestName.trim()}
+              disabled={!guestName.trim() || pending}
             >
-              Pesan Sekarang
+              {pending ? "Memproses…" : "Pesan Sekarang"}
             </Button>
           </div>
         </form>
@@ -359,6 +372,20 @@ export interface GuestCafeClientProps {
   menu: GuestMenuItemView[];
 }
 
+/** Map server-action error sentinels to user-facing Indonesian copy. */
+function toOrderErrorMessage(err: unknown): string {
+  const sentinel = err instanceof Error ? err.message : String(err);
+  const map: Record<string, string> = {
+    INVALID_MENU_ITEMS: "Sebagian item tidak tersedia. Perbarui keranjang Anda.",
+    INVALID_QUANTITY: "Jumlah pesanan tidak valid.",
+    EMPTY_ORDER: "Keranjang masih kosong.",
+    GUEST_NAME_REQUIRED: "Nama wajib diisi.",
+    ORG_NOT_FOUND: "Pesanan gagal diproses. Coba lagi.",
+    CODE_GENERATION_FAILED: "Pesanan gagal diproses. Coba lagi.",
+  };
+  return map[sentinel] ?? "Pesanan gagal diproses. Coba lagi.";
+}
+
 export function GuestCafeClient({ menu }: GuestCafeClientProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -367,6 +394,8 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
   const [variantItem, setVariantItem] = useState<GuestMenuItemView | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [successName, setSuccessName] = useState<string | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const [orderPending, setOrderPending] = useState(false);
 
   // Filter menu by selected tab
   const filtered =
@@ -412,6 +441,9 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
   }
 
   async function handleConfirmOrder(guestName: string) {
+    setOrderError(null);
+    setOrderPending(true);
+
     // Map temperature/sugar to DB enums
     const tempMap: Record<TemperatureOption, OrderLineInput["temperature"]> = {
       Hot: "HOT",
@@ -433,10 +465,13 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
 
     try {
       await placeOrder({ lines, guestName });
-    } catch {
-      return; // keep checkout modal open on error
+    } catch (err) {
+      setOrderError(toOrderErrorMessage(err));
+      setOrderPending(false);
+      return;
     }
 
+    setOrderPending(false);
     setCart([]);
     setCheckoutOpen(false);
     setSuccessName(guestName);
@@ -667,8 +702,10 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
         <CheckoutModal
           cart={cart}
           total={cartTotal}
-          onClose={() => setCheckoutOpen(false)}
+          onClose={() => { setCheckoutOpen(false); setOrderError(null); }}
           onConfirm={handleConfirmOrder}
+          error={orderError}
+          pending={orderPending}
         />
       )}
 

@@ -1,3 +1,4 @@
+-- DDL authority = supabase/migrations/0000_app_schema.sql; this file is a legacy generated artifact (drizzle-kit is not run in CI).
 CREATE TYPE "public"."MembershipTier" AS ENUM('REGULAR', 'PREMIUM', 'GOLD');--> statement-breakpoint
 CREATE TYPE "public"."Role" AS ENUM('MEMBER', 'ADMIN', 'BARISTA');--> statement-breakpoint
 CREATE TABLE "app_users" (

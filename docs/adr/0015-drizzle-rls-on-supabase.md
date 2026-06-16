@@ -26,7 +26,7 @@ server is authoritative. Both are settled here so the rest of I-005 has no open 
 - A Drizzle client singleton (`lib/db/client.ts`) replaces the Prisma singleton, using `postgres-js` against
   `DATABASE_URL` (the Supabase pooled connection). Repositories import `db` from there as before.
 
-### 2. drizzle-kit owns migrations (not Supabase migrations) — **DECISION FLAGGED (OQ-B)**
+### 2. DDL authority: a single ordered `supabase/migrations/` stream (drizzle-kit is the query-layer tool, **not** the DDL authority)
 
 > **Revision (2026-06-16, I-005 CI fix):** the app DDL (`organizations`, `app_users`, enums) is **consolidated into
 > `supabase/migrations/0000_app_schema.sql`** — the single, ordered source of truth that a fresh `supabase start`
@@ -36,19 +36,15 @@ server is authoritative. Both are settled here so the rest of I-005 has no open 
 > which is what a fresh `supabase start` actually applies. The `*.down.sql` pairs were removed from the apply path
 > (moved to `supabase/migrations/_down/`) because the Supabase CLI has no down-migration concept and applied them
 > as forward migrations on a fresh stack (CI failure I-005).
-- **Chosen:** `drizzle-kit generate` emits SQL migrations under `drizzle/` from the Drizzle schema; they are the
-  single source of truth for application tables (`organizations`, `app_users`), applied with `drizzle-kit migrate`
-  in dev/CI and against prod.
-- **Why over `supabase migration`:** the schema already lives in TypeScript (Drizzle), so one tool authoring both
-  schema and migration keeps types and DDL in lockstep and avoids drift between a `.sql` file and the TS model.
-  `supabase/migrations/*` is **still used**, but only for **Supabase-owned concerns** that are not application
-  tables: RLS policies, the `app_users ↔ auth.users` FK, Storage buckets, and Realtime publication. This split —
-  *drizzle-kit owns app DDL, supabase migrations own platform wiring* — is the cleanest seam and keeps the app
-  schema portable off Supabase if ever needed.
-- **Trade-off accepted:** two migration directories. Mitigated by a clear ownership rule (app tables → drizzle;
-  RLS/Storage/auth-linkage/realtime → supabase) and a single `pnpm db:migrate` script that runs both in order.
-- Migrations stay **reversible** (each `drizzle/*.sql` has a paired down step documented in the plan; RLS/policy
-  migrations include `drop policy` down steps). This satisfies the charter's reversible-migration rule.
+> **Original §2 intent (superseded — kept for history).** The working assumption was that `drizzle-kit generate`/
+> `migrate` would own app-table DDL from the Drizzle schema, with `supabase/migrations/*` reserved for
+> Supabase-platform concerns (RLS/Storage/auth-link/Realtime), accepting **two migration directories** and a
+> combined script that ran both. That split was **reversed** by the CI fix above: a fresh `supabase start` must
+> apply one ordered stream, so app DDL moved into `supabase/migrations/`. `drizzle/` is now reference-only.
+
+> **Migrations are NOT reversible in the down-migration sense.** The Supabase CLI has no `down` concept; migrations
+> are forward-only and re-applied fresh via `supabase db reset`. The `supabase/migrations/_down/*.sql` files are
+> documentation only — they are not applied. (This corrects the original §2's "reversible / paired down step" claim.)
 
 ### 3. RLS as a defense-in-depth backstop (server stays authoritative)
 - Per ADR-0013 the server is the gate. We still add RLS on `app_users` (and it becomes the default for future
@@ -65,10 +61,11 @@ server is authoritative. Both are settled here so the rest of I-005 has no open 
 - `prisma/` (schema, migrations, seed, client) and the `@prisma/client` + `prisma` + `bcryptjs` (auth path)
   dependencies are deleted at the end of I-005's cutover. `bcryptjs` may remain only if any non-auth code uses it
   (it does not — it is auth-only), so it is removed.
-- `package.json` db scripts change: `db:generate`→`drizzle-kit generate`, `db:migrate`→ run drizzle + supabase
-  migrations, `db:deploy`→`drizzle-kit migrate` + `supabase db push` for policies, `db:seed` unchanged (tsx), new
-  `db:studio`→`drizzle-kit studio`. Supabase local stack via `supabase start`/`supabase stop`.
-- ADR-0010's "throwaway Postgres (Docker/Neon)" becomes "**Supabase CLI local stack**" for integration + e2e; the
-  pyramid (many unit, few integration, ~few e2e) and one-owning-layer rule are unchanged.
+- `package.json` db scripts (actual, post-I-005): `sb:start`/`sb:stop` (Supabase CLI local stack),
+  `db:seed`/`db:seed:supabase` (`tsx scripts/seed-supabase.ts`), and `dz:generate`/`dz:migrate`/`dz:studio` (drizzle-kit
+  query-layer tooling — **not** the DDL authority). The original §2 conjectured a set of `db:*` migration/deploy/studio
+  script renames that were **never added** — corrected here.
+- ADR-0010's "throwaway Postgres" becomes the **Supabase CLI local stack** for integration + e2e; the
+  pyramid (many unit, few integration, ~few e2e) and one-owning-layer rule is unchanged.
 - Portability retained: Drizzle emits standard Postgres SQL; the app schema can move off Supabase. Supabase-only
   coupling is confined to `supabase/migrations/*` (RLS/Storage/Realtime) and the auth linkage.

@@ -1,3 +1,4 @@
+// DDL authority = supabase/migrations/0000_app_schema.sql; this file is the Drizzle TS query mirror (drizzle-kit is not run in CI).
 import {
   pgTable,
   pgEnum,

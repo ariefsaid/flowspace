@@ -1,21 +1,20 @@
 # Spec 0002 — Auth + data foundation
 
-- Status: Draft (for I-004)
+- Status: Built (I-004) + re-platformed (I-005)
 - Depends on / supersedes recon: `OBS-010`, `OBS-011`, `OBS-020`, `OBS-122`, `OBS-131` (spec 0001).
 - Source of behavior: the live product's auth flow (recon) for `OBS-*`; net-new server-side authz hardening as `FR-*`.
 - Purpose: turn the frontend-first replica into an authenticated app with a real data seam, and **close the
   server-side authorization gap** (`OBS-122`/`OBS-131`): members can currently reach `/admin/*` and `/barista`
   guarded only by a client redirect.
 
-> **Masking note (ADR-0002).** Membership-tier names are white-labeled. This spec uses the masked enum
-> `{ REGULAR, PREMIUM, GOLD }`. The current `lib/mock/*` leaks client-identifying tier codes (`PERADI_RBA`,
-> `PERADI_SUARA`, `PERADI_DPC`) — see Open Question OQ-3; those mocks are FE-only and out of this issue's data scope,
-> but must be masked before any are committed to a brand-visible surface.
+> **Masking note (ADR-0002).** Membership-tier names are white-labeled; this spec uses the masked enum
+> `{ REGULAR, PREMIUM, GOLD }`. The FE mocks use these masked codes and `app/(public)/__tests__/landing.test.tsx`
+> asserts the client-identifying codes (`PERADI`/`RBA`) never render (OQ-3 resolved).
 
 ## Scope
-**In:** `Organization` + `AppUser` Prisma models + first reversible migration + dev seed; NextAuth v5 Credentials
-auth (`lib/auth.ts`, `app/api/auth/[...nextauth]`); login/signup wired to real auth; server-side route authz
-(middleware); `lib/db/users.ts` repository (org-scoped); `lib/auth/policy.ts` `can()` (UX-only).
+**In:** `organizations` + `app_users` Drizzle/Supabase tables (DDL in `supabase/migrations/`) + dev seed; **Supabase Auth**
+credentials (the credential lives in `auth.users`, not on `app_users`); login/signup wired to real auth; server-side route
+authz (`middleware.ts`); `lib/db/users.ts` Drizzle repository (org-scoped); `lib/auth/policy.ts` `can()` (UX-only).
 **Out (follow-up issues):** booking/cafe/print/transaction tables and wiring those pages to live data; password
 reset & email; OAuth; admin user-management writes; Postgres RLS.
 
@@ -39,11 +38,12 @@ reset & email; OAuth; admin user-management writes; Postgres RLS.
   the user's role may access). (Realizes/generalizes `OBS-011`.)
 - **FR-004** (event-driven) — *When* a visitor submits the signup form with a name, a unique email, and a password
   (≥6 chars, matching its confirmation), the system *shall* create a new `AppUser` with `role = MEMBER` in the
-  single seeded organization, hash the password (bcrypt), and then sign the user in (→ `/dashboard`).
+  single seeded organization, register the credential via **Supabase Auth** (which owns it — `app_users` carries no
+  password column), and then sign the user in (→ `/dashboard`).
 - **FR-005** (event-driven, conditional) — *When* signup is submitted with an email that already exists in the org,
   the system *shall not* create a user and *shall* return a generic "email already registered" error.
-- **NFR-001** (ubiquitous) — Passwords *shall* be stored only as a bcrypt hash (cost ≥10); the plaintext password
-  *shall never* be persisted, logged, or returned by any repository read.
+- **NFR-001** (ubiquitous) — Credentials *shall* be owned by **Supabase Auth** (`auth.users`); `app_users` *shall* carry
+  **no password column at all**. The plaintext password *shall never* be persisted, logged, or returned by any repository read.
 
 ### Server-side authorization (the security fix — FR-010..FR-014 realize the OBS-122/131 fix)
 - **FR-010** (state-driven) — *While* a request targets a protected path and carries **no** valid session, the
@@ -65,10 +65,12 @@ reset & email; OAuth; admin user-management writes; Postgres RLS.
 ### Data seam & tenancy
 - **FR-020** (ubiquitous) — Every `AppUser` read exposed by `lib/db/users.ts` *shall* be scoped to the caller's
   `orgId` (resolved server-side from the session); the client *shall never* supply `orgId`.
-- **FR-021** (ubiquitous) — The schema *shall* finalize `AppUser` with: `id`, `orgId` (FK→Organization),
-  `email` (unique), `name`, `passwordHash`, `role` (enum), `membershipTier` (enum, default `REGULAR`),
-  `timeCredits` (default 0), `printBalance` (default 0), `createdAt`, `updatedAt`, `archivedAt` (nullable, for
-  soft-archive over hard-delete). camelCase fields `@map` to snake_case; `@@index([orgId])`. Migration reversible.
+- **FR-021** (ubiquitous) — The schema *shall* finalize the `app_users` table (Drizzle mirror in `lib/db/schema.ts`;
+  DDL in `supabase/migrations/0000_app_schema.sql`) with: `id`, `org_id` (FK→`organizations`), `auth_user_id`
+  (FK→`auth.users`, nullable; links the domain profile to its Supabase-Auth credential), `email` (unique), `name`,
+  `role` (enum), `membership_tier` (enum, default `REGULAR`), `time_credits` (default 0), `print_balance` (default 0),
+  `created_at`, `updated_at`, `archived_at` (nullable, for soft-archive over hard-delete). **No password column** — the
+  credential lives in `auth.users`. Applied as an ordered Supabase migration (`supabase db reset` re-applies fresh).
 - **FR-022** (ubiquitous) — A dev seed *shall* create one organization and three users so the existing UI renders
   against real rows: an **admin**, a **member** "Budi" (`membershipTier = PREMIUM`, `timeCredits = 139`,
   `printBalance = 68` — matching the mock the dashboard already renders, `OBS-056`), and a **barista**.
@@ -103,8 +105,8 @@ reset & email; OAuth; admin user-management writes; Postgres RLS.
 - **AC-004** — Signup creates a MEMBER and signs in.
   Given an email not yet registered in the org,
   When a visitor submits signup (name, email, password ≥6 = confirmation),
-  Then a new `AppUser` exists with `role = MEMBER`, `orgId` = the seeded org, a bcrypt `passwordHash` (never the
-  plaintext), and the visitor is signed in → `/dashboard`. (FR-004, NFR-001)
+  Then a new `app_users` row exists with `role = MEMBER`, `org_id` = the seeded org, linked to a Supabase-Auth
+  credential (**no password column** on `app_users`), and the visitor is signed in → `/dashboard`. (FR-004, NFR-001)
 - **AC-005** — Duplicate-email signup is rejected.
   Given an email already registered,
   When signup is submitted with that email,
@@ -151,10 +153,11 @@ reset & email; OAuth; admin user-management writes; Postgres RLS.
   When `can("access","admin",{role})` / `can("access","barista",{role})` is evaluated,
   Then it is true exactly for `ADMIN` / for `{ADMIN,BARISTA}` respectively, and the module documents that it is not
   the security boundary. (FR-030)
-- **AC-023** — Passwords are never persisted in plaintext.
+- **AC-023** — The credential lives in Supabase Auth, not on `app_users`.
   Given a created/seeded user,
-  When the row is inspected,
-  Then `passwordHash` is a bcrypt hash and there is no plaintext-password column or field anywhere. (NFR-001)
+  When the `app_users` row (and its migration DDL) is inspected,
+  Then there is **no password column at all** on `app_users` — the credential is owned by `auth.users` (Supabase Auth).
+  (NFR-001)
 
 ---
 
@@ -163,21 +166,25 @@ reset & email; OAuth; admin user-management writes; Postgres RLS.
 |----|--------------|-----|
 | AC-001, AC-002 | E2E (Playwright) | real login form → session → role redirect across the stack |
 | AC-003, AC-005 | E2E (Playwright) | real form error path |
-| AC-004 | Integration (Prisma) | user-creation + hash contract owned at the data layer; e2e references it |
+| AC-004 | Integration (Drizzle) | user-creation + Supabase-Auth credential contract owned at the data layer; e2e references it |
 | AC-010, AC-011, AC-012, AC-013, AC-014, AC-015 | E2E (Playwright) | middleware request→redirect is only honestly provable end-to-end |
 | AC-020 | Unit (Vitest) | jwt/session callback pure logic |
-| AC-021 | Integration (Prisma) | org_id scoping against a real test DB |
+| AC-021 | Integration (Drizzle) | org_id scoping against the Supabase local stack |
 | AC-022 | Unit (Vitest) | pure `can()` policy |
-| AC-023 | Integration (Prisma) | inspect the persisted row / schema |
+| AC-023 | Integration (Drizzle) | inspect the persisted row / migration DDL (no password column) |
 
-## Open questions (need Director/owner sign-off)
-- **OQ-1 (decided in ADR-0003, confirm):** password hashing = `bcryptjs` cost 10 (vs argon2id). OK?
-- **OQ-2 (decided in ADR-0004, confirm):** authz via root `middleware.ts` (vs per-layout server guards). OK?
-- **OQ-3 (masking):** the FE mocks (`lib/mock/admin.ts`, `member.ts`, `lib/mock/types.ts` doc-comment) carry
-  client-identifying tier codes (`PERADI_*`). Mask to `{REGULAR,PREMIUM,GOLD}` now, or track as a separate cleanup
-  issue? (This issue's *data* model uses the masked enum regardless.)
-- **OQ-4 (seed vs real data):** seed-only demo users for now (admin/budi/barista), real signup creates members.
-  Confirm seed passwords come from env (`SEED_ADMIN_PASSWORD`, …) with dev-only fallbacks, never committed.
-- **OQ-5 (test DB):** integration tests run against local Docker Postgres or a Neon test branch (per
-  `docs/environments.md`). Confirm the CI choice (plan assumes a `TEST_DATABASE_URL` env + a separate node-env
-  Vitest project; CI provisions a throwaway DB).
+## Resolution notes (settled during I-004 → I-005 re-platform)
+
+These were open at the I-004 draft; the re-platform to Supabase + Drizzle + Supabase Auth (ADR-0013/0014/0015) settled them.
+
+- **OQ-1 → resolved (ADR-0014):** credential storage is **Supabase Auth** (`auth.users`); there is no app-side password
+  column and no hashing dependency (the legacy hashing library was removed in I-005).
+- **OQ-2 → resolved (ADR-0004, revised by ADR-0014 §3):** authz via root `middleware.ts` reading the Supabase session
+  via `getUser()`. The route-gate decision is preserved; only the *session source* moved (from the old credentials
+  provider's JWT to the Supabase session cookie).
+- **OQ-3 → resolved (masking):** the FE mocks use the masked enum `{REGULAR, PREMIUM, GOLD}`, and
+  `app/(public)/__tests__/landing.test.tsx` asserts the client-identifying codes (`PERADI`/`RBA`) never render.
+- **OQ-4 → resolved (seed):** the dev seed creates admin/budi/barista from `SEED_*` env vars (dev-only fallbacks,
+  never committed) against the Supabase local stack.
+- **OQ-5 → resolved (ADR-0010/0015):** integration tests run against the **Supabase CLI local stack** (`supabase start`);
+  CI provisions the same. `TEST_DATABASE_URL`/`DATABASE_URL` point at the local stack DB; tests truncate between runs.

@@ -153,6 +153,6 @@ right side member name + "Keluar".
 4. Exact design tokens (colors, type scale, spacing, radius, shadows) → `DESIGN.md` (design-architect Foundation, I-002).
 5. Each admin sub-page's table columns, filters, actions, modals, and empty/error states.
 6. Pricing source of truth & discount matrix (print base vs 20%; cafe 5%; coworking/meeting tier discounts) from admin Settings.
-7. Data model → `prisma/schema.prisma` (I-003): users, memberships+tiers, time-credit ledger, print-balance ledger,
+7. Data model → `supabase/migrations/` (I-005): users, memberships+tiers, time-credit ledger, print-balance ledger,
    bookings (walk-in vs scheduled, payment state machine), rooms/seats, cafe menu+variants+orders+order-status,
    print jobs, transactions, wifi vouchers, QR/keycard tokens, settings.

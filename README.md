@@ -11,15 +11,16 @@ tiered memberships. Built **spec-first** with an agentic SDD / TDD / BDD workflo
 ## Stack
 - **Next.js 15** (App Router) · **React 19** · **TypeScript** (strict)
 - **Tailwind CSS v4**
-- **Prisma** + **Postgres** (Neon) · **NextAuth/Auth.js v5**
+- **Supabase** (Postgres + Auth + Realtime + Storage + RLS) + **Drizzle ORM**, server-authoritative (ADR-0013/0014/0015)
 - **Vitest** + Testing Library (unit) · **Playwright** (e2e / BDD)
 - Locale: Bahasa Indonesia (`id-ID`)
 
 ## Quick start
 ```bash
 pnpm install
-cp .env.example .env        # fill DATABASE_URL (Neon), NEXTAUTH_SECRET, ...
-pnpm db:migrate             # apply schema to your dev DB
+pnpm sb:start               # start the Supabase CLI local stack (Docker); applies all migrations fresh
+cp .env.example .env        # fill DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL/ANON_KEY, SUPABASE_SERVICE_ROLE_KEY (from `supabase status`)
+pnpm db:seed:supabase       # seed the dev org + users
 pnpm dev                    # http://localhost:3000
 ```
 
@@ -31,7 +32,9 @@ pnpm dev                    # http://localhost:3000
 | `pnpm lint:ci` | ESLint `--max-warnings=0` (zero to merge) |
 | `pnpm test` / `test:coverage` | Vitest unit (≥80% on changed code to merge) |
 | `pnpm e2e` | Playwright acceptance (the BDD layer) |
-| `pnpm db:migrate` / `db:deploy` / `db:studio` | Prisma migrations / deploy / studio |
+| `pnpm sb:start` / `sb:stop` | Supabase CLI local stack (Docker) — dev + test DB; `pnpm exec supabase db reset` re-applies all migrations |
+| `pnpm db:seed` / `db:seed:supabase` | seed the dev org + users (`tsx scripts/seed-supabase.ts`) |
+| `pnpm dz:generate` / `dz:studio` | Drizzle query-layer tooling (drizzle-kit is **not** the DDL authority — see ADR-0015) |
 
 ## How this repo is built (agentic workflow)
 Owner → **Director** (main session) → role agents, one issue at a time:

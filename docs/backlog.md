@@ -5,7 +5,7 @@ Surfaces come from `docs/specs/0001-recon-app-surface.spec.md`.
 
 ## CURRENT STATE (2026-06-16) — read this first
 - **Stack:** Supabase (Postgres+Auth+Realtime+Storage+RLS) + Drizzle, server-authoritative (ADR-0013/0014/0015). Prisma/Neon/NextAuth removed.
-- **On `main` (CI green):** the **21-route frontend pixel replica** (~95 fidelity) + the **auth/data foundation** (Supabase Auth, `middleware.ts` server-side authz closing OBS-122/131, org_id-scoped Drizzle repo, RLS backstop, Realtime/Storage seams). Tests: unit 52 / integration 19 / e2e 5.
+- **On `main` (CI green):** the **20-route frontend pixel replica** (~95 fidelity) + the **auth/data foundation** (Supabase Auth, `middleware.ts` server-side authz closing OBS-122/131, org_id-scoped Drizzle repo, RLS backstop, Realtime/Storage seams). Tests: unit 52 / integration 19 / e2e 5.
 - **Shelved (NOT on main):** `feat/cafe-domain` branch = the cafe domain built on the OLD Prisma/NextAuth stack (schema/repo/actions/5 surfaces wired + tests, spec `0003-cafe-domain`, plan, `lib/cafe/*` logic). **Rebuild on Supabase+Drizzle** — spec/plan/domain-logic carry over; redo the data/auth wiring. First candidate for the **pi+GLM parallel lane** (`docs/pi-delegation.md`).
 
 ## Done
@@ -16,7 +16,7 @@ Surfaces come from `docs/specs/0001-recon-app-surface.spec.md`.
 ## OUTSTANDING — next work (domain verticals rebuilt on the Supabase foundation)
 - [ ] **I-022 (cafe) — rebuild on Supabase+Drizzle** (un-shelve `feat/cafe-domain`): menu reads + order lifecycle (member/guest → barista KDS → admin orders/POS), now using **Supabase Realtime** for the live KDS. Spec `docs/specs/0003-cafe-domain.spec.md` (on the shelved branch) carries over.
 - [ ] **I-020** Time-credit packages: list + purchase + ledger debit (Top Up).
-- [ ] **I-021** Booking (seat/room, walk-in vs scheduled, time-window, credit check/debit, payment states). NB: enables the cafe "active-session" 5% discount (dormant until booking exists — ADR-0011).
+- [ ] **I-021** Booking (seat/room, walk-in vs scheduled, time-window, credit check/debit, payment states). NB: enables the cafe "active-session" 5% discount (dormant until booking exists; ADR-0011 lands with the cafe rebuild from `feat/cafe-domain`).
 - [ ] **I-023** Print billing (PaperCut-style charge model) + member view + **Supabase Storage** for uploads.
 - [ ] **I-024** Dynamic-QR facility access. · Admin sub-pages wired to live data (users/bookings/pending/pos/orders/print-reports/settings).
 
@@ -47,7 +47,7 @@ Surfaces come from `docs/specs/0001-recon-app-surface.spec.md`.
 
 ## Tech debt / enhancements
 - [ ] Changed-lines-precise coverage gate (PMO had a root-anchored script; dropped here — re-add root-aware version).
-- [ ] Preview env wiring (Neon branch per PR + Vercel).
+- [ ] Preview env wiring (deferred Supabase preview/branch per PR — see `docs/environments.md`; ADR-0013).
 - [ ] Storybook for the shared component library (once extracted).
 - [ ] **External/hardware integrations (each its own ADR/issue, server-authoritative, per-venue on-prem agent — ADR-0013):** payment gateway (Midtrans/Xendit) for PAID ONLINE · **PaperCut** print billing + print-server (Mini PC) · **UniFi** WiFi vouchers · **dynamic-QR door/print access** (rotating token + device verify) · **ESB/ERP** connectors (future).
 - [ ] **Prod infra decision (owner-gated, ADR-0013):** Supabase cloud vs self-host + **Indonesia data-residency (PDP)**.

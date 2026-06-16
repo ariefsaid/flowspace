@@ -15,7 +15,7 @@ never write app code yourself — you delegate and **verify**.
    backlog item). State the locked decisions you're applying up front.
 1b. **Grill (alignment gate — before any spec effort)** — run the `grill-with-docs` skill with the
    owner: challenge the proposed issue against the existing domain model (`docs/glossary.md`, ADRs,
-   locked `OD-*` decisions in `docs/decisions.md`), sharpen terminology, and update glossary/ADRs
+   locked `OD-*` decisions in `docs/adr/`), sharpen terminology, and update glossary/ADRs
    inline as decisions crystallise. No spec work starts until the grill ends in owner alignment —
    this is where misframed issues die cheaply.
    **Job-story capture hook (every FE feature — binding):** during the grill, before any spec effort,
@@ -107,7 +107,7 @@ exploit a window of abundant Claude weekly quota). When parallel, the wave model
 Each `AC-###` is owned by **one** test at the **lowest sufficient layer**:
 - **Unit (bulk):** Vitest/RTL, mocked — logic, hooks, db query builders, formatters, and component
   loading/empty/error/filter states. Fast, no stack.
-- **Integration (some):** **Integration** (Vitest + Prisma against a test Postgres) — RLS/tenancy/role read+write contracts. This
+- **Integration (some):** Vitest + **Drizzle against the Supabase CLI local stack** — RLS/tenancy/role read+write contracts. This
   is the home for "in-org read allowed / cross-org blocked / role gate", NOT e2e.
 - **E2E (few, ~6–8 curated journeys):** Playwright against the live stack — real cross-stack flows only
   (login→dashboard, sign-out guard, magic-link, session-persist, one real-data smoke per module).
@@ -118,7 +118,7 @@ Each `AC-###` is owned by **one** test at the **lowest sufficient layer**:
 - One **branch per issue** off an **up-to-date `main`**. Branch names: `feat/`, `chore/`, `test/`, `perf/`.
 - `release-engineer` runs the **full fresh verification before pushing**: from the repo root —
   `typecheck`, `lint:ci`, `test`, `build`, and **`pnpm e2e` against a live stack** (start
-  Postgres/Neon; it's the behavioral guard) + the Prisma integration suite for DB changes. No push without green e2e.
+  the Supabase CLI local stack; it's the behavioral guard) + the Drizzle integration suite for DB changes. No push without green e2e.
 - **Never force-push. Never `git add -A`.** Stage the issue's files explicitly.
 - `release-engineer` opens the PR and **stops**. The **Director** approves & merges within the signed
   spec (`gh pr merge <n> --squash --delete-branch`), then **immediately syncs**:
@@ -132,7 +132,7 @@ Each `AC-###` is owned by **one** test at the **lowest sufficient layer**:
 No completion claim without fresh evidence. The gates (all must be green to merge): `pnpm
 typecheck` (0 errors) · `pnpm lint:ci` (`--max-warnings=0`) · `pnpm test` (unit, ≥80% on changed
 code, behavior-asserting) · `pnpm build` · `pnpm e2e` (live stack, from the repo root) ·
-the Prisma integration suite (for DB changes). **Don't trust agent reports — re-verify the load-bearing
+the Drizzle integration suite (for DB changes). **Don't trust agent reports — re-verify the load-bearing
 claims yourself** (re-run gates, read the diff, or dispatch a reviewer). Reviewers caught a broken
 render, a self-escalation RLS hole, and a lying test that the implementer's own green run missed.
 

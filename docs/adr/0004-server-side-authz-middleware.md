@@ -1,6 +1,6 @@
 # ADR-0004 — Server-side authorization: middleware route-gate + `org_id` seam
 
-- Status: Accepted
+- Status: Accepted — **Revised by [ADR-0014](0014-auth-supabase.md) §3** (session source → Supabase Auth `getUser()`; the route-gate decision is preserved)
 - Date: 2026-06-15
 - Issue: I-004 (auth + data foundation)
 
@@ -12,8 +12,9 @@ the server but is never the gate. We need: unauthenticated → `/login`; `/admin
 ADMIN; member routes → any authenticated user. We also need every user **read** scoped to the caller's `org_id`.
 
 ## Decision
-1. **Middleware as the primary route gate.** A single `middleware.ts` at the repo root runs Auth.js v5's
-   `auth((req) => …)` wrapper. It reads the JWT (`req.auth`) — no DB call — and enforces, before the page renders:
+1. **Middleware as the primary route gate.** A single `middleware.ts` at the repo root reads the authenticated
+   session and enforces, before the page renders: (Re-platformed in I-005 per ADR-0014 §3: the session is now read
+   via Supabase Auth `getUser()` — originally an Auth.js JWT wrapper with no DB call — the gate decision is unchanged.)
    - no session on a protected path → redirect to `/login?callbackUrl=…`;
    - `/admin` or `/admin/*` requires `role === "ADMIN"`;
    - `/barista` requires `role === "ADMIN" || role === "BARISTA"`;
@@ -30,8 +31,8 @@ ADMIN; member routes → any authenticated user. We also need every user **read*
 2. **Defense in depth at the data seam.** Middleware gates *navigation*; the repository layer gates *data*. Every
    query in `lib/db/users.ts` takes the caller's `orgId` (resolved server-side from the session via
    `lib/auth/session.ts → requireSession()`), and the `WHERE` is always `org_id`-scoped. The client never supplies
-   `orgId`. A future per-route handler / server action follows the same rule. (Neon Postgres RLS remains optional
-   future hardening per ADR-0001 — not in this issue.)
+   `orgId`. A future per-route handler / server action follows the same rule. (Supabase RLS is now a
+   defense-in-depth backstop added in I-005 — see ADR-0015; it is not the primary gate, the server is.)
 3. **`can(action, entity, ctx)` is UX-only.** `lib/auth/policy.ts` exports a pure `can()` used by components to
    show/hide affordances. It is explicitly **not** an authorization boundary — the middleware and the `org_id`-scoped
    repository are. This is stated in the policy module's doc comment and asserted by a unit test.
@@ -49,4 +50,4 @@ ADMIN; member routes → any authenticated user. We also need every user **read*
   separate from the unit test of `can()`.
 - The middleware authz outcomes (member→/admin blocked, member→/barista blocked, admin→/admin allowed) are owned by
   an **e2e** test (only Playwright exercises the real request → middleware → redirect across the stack); `org_id`
-  scoping of reads is owned by a **Prisma integration** test. (Traceability table in the plan.)
+  scoping of reads is owned by a **Drizzle integration** test against the Supabase local stack. (Traceability table in the plan.)

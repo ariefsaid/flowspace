@@ -1,6 +1,6 @@
 # ADR-0003 — Auth: NextAuth/Auth.js v5 Credentials + JWT session shape
 
-- Status: Accepted
+- Status: **Superseded by [ADR-0014](0014-auth-supabase.md)** (Supabase Auth; the full NextAuth body below is kept as history)
 - Date: 2026-06-15
 - Issue: I-004 (auth + data foundation)
 

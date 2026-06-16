@@ -18,12 +18,12 @@ Admin/Operator (dashboard, users, bookings, pending approvals, cafe POS, orders,
 
 ## Part B — Engineering DoD (every code issue)
 - **Architecture.** Production-grade and minimal for one venue, yet scalable. 3-layer seam: components/route
-  handlers → typed Prisma **repositories** (`lib/db/*`) → Postgres. No raw Prisma or `org_id` threaded from the client.
+  handlers → typed **Drizzle** **repositories** (`lib/db/*`) → Supabase Postgres. No raw SQL or `org_id` threaded from the client.
 - **Correctness.** Every `AC-###` proven by a test at its lowest sufficient layer (ADR-0010). Handle **loading /
   empty / error / edge** states, not just the happy path.
 - **Security.** Server-side authz is the enforcement authority: every business read/write is `org_id`-scoped and
   ownership/role-checked server-side. No secrets in code/history. (See `security-auditor`.)
-- **Data/schema.** Reversible Prisma migrations. Indexes on hot-path `WHERE`/`JOIN`/`ORDER BY` columns. No N+1,
+- **Data/schema.** Ordered Supabase migrations (`supabase/migrations/`; `pnpm exec supabase db reset` re-applies fresh — the CLI has no down-migration concept). Indexes on hot-path `WHERE`/`JOIN`/`ORDER BY` columns. No N+1,
   no unbounded scans, no `select *` over wide rows on hot paths. Soft-archive over hard-delete; FK-block referenced rows.
 - **Performance.** No needless re-renders, expensive synchronous work, or leaks on the FE; bounded queries on the BE.
 - **Quality gates (block merge).** `pnpm typecheck` 0 errors · ESLint `--max-warnings=0` · Vitest unit green with
@@ -41,7 +41,7 @@ Admin/Operator (dashboard, users, bookings, pending approvals, cafe POS, orders,
 
 ## Part D — DevOps & delivery DoD
 - One PR per issue. No force-push, no `git add -A`. No push without fresh green verification evidence.
-- Reversible migrations; production deploy + irreversible infra require **owner** approval.
+- Ordered Supabase migrations; production deploy + irreversible infra require **owner** approval.
 - CI runs typecheck, lint, unit (coverage), build, and e2e on every PR.
 
 ## Part E — Replica acceptance (this project specifically)

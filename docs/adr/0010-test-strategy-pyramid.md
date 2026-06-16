@@ -25,7 +25,7 @@ changed-lines-precise gate is a future enhancement — see backlog).
 
 ## Consequences
 - Fast, honest suite; e2e reserved for what only e2e can prove.
-- Integration tests need a disposable Postgres — provided by Docker locally and a Neon branch in CI/preview.
+- Integration tests need a disposable Postgres — provided by Docker locally and the **Supabase CLI local stack** in CI/preview (per the I-005 revision below).
 - **Reinforcement (2026-06-16, I-004 rebalance):** e2e is reserved for genuine cross-stack-only guarantees
   (e.g. content-absence after a real HTTP redirect). Authorization *decision* logic (`requiredRolesFor`,
   `authorized`, `roleHome`) belongs at unit — it is pure function logic that does not require a browser or a

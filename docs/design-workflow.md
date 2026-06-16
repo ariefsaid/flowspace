@@ -1,7 +1,7 @@
 # UI/UX Workflow
 
 The design analog of the code-side SDD→TDD→BDD loop (`docs/director-playbook.md` §2,
-`docs/decisions.md`). The **Director** (main Opus session) orchestrates this and **owns the
+`docs/adr/`). The **Director** (main Opus session) orchestrates this and **owns the
 human-UX checkpoint** — taste is the owner's gate, the way spec sign-off is. `DESIGN.md` at repo
 root is the single source of truth (see `docs/product-expectations.md` Part C "Design/UI").
 
@@ -90,7 +90,7 @@ The review battery (§2.3) **discovers** UX issues and makes the judgment calls;
 - *"When a PM creates a project, opening it from **either** the Projects list **or** the Pipeline resolves to **ONE** detail page (same URL), showing the stage-appropriate lens."* — the IA canonical-view invariant.
 - *"On the timesheet entry screen the engineer sees **Save and Submit together** from first paint; on **Save**, the entered hours persist with a quiet confirmation and no forced summary view; on **Submit**, the week becomes read-only Submitted."* — co-located primaries + the explicit post-states.
 
-**Rule: every confirmed IxD/IA finding becomes a regression invariant at the lowest sufficient layer** (ADR-0010) — observable flow/structure → e2e/component test; data-logic (honest numbers, list scoping) → unit / Prisma integration test. Discovery (the agent battery) feeds regression (the test pyramid); the battery then re-runs to find the next unforeseen class.
+**Rule: every confirmed IxD/IA finding becomes a regression invariant at the lowest sufficient layer** (ADR-0010) — observable flow/structure → e2e/component test; data-logic (honest numbers, list scoping) → unit / Drizzle integration test. Discovery (the agent battery) feeds regression (the test pyramid); the battery then re-runs to find the next unforeseen class.
 
 ## 4. Storybook
 When the shared component library is extracted (Phase 3, per `docs/product-expectations.md`), each

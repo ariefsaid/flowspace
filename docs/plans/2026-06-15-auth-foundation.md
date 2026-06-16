@@ -1,3 +1,5 @@
+> **SUPERSEDED by [`docs/plans/2026-06-16-replatform-supabase.md`](2026-06-16-replatform-supabase.md) (I-005)** — kept as history (NextAuth/Prisma were removed in I-005).
+
 # Plan — I-004 Auth + data foundation (2026-06-15)
 
 Spec: `docs/specs/0002-auth-foundation.spec.md` · ADRs: `0003` (NextAuth credentials), `0004` (server-side authz).

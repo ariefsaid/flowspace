@@ -46,7 +46,12 @@ export function listOrders(
       orgId,
       ...(opts?.statuses ? { status: { in: opts.statuses } } : {}),
     },
-    include: { items: true },
+    include: {
+      items: true,
+      // Include member identity for the admin order view — only safe fields;
+      // passwordHash is never selected. Customer is always in the same org by FK.
+      customer: { select: { id: true, name: true, email: true } },
+    },
     orderBy: { createdAt: "desc" },
     take: opts?.limit,
   });
@@ -59,7 +64,11 @@ export function listOrders(
 export function getOrder(orgId: string, id: string) {
   return prisma.cafeOrder.findFirst({
     where: { id, orgId },
-    include: { items: true },
+    include: {
+      items: true,
+      // Same safe field selection as listOrders — no passwordHash.
+      customer: { select: { id: true, name: true, email: true } },
+    },
   });
 }
 

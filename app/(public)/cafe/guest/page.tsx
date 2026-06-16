@@ -3,7 +3,13 @@
  * Fetches menu from DB using the single venue org (resolved server-side by slug).
  * No session required; no discount applied.
  * FR-102, FR-113 / AC-101
+ *
+ * force-dynamic: no cookies/session here, so Next.js would otherwise statically
+ * optimize this at build time, freezing the menu. We need a fresh DB read per
+ * request so live menu changes (availability, new items) are reflected immediately.
  */
+export const dynamic = "force-dynamic";
+
 import { prisma } from "@/lib/db/client";
 import { listMenu } from "@/lib/db/cafe";
 import { GuestCafeClient } from "./GuestCafeClient";

@@ -353,6 +353,69 @@ describe("lib/db/cafe", () => {
       const result = await getOrder(orgAId, oB.id);
       expect(result).toBeNull();
     });
+
+    // listOrders customer-include contract (FR-130 / I-022 Fix 2)
+    it("listOrders includes customer (id/name/email) for member orders, null for guest orders", async () => {
+      // Member order — customerUserId set
+      const memberOrder = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+      });
+      // Guest order — no customerUserId
+      const guestOrder = await createOrder({
+        orgId: orgAId,
+        customerUserId: null,
+        guestName: "Rini",
+        lines: [{ menuItemId: croissantAId, qty: 1 }],
+        discountEligible: false,
+      });
+
+      const orders = await listOrders(orgAId);
+      const foundMember = orders.find((o) => o.id === memberOrder.id);
+      const foundGuest = orders.find((o) => o.id === guestOrder.id);
+
+      // Member order must carry safe customer fields — no passwordHash
+      expect(foundMember).toBeDefined();
+      expect(foundMember?.customer).not.toBeNull();
+      expect(foundMember?.customer?.name).toBe("Alice");
+      expect(foundMember?.customer?.email).toBe("alice@cafe.test");
+      expect(foundMember?.customer).not.toHaveProperty("passwordHash");
+
+      // Guest order must have null customer
+      expect(foundGuest).toBeDefined();
+      expect(foundGuest?.customer).toBeNull();
+      expect(foundGuest?.guestName).toBe("Rini");
+    });
+
+    it("getOrder includes customer for member order, null for guest order", async () => {
+      const memberOrder = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+      });
+      const guestOrder = await createOrder({
+        orgId: orgAId,
+        customerUserId: null,
+        guestName: "Tono",
+        lines: [{ menuItemId: croissantAId, qty: 1 }],
+        discountEligible: false,
+      });
+
+      const foundMember = await getOrder(orgAId, memberOrder.id);
+      const foundGuest = await getOrder(orgAId, guestOrder.id);
+
+      expect(foundMember?.customer).not.toBeNull();
+      expect(foundMember?.customer?.name).toBe("Alice");
+      expect(foundMember?.customer).not.toHaveProperty("passwordHash");
+
+      expect(foundGuest?.customer).toBeNull();
+      expect(foundGuest?.guestName).toBe("Tono");
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -42,6 +42,21 @@ const newOrder: AdminOrderView = {
   guestName: "Sari",
 };
 
+/** Guest order: no customer, only guestName */
+const guestOnlyOrder: AdminOrderView = {
+  id: "ord-3",
+  code: "#guest01",
+  customer: undefined,
+  email: undefined,
+  guestName: "Rini",
+  placedAt: new Date("2026-05-08T10:00:00Z").toISOString(),
+  status: "NEW",
+  subtotalRupiah: 25000,
+  discountRupiah: 0,
+  totalRupiah: 25000,
+  items: [{ nameSnapshot: "Croissant", qty: 1, unitPriceRupiah: 25000 }],
+};
+
 describe("OrdersClient (AC-101)", () => {
   it("AC-101: renders order code from props (DB-sourced)", () => {
     render(<OrdersClient initialOrders={[completedOrder, newOrder]} />);
@@ -69,5 +84,24 @@ describe("OrdersClient (AC-101)", () => {
     const select = screen.getByLabelText(/filter status/i);
     fireEvent.change(select, { target: { value: "NEW" } });
     expect(screen.getByText(/belum ada pesanan/i)).toBeInTheDocument();
+  });
+
+  it("member order shows customer name and email from joined AppUser", () => {
+    render(<OrdersClient initialOrders={[completedOrder]} />);
+    // completedOrder has customer="Budi Santoso" and email="budi@test.com"
+    expect(screen.getByText(/Budi Santoso/)).toBeInTheDocument();
+    expect(screen.getByText(/budi@test\.com/)).toBeInTheDocument();
+  });
+
+  it("guest order shows 'Guest: <name>' and no member email", () => {
+    render(<OrdersClient initialOrders={[guestOnlyOrder]} />);
+    expect(screen.getByText(/Guest: Rini/)).toBeInTheDocument();
+    // no email line rendered for guests
+    expect(screen.queryByText(/@/)).not.toBeInTheDocument();
+  });
+
+  it("order with customerUserId set does not show 'Guest:' prefix", () => {
+    render(<OrdersClient initialOrders={[completedOrder]} />);
+    expect(screen.queryByText(/Guest:/)).not.toBeInTheDocument();
   });
 });

@@ -46,12 +46,16 @@ export default async function AdminOrdersPage() {
       variant: formatVariant(item.temperature, item.sugar),
     }));
 
+    // Prefer the joined AppUser name/email; fall back to guestName for walk-ins.
+    // passwordHash is never selected by listOrders (only id/name/email).
+    const memberName = o.customer?.name ?? undefined;
+    const memberEmail = o.customer?.email ?? undefined;
+
     return {
       id: o.id,
       code: `#${o.code}`,
-      // customer: resolved via member join; for now use guestName / undefined
-      customer: undefined,
-      email: undefined,
+      customer: memberName,
+      email: memberEmail,
       guestName: o.guestName ?? undefined,
       placedAt: o.createdAt.toISOString(),
       status: o.status,

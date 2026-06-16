@@ -10,7 +10,7 @@ can scale to multi-venue/franchise B2B without a rewrite.
 
 ## Repo layout
 - App lives at the **repo root** (Next.js App Router). `app/` = routes/layouts/route-handlers; `components/` =
-  shared UI; `lib/` = `lib/db/*` (Prisma repositories — the API seam over the DB), `lib/types.ts`, `lib/auth.ts`,
+  shared UI; `lib/` = `lib/db/*` (Drizzle repositories — the API seam over Supabase Postgres), `lib/supabase/*`, `lib/auth/*`,
   formatters; `prisma/` = `schema.prisma` + `migrations/`; `e2e/` = Playwright acceptance tests (the BDD layer).
 - `brand.config.ts` — white-label brand seam (name/tagline/locale/colors from env). Never hardcode the client brand.
 - `docs/specs/` `docs/plans/` `docs/adr/` — specs, implementation plans, architecture decisions.
@@ -49,7 +49,7 @@ production-ready solution. Build a production-grade MVP — minimal enough for o
 - **Checkpoints:** the **owner** approves spec sign-off + production deploy / irreversible infra; the **Director**
   approves merge-to-main and staging within the signed spec, and escalates anything strategic or out-of-spec.
 - **PRs:** one per issue. **ADRs:** only for architectural / irreversible / cross-cutting decisions.
-- **Data/schema:** reversible Prisma migrations; server-side `org_id`-scoped authorization on every business
+- **Data/schema:** ordered Supabase migrations (`supabase/migrations/`); server-side `org_id`-scoped authorization on every business
   table/route; `org_id` seam enforced.
 - **Design/UI:** `DESIGN.md` is the design-system source of truth; `/design-review` before merging UI changes.
 - **Replica fidelity:** UI issues are graded against the captured original (pixel + behavior); the recon spec's
@@ -92,7 +92,7 @@ superpowers' planning tier owns planning. spec-miner's `Bash` tool is stripped (
   conditional `While…when…`). All acceptance criteria in **Given/When/Then**.
 - **Test pyramid (ADR-0010).** Each `AC-###` is owned by **one** test at the **lowest sufficient layer**:
   Unit (Vitest/RTL, mocked) for logic/components/render-empty-error-filter; Integration (Vitest against a real
-  test Postgres via Prisma — RLS/tenancy/role read+write contracts) for data + authz; E2E (Playwright, ~6–8
+  Supabase Postgres via Drizzle — RLS/tenancy/role read+write contracts) for data + authz; E2E (Playwright, ~6–8
   curated journeys) for real cross-stack flows only. Never push an AC up a layer to satisfy a convention.
 - **AC-id tagging (traceability).** The owning test names its `AC-###` in its title so `grep -r AC-XXX` finds the
   canonical proof: Vitest in the `it(...)` title; Playwright as the leading token of `test(...)` with file
@@ -102,31 +102,42 @@ superpowers' planning tier owns planning. spec-miner's `Bash` tool is stripped (
   only for a *deliberate* UX change do you update the journey *steps*, and the goal-oracle stays intact. **Never
   bend an assertion to the app's current state to go green.** Full statement: `.claude/agents/qa-acceptance.md`.
 
+## Backend stack (current — post-I-005, ADR-0013/0014/0015)
+**Supabase (Postgres + Auth + Realtime + Storage + RLS) + Drizzle ORM, server-authoritative.** Prisma/Neon/NextAuth
+were removed in I-005. The app DDL lives in **`supabase/migrations/`** (one ordered source — `0000_app_schema` first,
+then auth-link FK / RLS / storage); `drizzle-orm` + `lib/db/schema.ts` are the **query layer** (drizzle-kit is NOT the
+DDL authority). Auth = **Supabase Auth**; `role`/`org_id` ride in the JWT `app_metadata` (admin-API-only, never
+client-writable) and the authoritative session is re-resolved server-side from the `app_users` profile row.
+
 ## Architecture patterns (binding for new features)
-- **3 layers / repository seam:** FE (server + client components) → a typed **Prisma repository** per entity
-  (`lib/db/*`, the API seam over Prisma) → Postgres (Neon). Components/route-handlers consume `lib/db`
-  repositories; never thread raw Prisma calls or `org_id` from the client (the server scopes `org_id`).
-- **Authorization:** gate every create/edit/delete/approve affordance with a `can(action, entity, ctx)` policy on
-  the **real session role** (NextAuth/Auth.js). `can()` is **UX only** — **server-side authz (route handlers /
-  server actions, `org_id`-scoped Prisma queries) is the enforcement authority**; the FE may be stricter than the server.
-- **Destructive deletes / SoD:** soft-archive (`archived_at`) over hard-delete; referenced rows FK-block. Real
-  separation-of-duties (e.g. approver≠author) and destructive deletes (Admin-only) are enforced server-side with
-  an integration-test proof — not just a hidden button.
-- **UI:** strictly `DESIGN.md` tokens (no raw hex/px). Reverse-engineer the original's design system into
-  `DESIGN.md` first (design-architect Foundation pass).
+- **3 layers / repository seam:** FE (server + client components) → a typed **Drizzle repository** per entity
+  (`lib/db/*`, the API seam over Supabase Postgres) → Supabase. Repositories take a server-derived `orgId`; never
+  thread raw queries or `org_id` from the client. Supabase clients in `lib/supabase/*` (server/admin/client/middleware).
+- **Authorization:** `middleware.ts` is the server-side gate (reads the Supabase session via `getUser()` + the
+  `route-policy` role table, fails closed). `can()`/policy in `lib/auth/*` is **UX only**. **RLS is a defense-in-depth
+  backstop** (`org_id = current_org()`), NOT the primary gate — the server stays the authority. Service-role key is
+  server-only (`lib/supabase/admin.ts`), never in a client/edge bundle.
+- **Destructive deletes / SoD:** soft-archive (`archived_at`) over hard-delete; FK-block referenced rows. Real SoD
+  (e.g. approver≠author) + destructive deletes (Admin-only) enforced server-side with an integration-test proof.
+- **UI:** strictly `DESIGN.md` tokens (no raw hex/px), reverse-engineered from the original.
 
 ## Tech stack & commands (run at repo root)
-- **Next.js 15 (App Router), React 19, TypeScript ~5.x, Tailwind CSS v4.** Backend: **Prisma + Postgres (Neon)**;
-  Auth: **NextAuth/Auth.js v5**. Locale: Indonesian (`id-ID`) — the original UI is in Bahasa Indonesia.
-- `pnpm dev` · `pnpm build` · `pnpm typecheck` · `pnpm lint:ci` · `pnpm test` (Vitest) · `pnpm e2e` (Playwright) ·
-  `pnpm db:migrate` · `pnpm db:deploy` · `pnpm db:studio`.
+- **Next.js 15 (App Router), React 19, TypeScript ~5.x, Tailwind CSS v4.** Backend: **Supabase + Drizzle**;
+  Auth **Supabase Auth**. Locale `id-ID`.
+- `pnpm dev` · `build` · `typecheck` · `lint:ci` · `test:unit` (Vitest) · `test:int` (Vitest vs the Supabase DB) ·
+  `e2e` (Playwright). DB: `pnpm sb:start`/`sb:stop` (Supabase CLI local stack), `pnpm exec supabase db reset`
+  (fresh re-apply — the CI path), `pnpm db:seed:supabase`, `pnpm dz:generate`/`dz:studio` (Drizzle query layer).
 - Commit trailer: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
+- **Delegation lane:** role work may be dispatched to **pi + GLM** to spare Claude quota — see `docs/pi-delegation.md`.
+  Cross-family review (codex) is preferred; security/RLS/money-path slices must NOT ship on same-family-only — the
+  Director (Claude) verifies those.
 
 ## Environments (binding — full rules: `docs/environments.md`)
-**Local Postgres (Docker) or a Neon dev branch = dev+test; the Neon main branch = prod.** Test on a throwaway DB
-(`pnpm db:migrate` against a local/branch DB); never run destructive migrations against prod without an explicit,
-typed confirm. Secrets (DATABASE_URL, NEXTAUTH_SECRET) live in env / the host's secret store — **never committed**.
-`.env.example` is the only env file in the repo.
+**Supabase CLI local stack (Docker) = dev + test** (a fresh `supabase db reset` applies all `supabase/migrations/` in
+order; CI provisions the same way). **Prod = a Supabase project (cloud-vs-self-host + Indonesia data-residency is
+deferred + owner-gated, ADR-0013).** Secrets (`SUPABASE_SERVICE_ROLE_KEY`, DB url, etc.) live in env / the host's
+secret store — **never committed**; the service-role key is never `NEXT_PUBLIC_*`. `.env.example` is the only env file
+in the repo.
 
 ## Masking (this is a public repo)
 Never commit the client's real brand name, logo, domain, member-tier names, or the source URL. Use `brand.config.ts`

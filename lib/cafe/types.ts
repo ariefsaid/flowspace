@@ -1,6 +1,6 @@
 /**
  * Shared type contract for the cafe domain (I-022).
- * Import enums from Prisma; define DTO shapes here.
+ * Import enums from @/lib/db/enums (the hand-authored source, ADR-0015); define DTO shapes here.
  */
 import type { CafeCategory, CafeOrderStatus, DrinkTemperature, SugarLevel } from "@/lib/db/enums";
 export type { CafeCategory, CafeOrderStatus, DrinkTemperature, SugarLevel };

@@ -53,8 +53,10 @@ export async function placeOrder(input: {
     });
   }
 
-  // Guest path — require a non-empty name
-  const guestName = (input.guestName ?? "").trim();
+  // Guest path — require a non-empty name (capped to a sane length; it is
+  // client-supplied and rendered on the KDS — React escapes it, but bound the
+  // stored/rendered size).
+  const guestName = (input.guestName ?? "").trim().slice(0, 60);
   if (!guestName) throw new Error("GUEST_NAME_REQUIRED");
 
   const slug = process.env.SEED_ORG_SLUG ?? "flowspace";

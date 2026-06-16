@@ -86,10 +86,16 @@ export async function createOrder(input: {
   // Guard: reject empty lines BEFORE any DB access
   if (!lines.length) throw new Error("EMPTY_ORDER");
 
-  // Guard: every line qty must be a positive integer. qty is client-supplied and
-  // is multiplied into the server-computed total — a negative/zero/fractional qty
-  // would manipulate the bill, so reject the whole order before any write ([SEC]).
-  if (lines.some((l) => !Number.isInteger(l.qty) || l.qty <= 0)) {
+  // Guard: every line qty must be a positive integer within a sane bound. qty is
+  // client-supplied and is multiplied into the server-computed total — a negative/
+  // zero/fractional qty would manipulate the bill, and an enormous qty overflows
+  // int4 (price × qty). Reject the whole order before any write ([SEC]).
+  const MAX_QTY_PER_LINE = 99;
+  if (
+    lines.some(
+      (l) => !Number.isInteger(l.qty) || l.qty <= 0 || l.qty > MAX_QTY_PER_LINE,
+    )
+  ) {
     throw new Error("INVALID_QUANTITY");
   }
 
@@ -102,10 +108,18 @@ export async function createOrder(input: {
     .select()
     .from(cafeMenuItems)
     .where(
-      and(eq(cafeMenuItems.orgId, orgId), inArray(cafeMenuItems.id, uniqueIds)),
+      and(
+        eq(cafeMenuItems.orgId, orgId),
+        inArray(cafeMenuItems.id, uniqueIds),
+        // Only orderable items: the venue's availability/archive contract is
+        // enforced server-side, not just hidden in listMenu ([SEC] business
+        // integrity — a captured id must not order a sold-out/archived item).
+        eq(cafeMenuItems.available, true),
+        isNull(cafeMenuItems.archivedAt),
+      ),
     );
 
-  // Reject if any line refers to an item that doesn't exist in this org
+  // Reject if any line refers to an item that is unknown, cross-org, or unorderable
   if (foundItems.length !== uniqueIds.length) {
     throw new Error("INVALID_MENU_ITEMS");
   }
@@ -169,7 +183,8 @@ export async function createOrder(input: {
       const isUniqueViolation =
         pgErr.code === "23505" ||
         (pgErr.message ?? "").includes("cafe_orders_org_id_code_key");
-      if (!isUniqueViolation || attempt === MAX_RETRIES - 1) throw err;
+      if (!isUniqueViolation) throw err;
+      if (attempt === MAX_RETRIES - 1) throw new Error("CODE_GENERATION_FAILED");
       // else: retry with a new code
     }
   }
@@ -203,12 +218,23 @@ export async function advanceOrderStatus(
   const next = nextStatus(order.status);
   if (!next) throw new Error("INVALID_TRANSITION");
 
+  // Compare-and-set on the status we read: if a concurrent actor (two baristas,
+  // a double-click, or a Realtime-driven re-render) already advanced this order,
+  // the WHERE matches 0 rows and we reject rather than silently overwriting a
+  // newer state with a stale forward step (lost-update guard).
   const [updated] = await db
     .update(cafeOrders)
     .set({ status: next, updatedAt: new Date() })
-    .where(and(eq(cafeOrders.id, id), eq(cafeOrders.orgId, orgId)))
+    .where(
+      and(
+        eq(cafeOrders.id, id),
+        eq(cafeOrders.orgId, orgId),
+        eq(cafeOrders.status, order.status),
+      ),
+    )
     .returning();
 
+  if (!updated) throw new Error("INVALID_TRANSITION");
   return updated;
 }
 

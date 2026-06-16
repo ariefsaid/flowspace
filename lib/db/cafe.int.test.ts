@@ -186,6 +186,12 @@ describe("lib/db/cafe", () => {
       // Latte (COFFEE) and Croissant (FOOD) should be present
       expect(names).toContain("Latte");
       expect(names).toContain("Croissant");
+      // Ordered by category then name (the AC-100 title's ordering claim).
+      const ordered = [...items].sort(
+        (a, b) =>
+          a.category.localeCompare(b.category) || a.name.localeCompare(b.name),
+      );
+      expect(items.map((i) => i.id)).toEqual(ordered.map((i) => i.id));
     });
 
     it("AC-100: listMenu org isolation — orgB call does not return orgA items", async () => {
@@ -262,7 +268,7 @@ describe("lib/db/cafe", () => {
     it("AC-112: createOrder rejects a non-positive / fractional qty (no total manipulation), no write", async () => {
       const [{ count: before }] = await testSql`
         select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
-      for (const badQty of [-1, 0, 1.5]) {
+      for (const badQty of [-1, 0, 1.5, 100, 3_000_000_000]) {
         await expect(
           createOrder({
             orgId: orgAId,
@@ -272,6 +278,32 @@ describe("lib/db/cafe", () => {
             discountEligible: false,
           }),
         ).rejects.toThrow(/INVALID_QUANTITY/);
+      }
+      const [{ count: after }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      expect(after).toBe(before);
+    });
+
+    it("AC-112: createOrder rejects an unavailable or archived item (orderability enforced), no write", async () => {
+      // Capture the seeded non-orderable item ids.
+      const seeded = await testDb
+        .select()
+        .from(cafeMenuItems)
+        .where(eq(cafeMenuItems.orgId, orgAId));
+      const hidden = seeded.find((i) => i.name === "HiddenItem")!; // available:false
+      const archived = seeded.find((i) => i.name === "ArchivedItem")!; // archivedAt set
+      const [{ count: before }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      for (const badId of [hidden.id, archived.id]) {
+        await expect(
+          createOrder({
+            orgId: orgAId,
+            customerUserId: aUserId,
+            guestName: null,
+            lines: [{ menuItemId: badId, qty: 1 }],
+            discountEligible: false,
+          }),
+        ).rejects.toThrow(/INVALID_MENU_ITEMS/);
       }
       const [{ count: after }] = await testSql`
         select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;

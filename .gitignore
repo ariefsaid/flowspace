@@ -52,3 +52,5 @@ landing.png
 
 # Personal local Claude settings
 .claude/settings.local.json
+supabase/.branches/
+supabase/.temp/

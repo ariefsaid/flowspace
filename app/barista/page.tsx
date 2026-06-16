@@ -76,5 +76,5 @@ export default async function BaristaPage() {
     })
     .filter((o): o is BaristaOrderView => o !== null);
 
-  return <BaristaClient initialOrders={orders} />;
+  return <BaristaClient initialOrders={orders} orgId={user.orgId} />;
 }

@@ -15,6 +15,11 @@ vi.mock("@/app/barista/actions", () => ({
   advanceOrderStatusAction: vi.fn().mockResolvedValue({}),
 }));
 
+// useKdsRealtime opens a Supabase Realtime channel — stub it out in unit tests.
+vi.mock("./useKdsRealtime", () => ({
+  useKdsRealtime: vi.fn(),
+}));
+
 const newOrder: BaristaOrderView = {
   id: "order-1",
   code: "#ab1234",
@@ -26,22 +31,22 @@ const newOrder: BaristaOrderView = {
 
 describe("BaristaClient (AC-101)", () => {
   it("AC-101: 'Pesanan Baru' column shows 1 when one NEW order is passed", () => {
-    render(<BaristaClient initialOrders={[newOrder]} />);
+    render(<BaristaClient initialOrders={[newOrder]} orgId="org-test" />);
     expect(screen.getByText(/pesanan baru \(1\)/i)).toBeInTheDocument();
   });
 
   it("AC-101: shows the order code from props (DB-sourced)", () => {
-    render(<BaristaClient initialOrders={[newOrder]} />);
+    render(<BaristaClient initialOrders={[newOrder]} orgId="org-test" />);
     expect(screen.getByText("#ab1234")).toBeInTheDocument();
   });
 
   it("AC-101: shows the order line from props", () => {
-    render(<BaristaClient initialOrders={[newOrder]} />);
+    render(<BaristaClient initialOrders={[newOrder]} orgId="org-test" />);
     expect(screen.getByText("Latte")).toBeInTheDocument();
   });
 
   it("shows empty state when no orders", () => {
-    render(<BaristaClient initialOrders={[]} />);
+    render(<BaristaClient initialOrders={[]} orgId="org-test" />);
     expect(screen.getByText(/belum ada pesanan/i)).toBeInTheDocument();
   });
 

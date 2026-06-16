@@ -7,6 +7,7 @@ import { brand } from "@/brand.config";
 import { cn } from "@/lib/cn";
 import { Button, Card } from "@/components/ui";
 import { advanceOrderStatusAction } from "@/app/barista/actions";
+import { useKdsRealtime } from "./useKdsRealtime";
 
 // ---------------------------------------------------------------------------
 // View shape — maps DB CafeOrder → what this component consumes
@@ -174,9 +175,12 @@ function KdsColumn({ status, orders, onAdvance, onComplete }: KdsColumnProps) {
 
 export interface BaristaClientProps {
   initialOrders: BaristaOrderView[];
+  /** Server-resolved org ID (from requireSession in page.tsx). [SEC] must be server-sourced. */
+  orgId: string;
 }
 
-export function BaristaClient({ initialOrders }: BaristaClientProps) {
+export function BaristaClient({ initialOrders, orgId }: BaristaClientProps) {
+  useKdsRealtime(orgId);
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [orders, setOrders] = useState<BaristaOrderView[]>(initialOrders);

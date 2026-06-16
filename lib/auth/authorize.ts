@@ -4,7 +4,7 @@
  * it pulls Prisma (via `lib/db/users`) and bcrypt.
  */
 import bcrypt from "bcryptjs";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/db/enums";
 import { findByEmail } from "@/lib/db/users";
 
 /**
@@ -47,7 +47,13 @@ export async function authorizeUser(creds: {
     return null;
   }
 
-  const ok = await bcrypt.compare(password, user.passwordHash);
+  // NOTE: passwordHash was removed in I-005 Phase 2 (Drizzle port); authorize.ts
+  // is deleted in Phase 6. Until then, fall through as if password doesn't match.
+  const storedHash = (user as Record<string, unknown>).passwordHash as
+    | string
+    | undefined;
+  if (!storedHash) return null;
+  const ok = await bcrypt.compare(password, storedHash);
   if (!ok) return null;
 
   return {

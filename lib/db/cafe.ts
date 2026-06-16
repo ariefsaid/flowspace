@@ -86,17 +86,20 @@ export async function createOrder(input: {
   // Guard: reject empty lines BEFORE any DB access
   if (!lines.length) throw new Error("EMPTY_ORDER");
 
-  // Look up each requested item within this org only (cross-org guard [SEC])
-  const ids = lines.map((l) => l.menuItemId);
+  // Look up each requested item within this org only (cross-org guard [SEC]).
+  // Validate against DISTINCT ids: a single item may appear on multiple lines
+  // (e.g. the same drink ordered in two variants — hot + cold), so comparing
+  // raw line count would falsely reject a legitimate multi-variant order.
+  const uniqueIds = [...new Set(lines.map((l) => l.menuItemId))];
   const foundItems = await db
     .select()
     .from(cafeMenuItems)
     .where(
-      and(eq(cafeMenuItems.orgId, orgId), inArray(cafeMenuItems.id, ids)),
+      and(eq(cafeMenuItems.orgId, orgId), inArray(cafeMenuItems.id, uniqueIds)),
     );
 
   // Reject if any line refers to an item that doesn't exist in this org
-  if (foundItems.length !== ids.length) {
+  if (foundItems.length !== uniqueIds.length) {
     throw new Error("INVALID_MENU_ITEMS");
   }
 

@@ -235,6 +235,30 @@ describe("lib/db/cafe", () => {
       expect(crossnt?.nameSnapshot).toBe("Croissant");
     });
 
+    it("AC-112: createOrder accepts the same item on two lines (multi-variant drink: hot + cold)", async () => {
+      // A member orders one Latte hot + one Latte cold — two lines, same menuItemId.
+      // The cross-org guard must validate distinct ids, not raw line count.
+      const order = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [
+          { menuItemId: latteAId, qty: 1, temperature: "HOT", sugar: "NORMAL" },
+          { menuItemId: latteAId, qty: 1, temperature: "COLD", sugar: "LESS" },
+        ],
+        discountEligible: false,
+      });
+      expect(order.subtotalRupiah).toBe(64000); // 32000 × 2
+      const items = await testDb
+        .select()
+        .from(cafeOrderItems)
+        .where(eq(cafeOrderItems.orderId, order.id));
+      expect(items).toHaveLength(2);
+      expect(items.filter((i) => i.menuItemId === latteAId)).toHaveLength(2);
+      const temps = items.map((i) => i.temperature).sort();
+      expect(temps).toEqual(["COLD", "HOT"]);
+    });
+
     it("AC-125: createOrder rejects a menuItemId from another org (no cross-org pricing)", async () => {
       await expect(
         createOrder({

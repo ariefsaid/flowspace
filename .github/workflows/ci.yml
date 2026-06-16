@@ -31,31 +31,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# A non-placeholder secret (the prod guard in lib/auth.ts throws on known placeholders).
-env:
-  NEXTAUTH_SECRET: ci-secret-not-a-placeholder-0123456789abcdef
-  NEXTAUTH_URL: http://localhost:3000
-  AUTH_TRUST_HOST: 'true'
-
 jobs:
+  # Lightweight gate: type, lint, unit, build. No DB / Supabase stack needed.
   quality:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: flowspace
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 20
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/flowspace?schema=public
-      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/flowspace?schema=public
-      # Integration tests truncate between runs, so they can target the same DB.
-      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/flowspace?schema=public
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -64,32 +43,28 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm db:generate
       - run: pnpm typecheck
       - run: pnpm lint:ci
-      - name: Apply migrations
-        run: pnpm db:deploy
       - run: pnpm test:unit
-      - name: Integration tests (real Postgres)
-        run: pnpm test:int
       - run: pnpm build
 
-  e2e:
+  # Integration + e2e against the Supabase CLI local stack (Docker on the runner).
+  # drizzle-kit owns the app-table DDL; supabase/migrations owns the auth-link FK,
+  # RLS and Storage platform wiring (ADR-0015 §2). The stack does not auto-apply
+  # supabase/migrations for an unlinked local project, so the platform migrations
+  # are applied explicitly in order after drizzle (scripts/apply-supabase-migrations.mjs).
+  integration-and-e2e:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: flowspace
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/flowspace?schema=public
-      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/flowspace?schema=public
+      # Local Supabase CLI demo values (non-secret JWTs printed by `supabase status`;
+      # identical on every local stack — safe to commit; prod supplies real values).
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:64321
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
+      SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:64322/postgres
+      TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:64322/postgres
+      AUTH_TRUST_HOST: 'true'
+      SEED_ORG_SLUG: flowspace
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -98,10 +73,26 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm db:generate
-      - name: Migrate + seed the e2e DB
-        run: pnpm db:deploy && pnpm db:seed
-      - run: pnpm exec playwright install --with-deps chromium
-      - name: Build (the webServer runs `pnpm start`)
+
+      - name: Start Supabase local stack (Postgres + Auth + Storage + Realtime)
+        run: pnpm exec supabase start
+        timeout-minutes: 10
+
+      - name: Apply drizzle app-table migrations
+        run: pnpm dz:migrate
+
+      - name: Apply supabase platform migrations (auth-link FK / RLS / Storage)
+        run: node scripts/apply-supabase-migrations.mjs
+
+      - name: Seed (org + 3 auth/app users)
+        run: pnpm db:seed:supabase
+
+      - name: Integration tests (real Supabase stack)
+        run: pnpm test:int
+
+      - name: Build (the Playwright webServer runs `pnpm start`)
         run: pnpm build
-      - run: pnpm e2e
+
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: e2e (Playwright)
+        run: pnpm e2e

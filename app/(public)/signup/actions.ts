@@ -73,6 +73,12 @@ export async function signupAction(input: {
   // unique(email)/unique(auth_user_id) constraints (23505) are the real guard —
   // map the violation to the same duplicate error so both paths are
   // indistinguishable to the caller.
+  //
+  // M-3 (transactional): if the profile insert fails for ANY reason after the
+  // auth user was just created, we DELETE that auth user so no orphan identity
+  // is left behind (an auth.users row with no app_users profile). The FK
+  // app_users_auth_user_fk (0001) is what makes a dangling auth row an orphan
+  // risk in the first place — this cleanup is the counterpart.
   try {
     await createMember({
       orgId: org.id,
@@ -81,6 +87,7 @@ export async function signupAction(input: {
       name: input.name.trim(),
     });
   } catch (e) {
+    await admin.auth.admin.deleteUser(data.user.id);
     if (isUniqueViolation(e)) {
       return { error: "Email sudah terdaftar." };
     }

@@ -72,12 +72,22 @@ afterAll(async () => {
 // ---------------------------------------------------------------------------
 // Import the repository functions under test
 // ---------------------------------------------------------------------------
+import { createClient } from "@supabase/supabase-js";
 import {
   findByEmail,
   findById,
   listByOrg,
   createMember,
 } from "@/lib/db/users";
+
+const SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:64321";
+const SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ??
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
+const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
 
 describe("lib/db/users", () => {
   describe("findByEmail", () => {
@@ -129,14 +139,29 @@ describe("lib/db/users", () => {
       expect(names).not.toContain("password");
       expect(names).not.toContain("password_hash");
 
+      // M-3: the app_users.auth_user_id → auth.users(id) FK is live, so createMember
+      // must reference a REAL auth.users row (not a random uuid) — seed one first.
+      // Unique email so a leftover auth user from a prior run can't collide.
+      const email = `newmember-${Date.now()}@x.test`;
+      const { data, error } = await admin.auth.admin.createUser({
+        email,
+        password: "secret123",
+        email_confirm: true,
+      });
+      expect(error).toBeNull();
+      const authUserId = data.user!.id;
+
       const user = await createMember({
         orgId: orgAId,
-        authUserId: crypto.randomUUID(),
-        email: "newmember@x.test",
+        authUserId,
+        email,
         name: "New Member",
       });
       expect((user as Record<string, unknown>).password).toBeUndefined();
       expect((user as Record<string, unknown>).passwordHash).toBeUndefined();
+
+      // Clean up the auth user so the local stack stays reusable.
+      await admin.auth.admin.deleteUser(authUserId);
     });
   });
 });

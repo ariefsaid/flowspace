@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSession, signOut } from "next-auth/react";
+import { useSession } from "@/components/providers/SessionProvider";
 import {
   LayoutDashboard,
   Users,
@@ -39,10 +39,10 @@ const navItems: NavItem[] = [
 
 export function AdminHeader() {
   const pathname = usePathname();
-  const { data: session } = useSession();
+  const { name, signOut } = useSession();
 
   function handleSignOut() {
-    void signOut({ callbackUrl: "/login" });
+    void signOut();
   }
 
   return (
@@ -79,7 +79,7 @@ export function AdminHeader() {
 
         <div className="flex items-center gap-3">
           <span className="hidden text-sm font-medium text-gray-700 sm:inline">
-            {session?.user?.name ?? `Admin ${brand.name}`}
+            {name ?? `Admin ${brand.name}`}
           </span>
           <Button variant="danger" size="sm" onClick={handleSignOut}>
             <LogOut className="h-4 w-4" aria-hidden="true" />

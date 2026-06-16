@@ -1,4 +1,4 @@
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/db/enums";
 
 /**
  * UX-ONLY authorization helper. NOT the security boundary — the server

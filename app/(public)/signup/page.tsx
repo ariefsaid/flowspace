@@ -1,26 +1,56 @@
 'use client';
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { User, Mail, Phone, Lock, CheckCircle2 } from "lucide-react";
+import { signIn } from "next-auth/react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { brand } from "@/brand.config";
+import { signupAction } from "./actions";
 
 export default function SignupPage() {
-  const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  // `phone` is collected for UI parity with the original but intentionally NOT
+  // persisted: there is no phone column in the current AppUser schema scope.
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    router.push("/dashboard");
+    setError(null);
+
+    // Client-side confirmation check (FR-004)
+    if (password !== confirmPassword) {
+      setError("Konfirmasi kata sandi tidak cocok.");
+      return;
+    }
+
+    setPending(true);
+    try {
+      const res = await signupAction({ name, email, password });
+
+      if ("error" in res) {
+        setError(res.error); // AC-005: duplicate email, short password, etc.
+        return;
+      }
+
+      // AC-004: user created → sign in immediately → middleware routes to /dashboard
+      await signIn("credentials", {
+        email,
+        password,
+        callbackUrl: "/dashboard",
+        redirect: true, // allow NextAuth to handle the redirect
+      });
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -37,6 +67,16 @@ export default function SignupPage() {
               </p>
             </div>
           </div>
+
+          {/* Error banner */}
+          {error && (
+            <div
+              role="alert"
+              className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+              {error}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-3">
             {/* Nama Lengkap */}
@@ -155,8 +195,9 @@ export default function SignupPage() {
               variant="primary"
               size="lg"
               className="mt-2 w-full"
+              disabled={pending}
             >
-              Buat Akun
+              {pending ? "Memproses…" : "Buat Akun"}
             </Button>
           </form>
 

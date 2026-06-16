@@ -1,22 +1,48 @@
 'use client';
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Mail, Lock } from "lucide-react";
+import { signIn, getSession } from "next-auth/react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { roleHome } from "@/lib/auth/route-policy";
+import type { Role } from "@prisma/client";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    router.push("/dashboard");
+    setError(null);
+    setPending(true);
+
+    try {
+      // signIn with redirect:false so we can handle routing client-side.
+      const result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+      });
+
+      if (!result || result.error) {
+        // AC-003: same generic message for unknown email AND wrong password — no enumeration.
+        setError("Email atau kata sandi salah.");
+        return;
+      }
+
+      // Read the freshly-minted session to determine the user's role,
+      // then navigate to their role-home (FR-003 / AC-002).
+      const session = await getSession();
+      window.location.href = roleHome((session?.user?.role ?? "MEMBER") as Role);
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -33,6 +59,16 @@ export default function LoginPage() {
               </p>
             </div>
           </div>
+
+          {/* Generic auth error (AC-003) */}
+          {error && (
+            <div
+              role="alert"
+              className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+              {error}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Email */}
@@ -85,8 +121,9 @@ export default function LoginPage() {
               variant="primary"
               size="lg"
               className="mt-2 w-full"
+              disabled={pending}
             >
-              Masuk
+              {pending ? "Memproses…" : "Masuk"}
             </Button>
           </form>
 

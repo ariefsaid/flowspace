@@ -13,14 +13,35 @@ export default defineConfig({
     },
   },
   test: {
-    environment: "jsdom",
     globals: true,
-    setupFiles: ["./vitest.setup.ts"],
-    include: ["**/*.{test,spec}.{ts,tsx}"],
-    exclude: ["**/node_modules/**", "**/.next/**", "e2e/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
     },
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          environment: "jsdom",
+          setupFiles: ["./vitest.setup.ts"],
+          include: ["**/*.{test,spec}.{ts,tsx}"],
+          exclude: ["**/node_modules/**", "**/.next/**", "e2e/**", "**/*.int.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "integration",
+          environment: "node",
+          setupFiles: ["./vitest.setup.int.ts"],
+          include: ["**/*.int.test.ts"],
+          exclude: ["**/node_modules/**", "**/.next/**"],
+          // Integration files share one throwaway DB; run them serially so
+          // their TRUNCATE/seed lifecycles never interleave across files.
+          poolOptions: { forks: { singleFork: true } },
+        },
+      },
+    ],
   },
 });

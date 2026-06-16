@@ -49,10 +49,11 @@ jobs:
       - run: pnpm build
 
   # Integration + e2e against the Supabase CLI local stack (Docker on the runner).
-  # drizzle-kit owns the app-table DDL; supabase/migrations owns the auth-link FK,
-  # RLS and Storage platform wiring (ADR-0015 §2). The stack does not auto-apply
-  # supabase/migrations for an unlinked local project, so the platform migrations
-  # are applied explicitly in order after drizzle (scripts/apply-supabase-migrations.mjs).
+  # `supabase start` auto-applies EVERY supabase/migrations/*.sql in filename
+  # order at DB init, so the full schema — app DDL (0000_app_schema) + auth-link
+  # FK + RLS + Storage (ADR-0015 §2, revised) — is provisioned by start ALONE.
+  # drizzle-orm remains the query layer; drizzle-kit is no longer the DDL
+  # authority and is not run in CI.
   integration-and-e2e:
     runs-on: ubuntu-latest
     env:
@@ -74,21 +75,22 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: Start Supabase local stack (Postgres + Auth + Storage + Realtime)
+      # `supabase start` provisions the entire schema by applying
+      # supabase/migrations/*.sql (0000_app_schema → 0001-0004) in order on a
+      # fresh DB. No drizzle/apply step: migrations own the DDL now.
+      - name: Start Supabase local stack (applies all migrations, fresh)
         run: pnpm exec supabase start
         timeout-minutes: 10
 
-      - name: Apply drizzle app-table migrations
-        run: pnpm dz:migrate
-
-      - name: Apply supabase platform migrations (auth-link FK / RLS / Storage)
-        run: node scripts/apply-supabase-migrations.mjs
-
-      - name: Seed (org + 3 auth/app users)
-        run: pnpm db:seed:supabase
-
+      # Integration tests are hermetic: they seed+truncate their own rows in
+      # beforeAll/afterAll, so they run against the schema-only DB (start). They
+      # MUST run before `db:seed:supabase` — their afterAll truncates
+      # app_users/organizations and would otherwise wipe the e2e seed.
       - name: Integration tests (real Supabase stack)
         run: pnpm test:int
+
+      - name: Seed (org + 3 auth/app users) for build + e2e
+        run: pnpm db:seed:supabase
 
       - name: Build (the Playwright webServer runs `pnpm start`)
         run: pnpm build

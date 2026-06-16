@@ -27,6 +27,15 @@ server is authoritative. Both are settled here so the rest of I-005 has no open 
   `DATABASE_URL` (the Supabase pooled connection). Repositories import `db` from there as before.
 
 ### 2. drizzle-kit owns migrations (not Supabase migrations) — **DECISION FLAGGED (OQ-B)**
+
+> **Revision (2026-06-16, I-005 CI fix):** the app DDL (`organizations`, `app_users`, enums) is **consolidated into
+> `supabase/migrations/0000_app_schema.sql`** — the single, ordered source of truth that a fresh `supabase start`
+> applies cleanly in one pass. `drizzle-orm` remains the **query layer** (`lib/db/schema.ts`); `drizzle-kit` is **no
+> longer the DDL authority** (the `drizzle/` artifacts are retained as reference/legacy, not run in CI). This un-does
+> the two-directory split below: a single ordered `supabase/migrations/` stream owns all DDL + platform wiring,
+> which is what a fresh `supabase start` actually applies. The `*.down.sql` pairs were removed from the apply path
+> (moved to `supabase/migrations/_down/`) because the Supabase CLI has no down-migration concept and applied them
+> as forward migrations on a fresh stack (CI failure I-005).
 - **Chosen:** `drizzle-kit generate` emits SQL migrations under `drizzle/` from the Drizzle schema; they are the
   single source of truth for application tables (`organizations`, `app_users`), applied with `drizzle-kit migrate`
   in dev/CI and against prod.

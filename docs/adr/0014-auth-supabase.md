@@ -34,7 +34,18 @@ still pass on the new stack.
   `app_users` row in the same request. Rationale: a trigger cannot supply `org_id` (resolved from the seeded org
   server-side) without coupling auth schema to app schema, and the server is already the enforcement authority.
   The `app_users.auth_user_id` unique constraint is the integrity backstop if a partial failure occurs (re-running
-  signup upserts the profile rather than duplicating it).
+  signup upserts the profile rather than duplicating it). The signup action is **transactional on failure**: if the
+  profile insert fails after `admin.createUser` succeeds, the just-created auth user is deleted (`admin.deleteUser`)
+  so no orphan identity is left behind (the `app_users_auth_user_fk` ON DELETE CASCADE FK is live).
+
+- **`app_metadata` (role / org_id) is admin-API-only — NEVER client-writable.** The `role` and `org_id` JWT claims
+  the edge gate and RLS trust are set **only** via the service-role admin API (`admin.createUser`/
+  `admin.updateUserById`) at signup and on a server-side role change. No client-reachable (`"use client"`) module
+  may call `auth.updateUser` with `app_metadata`/`role`/`org_id` — that would let a user forge their own
+  role/tenant claim and escalate privileges. The guard test
+  `lib/supabase/no-client-metadata-write.test.ts` scans the source and fails if any client module ever does. **Prod
+  GoTrue MUST NOT run any hook that copies `user_metadata` → `app_metadata`** (that would re-open the same
+  self-elevation hole); app_metadata is written solely by the server admin API.
 
 ### 2. Session shape contract is preserved at the `lib/auth/session.ts` seam
 The rest of the app consumes a trusted server-resolved user `{ id, role, orgId, email, name }` — unchanged from

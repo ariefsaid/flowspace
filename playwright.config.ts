@@ -54,8 +54,7 @@ export default defineConfig({
         process.env.SUPABASE_SERVICE_ROLE_KEY ?? LOCAL_SERVICE_ROLE_KEY,
       DATABASE_URL:
         process.env.DATABASE_URL ?? LOCAL_DB_URL,
-      // NextAuth legacy: keep AUTH_TRUST_HOST so pnpm start doesn't panic
-      // on localhost (non-HTTPS). Remove in Phase 6 once next-auth is gone.
+      // Supabase local stack (and `next start`) needs this on localhost (non-HTTPS).
       AUTH_TRUST_HOST: "true",
     },
   },

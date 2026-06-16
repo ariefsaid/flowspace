@@ -19,33 +19,23 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "e2e": "playwright test",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts",
-    "db:studio": "prisma studio",
+    "db:seed": "tsx scripts/seed-supabase.ts",
     "sb:start": "supabase start --ignore-health-check",
     "sb:stop": "supabase stop",
     "dz:generate": "drizzle-kit generate",
     "dz:migrate": "drizzle-kit migrate",
     "dz:studio": "drizzle-kit studio",
-    "db:seed:supabase": "tsx scripts/seed-supabase.ts",
-    "postinstall": "prisma generate"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "db:seed:supabase": "tsx scripts/seed-supabase.ts"
   },
   "dependencies": {
     "@paralleldrive/cuid2": "^3.3.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.50.0",
-    "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
     "drizzle-orm": "^0.44.1",
     "lucide-react": "^1.18.0",
     "next": "^15.5.4",
-    "next-auth": "^5.0.0-beta.29",
     "postgres": "^3.4.7",
     "qrcode.react": "^4.2.0",
     "react": "^19.1.0",
@@ -57,11 +47,9 @@
     "@eslint/js": "^9.37.0",
     "@next/eslint-plugin-next": "^16.2.9",
     "@playwright/test": "^1.56.0",
-    "@prisma/client": "^6.18.0",
     "@tailwindcss/postcss": "^4.1.16",
     "@testing-library/jest-dom": "^6.9.0",
     "@testing-library/react": "^16.3.0",
-    "@types/bcryptjs": "^3.0.0",
     "@types/node": "^22.18.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
@@ -73,7 +61,6 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "jsdom": "^27.0.0",
     "prettier": "^3.6.2",
-    "prisma": "^6.18.0",
     "supabase": "^2.23.4",
     "tailwindcss": "^4.1.16",
     "tsx": "^4.22.4",
@@ -83,10 +70,7 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "@prisma/client",
-      "@prisma/engines",
       "esbuild",
-      "prisma",
       "sharp",
       "unrs-resolver"
     ]

@@ -86,6 +86,13 @@ export async function createOrder(input: {
   // Guard: reject empty lines BEFORE any DB access
   if (!lines.length) throw new Error("EMPTY_ORDER");
 
+  // Guard: every line qty must be a positive integer. qty is client-supplied and
+  // is multiplied into the server-computed total — a negative/zero/fractional qty
+  // would manipulate the bill, so reject the whole order before any write ([SEC]).
+  if (lines.some((l) => !Number.isInteger(l.qty) || l.qty <= 0)) {
+    throw new Error("INVALID_QUANTITY");
+  }
+
   // Look up each requested item within this org only (cross-org guard [SEC]).
   // Validate against DISTINCT ids: a single item may appear on multiple lines
   // (e.g. the same drink ordered in two variants — hot + cold), so comparing

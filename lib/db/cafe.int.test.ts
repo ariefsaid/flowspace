@@ -259,6 +259,25 @@ describe("lib/db/cafe", () => {
       expect(temps).toEqual(["COLD", "HOT"]);
     });
 
+    it("AC-112: createOrder rejects a non-positive / fractional qty (no total manipulation), no write", async () => {
+      const [{ count: before }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      for (const badQty of [-1, 0, 1.5]) {
+        await expect(
+          createOrder({
+            orgId: orgAId,
+            customerUserId: aUserId,
+            guestName: null,
+            lines: [{ menuItemId: latteAId, qty: badQty }],
+            discountEligible: false,
+          }),
+        ).rejects.toThrow(/INVALID_QUANTITY/);
+      }
+      const [{ count: after }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      expect(after).toBe(before);
+    });
+
     it("AC-125: createOrder rejects a menuItemId from another org (no cross-org pricing)", async () => {
       await expect(
         createOrder({

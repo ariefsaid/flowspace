@@ -24,24 +24,35 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
+    "sb:start": "supabase start",
+    "sb:stop": "supabase stop",
+    "dz:generate": "drizzle-kit generate",
+    "dz:migrate": "drizzle-kit migrate",
+    "dz:studio": "drizzle-kit studio",
     "postinstall": "prisma generate"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.50.0",
+    "@supabase/ssr": "^0.6.1",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
+    "drizzle-orm": "^0.44.1",
     "lucide-react": "^1.18.0",
     "next": "^15.5.4",
     "next-auth": "^5.0.0-beta.29",
+    "postgres": "^3.4.7",
     "qrcode.react": "^4.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "drizzle-kit": "^0.31.1",
+    "supabase": "^2.23.4",
     "@eslint/eslintrc": "^3.3.1",
     "@eslint/js": "^9.37.0",
     "@next/eslint-plugin-next": "^16.2.9",

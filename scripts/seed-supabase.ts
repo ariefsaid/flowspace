@@ -19,8 +19,8 @@ import { createClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { eq } from "drizzle-orm";
-import { organizations, appUsers } from "@/lib/db/schema";
-import type { Role, MembershipTier } from "@/lib/db/enums";
+import { organizations, appUsers, cafeMenuItems } from "@/lib/db/schema";
+import type { Role, MembershipTier, CafeCategory } from "@/lib/db/enums";
 import { createId } from "@paralleldrive/cuid2";
 
 // ---------------------------------------------------------------------------
@@ -85,6 +85,45 @@ const SEED_USERS: Array<{
 ];
 
 // ---------------------------------------------------------------------------
+// Cafe menu (I-022, FR-103). The 16 captured items from lib/mock/cafe.ts, seeded
+// into the org so all three menu surfaces render against real rows. Deterministic
+// id (`<orgId>__<slug>`) → idempotent (no-op if the row already exists).
+// ---------------------------------------------------------------------------
+const CATEGORY_MAP: Record<string, CafeCategory> = {
+  Coffee: "COFFEE",
+  "Non-Coffee": "NON_COFFEE",
+  Food: "FOOD",
+  Snack: "SNACK",
+};
+
+const CAFE_MENU: Array<{
+  slug: string;
+  name: string;
+  emoji: string;
+  category: string;
+  price: number;
+  description: string;
+  hasVariants: boolean;
+}> = [
+  { slug: "americano", name: "Americano", emoji: "☕", category: "Coffee", price: 25000, description: "Espresso dengan air panas, pahit yang bersih.", hasVariants: true },
+  { slug: "latte", name: "Latte", emoji: "🥛", category: "Coffee", price: 32000, description: "Espresso lembut dengan susu steamed.", hasVariants: true },
+  { slug: "cappuccino", name: "Cappuccino", emoji: "☕", category: "Coffee", price: 30000, description: "Espresso dengan foam susu tebal.", hasVariants: true },
+  { slug: "espresso", name: "Espresso", emoji: "☕", category: "Coffee", price: 20000, description: "Shot espresso pekat, sajian klasik.", hasVariants: true },
+  { slug: "matcha", name: "Matcha Latte", emoji: "🍵", category: "Non-Coffee", price: 35000, description: "Matcha premium dengan susu segar.", hasVariants: true },
+  { slug: "chocolate", name: "Chocolate", emoji: "🍫", category: "Non-Coffee", price: 28000, description: "Cokelat kental hangat atau dingin.", hasVariants: true },
+  { slug: "orange-juice", name: "Orange Juice", emoji: "🍊", category: "Non-Coffee", price: 22000, description: "Jus jeruk peras segar tanpa gula tambahan.", hasVariants: true },
+  { slug: "lemon-tea", name: "Lemon Tea", emoji: "🍋", category: "Non-Coffee", price: 20000, description: "Teh dengan perasan lemon segar.", hasVariants: true },
+  { slug: "tempe-orek", name: "Tempe Orek", emoji: "🍱", category: "Food", price: 4500, description: "Tempe manis pedas, lauk pendamping.", hasVariants: false },
+  { slug: "croissant", name: "Croissant", emoji: "🥐", category: "Food", price: 25000, description: "Croissant butter renyah, baru dipanggang.", hasVariants: false },
+  { slug: "sandwich", name: "Sandwich", emoji: "🥪", category: "Food", price: 35000, description: "Roti isi ayam, telur, dan sayuran.", hasVariants: false },
+  { slug: "salad", name: "Salad", emoji: "🥗", category: "Food", price: 45000, description: "Salad sayur segar dengan dressing.", hasVariants: false },
+  { slug: "nasi-rames", name: "Nasi Rames", emoji: "🍛", category: "Food", price: 40000, description: "Nasi dengan aneka lauk lengkap.", hasVariants: false },
+  { slug: "mie-goreng", name: "Mie Goreng", emoji: "🍜", category: "Food", price: 38000, description: "Mie goreng bumbu spesial dengan telur.", hasVariants: false },
+  { slug: "tahu-goreng", name: "Tahu Goreng", emoji: "🧆", category: "Snack", price: 25000, description: "Tahu goreng renyah dengan sambal.", hasVariants: false },
+  { slug: "chicken-wings", name: "Chicken Wings", emoji: "🍗", category: "Snack", price: 35000, description: "Sayap ayam goreng bumbu pedas manis.", hasVariants: false },
+];
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
@@ -93,7 +132,7 @@ async function main() {
   });
 
   const sql = postgres(DATABASE_URL, { prepare: false });
-  const db = drizzle(sql, { schema: { organizations, appUsers } });
+  const db = drizzle(sql, { schema: { organizations, appUsers, cafeMenuItems } });
 
   // -- Org upsert (by slug) --------------------------------------------------
   const [existing] = await db
@@ -187,6 +226,31 @@ async function main() {
   }
 
   console.log(`\nSeeded org "${SEED_ORG_SLUG}" with ${SEED_USERS.length} users.`);
+
+  // -- Cafe menu (FR-103) — idempotent, deterministic id ---------------------
+  for (const m of CAFE_MENU) {
+    const id = `${org.id}__${m.slug}`;
+    const [existingItem] = await db
+      .select()
+      .from(cafeMenuItems)
+      .where(eq(cafeMenuItems.id, id))
+      .limit(1);
+
+    if (!existingItem) {
+      await db.insert(cafeMenuItems).values({
+        id,
+        orgId: org.id,
+        name: m.name,
+        emoji: m.emoji,
+        category: CATEGORY_MAP[m.category],
+        priceRupiah: m.price,
+        description: m.description,
+        hasVariants: m.hasVariants,
+      });
+    }
+  }
+  console.log(`Seeded ${CAFE_MENU.length} cafe menu items into "${org.slug}".`);
+
   await sql.end();
 }
 

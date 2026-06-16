@@ -78,6 +78,22 @@ async function selectUsersScoped(
   });
 }
 
+/**
+ * Same scoped pattern as selectUsersScoped, but over `organizations` — proves the
+ * M-2 organizations RLS backstop: an authenticated request scoped to org A can
+ * read ONLY its own organization row, never org B's.
+ */
+async function selectOrgsScoped(
+  orgId: string
+): Promise<{ id: string; name: string }[]> {
+  const claims = JSON.stringify({ org_id: orgId }).replace(/'/g, "''");
+  return rootSql.begin(async (tx) => {
+    await tx.unsafe(`SET LOCAL ROLE authenticated`);
+    await tx.unsafe(`SET LOCAL "request.jwt.claims" = '${claims}'`);
+    return tx<{ id: string; name: string }[]>`SELECT id, name FROM organizations`;
+  });
+}
+
 describe("RLS backstop — org isolation on app_users", () => {
   it("AC-021 (RLS backstop): scoped role sees only its org's rows", async () => {
     const rows = await selectUsersScoped(orgAId);
@@ -91,5 +107,28 @@ describe("RLS backstop — org isolation on app_users", () => {
     const emails = rows.map((r) => r.email);
     expect(emails).toContain("a@x.test");
     expect(emails).toContain("b@x.test");
+  });
+});
+
+describe("RLS backstop — org isolation on organizations (M-2)", () => {
+  it("M-2: a scoped authenticated role sees ONLY its own organization row", async () => {
+    // Claim = org A → may read org A's row, never org B's.
+    const rowsA = await selectOrgsScoped(orgAId);
+    const idsA = rowsA.map((r) => r.id);
+    expect(idsA).toContain(orgAId);
+    expect(idsA).not.toContain(orgBId); // org B hidden by the new RLS policy
+
+    // And the symmetric check from org B's perspective.
+    const rowsB = await selectOrgsScoped(orgBId);
+    const idsB = rowsB.map((r) => r.id);
+    expect(idsB).toContain(orgBId);
+    expect(idsB).not.toContain(orgAId);
+  });
+
+  it("M-2: the privileged connection (server authority) still sees all orgs", async () => {
+    const rows = await rootDb.select().from(organizations);
+    const ids = rows.map((r) => r.id);
+    expect(ids).toContain(orgAId);
+    expect(ids).toContain(orgBId);
   });
 });

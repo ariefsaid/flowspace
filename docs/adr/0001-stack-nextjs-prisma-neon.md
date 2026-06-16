@@ -1,6 +1,6 @@
 # ADR-0001 — Stack: Next.js + Prisma + Postgres (Neon)
 
-- Status: Accepted
+- Status: **Superseded (backend) by [ADR-0013](0013-backend-platform-supabase.md)** — the frontend stack (Next.js 15 / React 19 / Tailwind) stands; the Prisma + Neon + NextAuth backend is replaced by Supabase + Drizzle + Supabase Auth (server-authoritative). Accepted 2026-06-15.
 - Date: 2026-06-15
 
 ## Context

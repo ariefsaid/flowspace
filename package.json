@@ -29,6 +29,7 @@
     "dz:generate": "drizzle-kit generate",
     "dz:migrate": "drizzle-kit migrate",
     "dz:studio": "drizzle-kit studio",
+    "db:seed:supabase": "tsx scripts/seed-supabase.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {

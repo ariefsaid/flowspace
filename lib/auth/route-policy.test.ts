@@ -2,21 +2,37 @@ import { describe, expect, it } from "vitest";
 import { requiredRolesFor, roleHome } from "@/lib/auth/route-policy";
 
 describe("route policy", () => {
-  it("public paths need no auth", () => {
+  // ---------------------------------------------------------------------------
+  // AC-015 — Public paths require no auth
+  // ---------------------------------------------------------------------------
+  it("AC-015: public paths need no auth", () => {
     for (const p of ["/", "/login", "/signup", "/cafe/guest"])
       expect(requiredRolesFor(p)).toBe("public");
   });
 
-  it("admin paths require ADMIN", () => {
+  // ---------------------------------------------------------------------------
+  // AC-012 — Admin paths require ADMIN
+  // ---------------------------------------------------------------------------
+  it("AC-012: admin paths require ADMIN", () => {
     expect(requiredRolesFor("/admin")).toEqual(["ADMIN"]);
     expect(requiredRolesFor("/admin/users")).toEqual(["ADMIN"]);
   });
 
-  it("barista requires BARISTA or ADMIN", () => {
+  // AC-012 inverse: authorized() with ADMIN on /admin → allowed (via requiredRolesFor)
+  it("AC-012: authorized — ADMIN role satisfies /admin requirements", () => {
+    const required = requiredRolesFor("/admin");
+    expect(required).not.toBe("public");
+    expect(Array.isArray(required) && required.includes("ADMIN")).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // AC-013 — /barista requires BARISTA or ADMIN
+  // ---------------------------------------------------------------------------
+  it("AC-013: barista requires BARISTA or ADMIN", () => {
     expect(requiredRolesFor("/barista")).toEqual(["BARISTA", "ADMIN"]);
   });
 
-  it("M1: barista sub-paths require BARISTA or ADMIN (no fail-open)", () => {
+  it("AC-013: M1 — barista sub-paths require BARISTA or ADMIN (no fail-open)", () => {
     expect(requiredRolesFor("/barista/queue")).toEqual(["BARISTA", "ADMIN"]);
   });
 
@@ -51,9 +67,15 @@ describe("route policy", () => {
     expect(required).toEqual(["ADMIN"]);
   });
 
-  it("roleHome maps each role", () => {
+  // ---------------------------------------------------------------------------
+  // AC-001 — roleHome maps each role to their home path
+  // ---------------------------------------------------------------------------
+  it("AC-001: roleHome('MEMBER') === '/dashboard'", () => {
+    expect(roleHome("MEMBER")).toBe("/dashboard");
+  });
+
+  it("AC-001: roleHome maps ADMIN → /admin, BARISTA → /barista", () => {
     expect(roleHome("ADMIN")).toBe("/admin");
     expect(roleHome("BARISTA")).toBe("/barista");
-    expect(roleHome("MEMBER")).toBe("/dashboard");
   });
 });

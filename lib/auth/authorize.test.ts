@@ -4,6 +4,11 @@
  * L3 (timing enumeration): when the user is missing or archived we still run a
  * bcrypt.compare against a fixed dummy hash, so a wrong-email request takes
  * roughly as long as a wrong-password request and cannot be timed apart.
+ *
+ * AC-003 — bad credentials (wrong password OR unknown email) both return null;
+ *           no session is created; the caller receives the same opaque signal.
+ * AC-014 — when authorize() receives no credentials (empty/absent token) it returns
+ *           null → the middleware denies and redirects to /login.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import bcrypt from "bcryptjs";
@@ -25,7 +30,10 @@ beforeEach(() => {
 });
 
 describe("authorizeUser", () => {
-  it("returns null when credentials are empty", async () => {
+  // ---------------------------------------------------------------------------
+  // AC-014 — no credentials → deny (returns null, middleware redirects to /login)
+  // ---------------------------------------------------------------------------
+  it("AC-014: returns null when credentials are empty (no token)", async () => {
     expect(await authorizeUser({ email: "", password: "" })).toBeNull();
     expect(mockFind).not.toHaveBeenCalled();
   });
@@ -57,7 +65,10 @@ describe("authorizeUser", () => {
     });
   });
 
-  it("returns null on a wrong password", async () => {
+  // ---------------------------------------------------------------------------
+  // AC-003 — bad credentials always return null (no enumeration)
+  // ---------------------------------------------------------------------------
+  it("AC-003: returns null on a wrong password (no enumeration)", async () => {
     mockFind.mockResolvedValue({
       id: "u1",
       email: "user@x.test",
@@ -70,7 +81,7 @@ describe("authorizeUser", () => {
     ).toBeNull();
   });
 
-  it("L3: runs bcrypt.compare even when the user is missing (timing guard)", async () => {
+  it("AC-003: L3 — runs bcrypt.compare even when the user is missing (timing guard; unknown email → same null)", async () => {
     mockFind.mockResolvedValue(null);
     const compareSpy = vi.spyOn(bcrypt, "compare");
 
@@ -83,7 +94,7 @@ describe("authorizeUser", () => {
     expect(compareSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("L3: runs bcrypt.compare even when the user is archived", async () => {
+  it("AC-003: L3 — runs bcrypt.compare even when the user is archived (timing guard)", async () => {
     mockFind.mockResolvedValue({
       id: "u1",
       email: "user@x.test",

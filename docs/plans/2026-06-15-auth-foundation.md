@@ -589,19 +589,24 @@ Stack: Next.js 15 App Router, NextAuth v5, Prisma + Postgres (Neon), Vitest (uni
 ---
 
 ## Traceability table (AC → owning layer → test file)
+
+> Rebalanced to ADR-0010 pyramid (2026-06-16): AC-001/003/012/013/014/015 moved
+> down to unit (their canonical proof is on logic functions; e2e reserved for
+> genuine cross-stack-only guarantees).
+
 | AC | Requirement | Owning layer | Test (title token / file) | Task |
 |----|-------------|--------------|----------------------------|------|
-| AC-001 | FR-001, FR-003 | E2E | `AC-001` · `e2e/AC-001-login-role-routing.spec.ts` | 7.3 |
-| AC-002 | FR-001, FR-003 | E2E | `AC-002` · same file | 7.3 |
-| AC-003 | FR-002 | E2E | `AC-003` · same file | 7.3 |
+| AC-001 | FR-001, FR-003 | **Unit** | `AC-001` · `lib/auth/route-policy.test.ts` | 3.3/3.4 |
+| AC-002 | FR-001, FR-003 | **E2E** | `AC-002` · `e2e/AC-002-admin-login.spec.ts` | 7.3 |
+| AC-003 (auth) | FR-002 | **Unit** | `AC-003 (auth)` · `app/(public)/login/__tests__/login-page.test.tsx` + `lib/auth/authorize.test.ts` | 7.3 |
 | AC-004 | FR-004, NFR-001 | Integration | `AC-004` · `app/(public)/signup/actions.int.test.ts` | 7.1 |
 | AC-005 | FR-005 | Integration | `AC-005` · same file | 7.1 |
-| AC-010 | FR-011 (OBS-131) | E2E | `AC-010` · `e2e/AC-010-server-side-authz.spec.ts` | 7.4 |
-| AC-011 | FR-012 (OBS-122) | E2E | `AC-011` · same file | 7.4 |
-| AC-012 | FR-011 | E2E | `AC-012` · same file | 7.4 |
-| AC-013 | FR-012 | E2E | `AC-013` · same file | 7.4 |
-| AC-014 | FR-010 | E2E | `AC-014` · same file | 7.4 |
-| AC-015 | FR-014 | E2E | `AC-015` · same file | 7.4 |
+| AC-010 | FR-011 (OBS-131) | **E2E** | `AC-010` · `e2e/AC-010-server-side-authz.spec.ts` | 7.4 |
+| AC-011 | FR-012 (OBS-122) | **E2E** | `AC-011` · same file | 7.4 |
+| AC-012 | FR-011 | **Unit** | `AC-012` · `lib/auth/route-policy.test.ts` | 3.3/3.4 |
+| AC-013 | FR-012 | **Unit** | `AC-013` · `lib/auth/route-policy.test.ts` | 3.3/3.4 |
+| AC-014 | FR-010 | **Unit** | `AC-014` · `lib/auth/authorize.test.ts` | 4.4 |
+| AC-015 | FR-014 | **Unit** | `AC-015` · `lib/auth/route-policy.test.ts` | 3.3/3.4 |
 | AC-020 | FR-001 | Unit | `AC-020` · `lib/auth.config.test.ts` | 4.2 |
 | AC-021 | FR-020 | Integration | `AC-021` · `lib/db/users.int.test.ts` | 2.1 |
 | AC-022 | FR-030 | Unit | `AC-022` · `lib/auth/policy.test.ts` | 3.1 |

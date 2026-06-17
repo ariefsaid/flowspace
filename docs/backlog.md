@@ -5,15 +5,14 @@ Surfaces come from `docs/specs/0001-recon-app-surface.spec.md`.
 
 ## CURRENT STATE (2026-06-17) — read this first
 - **Stack:** Supabase (Postgres+Auth+Realtime+Storage+RLS) + Drizzle, server-authoritative (ADR-0013/0014/0015). Prisma/Neon/NextAuth removed.
-- **On `main` (CI green):** the **20-route frontend pixel replica** (~95 fidelity) + the **auth/data foundation** (Supabase Auth, `middleware.ts` server-side authz closing OBS-122/131, org_id-scoped Drizzle repo, RLS backstop, Realtime/Storage seams).
-- **In review (NOT yet on main):** `feat/cafe-supabase` = **I-022 cafe domain** rebuilt on Supabase+Drizzle+Realtime — PR pending owner approval (see Done below). Tests on the branch: unit 94 / int 38 / e2e 6.
-- **Superseded:** the old `feat/cafe-domain` (Prisma) branch — its spec/plan/`lib/cafe/*` logic carried into `feat/cafe-supabase`; do NOT merge the old branch.
+- **On `main` (CI green):** the **20-route frontend pixel replica** (~95 fidelity) + the **auth/data foundation** (Supabase Auth, `middleware.ts` server-side authz closing OBS-122/131, org_id-scoped Drizzle repo, RLS backstop, Realtime/Storage seams) + **I-022 cafe domain** (PR #3 merged 2026-06-16; menu/orders/KDS on Supabase+Drizzle+Realtime). Tests on `main`: unit 94 / int 38 / e2e 6.
+- **Superseded:** the old `feat/cafe-domain` (Prisma) branch — its spec/plan/`lib/cafe/*` logic was carried into I-022; do NOT merge the old branch.
 
 ## Done
 - [x] **I-000** Repo + agentic SDD/TDD/BDD workflow scaffold. · [x] **I-001** Recon (all surfaces → spec 0001). · [x] **I-002** `DESIGN.md` tokens.
 - [x] **Frontend replica** (landing/login/signup/guest-cafe/member×7/barista/admin×8) built + pixel-hardened, merged.
 - [x] **I-003/I-004** auth+data foundation (NextAuth/Prisma) — **superseded by** [x] **I-005** re-platform to Supabase+Drizzle+Supabase Auth, **merged, CI green** (ADR-0013/0014/0015; plan `docs/plans/2026-06-16-replatform-supabase.md`).
-- [x] **I-022 (cafe) — rebuilt on Supabase+Drizzle+Realtime** (branch `feat/cafe-supabase`, **PR pending owner approval**): migration `0005_cafe_domain.sql` (3 tables + 4 enums + org-scoped RLS + realtime publication), Drizzle repo `lib/db/cafe.ts` (server-priced orders, org-scoped), server actions w/ Supabase-session authz, 5 surfaces wired (UI pixel-identical), Supabase Realtime KDS. Plan `docs/plans/2026-06-16-cafe-domain-supabase.md`. Tests: unit 94 / int 38 / e2e 6 (AC-121). 3-lens cross-family review (glm-5.1) done; Director [SEC] verification caught 2 money-path bugs (multi-variant guard, qty manipulation) + the review caught archived-item orderability + a TOCTOU status race + silent checkout errors — all fixed. **Supersedes the shelved `feat/cafe-domain` (Prisma) branch.**
+- [x] **I-022 (cafe) — rebuilt on Supabase+Drizzle+Realtime, merged ([PR #3](https://github.com/ariefsaid/flowspace/pull/3), 2026-06-16, CI green):** migration `0005_cafe_domain.sql` (3 tables + 4 enums + org-scoped RLS + realtime publication), Drizzle repo `lib/db/cafe.ts` (server-priced orders, org-scoped), server actions w/ Supabase-session authz, 5 surfaces wired (UI pixel-identical), Supabase Realtime KDS. Plan `docs/plans/2026-06-16-cafe-domain-supabase.md`. Tests: unit 94 / int 38 / e2e 6 (AC-121). 3-lens cross-family review (glm-5.1) + Director [SEC] verification caught 5 defects (multi-variant guard, qty manipulation, archived-item orderability, TOCTOU status race, silent checkout errors) — all fixed. **Supersedes the shelved `feat/cafe-domain` (Prisma) branch.**
 
 ## OUTSTANDING — next work (domain verticals rebuilt on the Supabase foundation)
 - [ ] **I-022 follow-ups (non-blocking, from the cross-family review):** guest-order rate-limit + per-order line-count cap (DoS); `advanceOrderStatusAsActor` test-seam → relocate out of prod `lib/cafe/authz.ts`; `canAdminSetOrderStatus()` helper for authz symmetry; integration test of `createOrder` with `discountEligible:true`; `updated_at` DB trigger (vs manual bump); realtime `orgId` format validation (belt-and-suspenders); AC-id hygiene (guest-name + checkout-error tests reuse AC-114/AC-102).
@@ -33,7 +32,7 @@ Surfaces come from `docs/specs/0001-recon-app-surface.spec.md`.
 ## Phase 2 — Core member journeys
 - [ ] **I-020** Time-credit packages: list + purchase + ledger debit.
 - [ ] **I-021** Booking flow (seat/room, time window, credit check, confirm).
-- [~] **I-022** Cafe domain — **shelved on `feat/cafe-domain` (Prisma/NextAuth), unmerged.** Schema/repo/actions/5 surfaces wired + tests built (Phases A–E); spec `0003-cafe-domain`, plan, domain logic (`lib/cafe/*`) all carry over. Rebuild the data/auth wiring on the Supabase+Drizzle foundation after I-005.
+- [x] **I-022** Cafe domain — **rebuilt on Supabase+Drizzle+Realtime and merged** (PR #3; see Done). The old `feat/cafe-domain` (Prisma) branch is superseded.
 - [ ] **I-023** Print billing (PaperCut-style charge model) + member view.
 - [ ] **I-024** Dynamic-QR facility access.
 

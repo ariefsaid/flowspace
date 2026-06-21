@@ -174,6 +174,11 @@ export function HistoryClient({ bookings, transactions }: HistoryClientProps) {
       <div className="space-y-3">
         {activeTab === "booking" && (
           <>
+            {bookings.length === 0 && (
+              <p className="py-8 text-center text-sm text-gray-400">
+                Belum ada riwayat booking.
+              </p>
+            )}
             {bookings.map((booking) => (
               <div
                 key={booking.id}
@@ -211,6 +216,11 @@ export function HistoryClient({ bookings, transactions }: HistoryClientProps) {
 
         {activeTab === "transaksi" && (
           <>
+            {transactions.length === 0 && (
+              <p className="py-8 text-center text-sm text-gray-400">
+                Belum ada transaksi.
+              </p>
+            )}
             {transactions.map((trx) => (
               <div
                 key={trx.id}

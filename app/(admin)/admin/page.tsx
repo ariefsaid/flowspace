@@ -142,10 +142,10 @@ export default async function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* Weekly Revenue — orange */}
-        <div className="flex items-center justify-between gap-4 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 p-4 shadow-md text-white">
+        {/* Weekly Revenue — orange (darkened to from-orange-600/to-orange-700 for WCAG-AA contrast) */}
+        <div className="flex items-center justify-between gap-4 rounded-xl bg-gradient-to-br from-orange-600 to-orange-700 p-4 shadow-md text-white">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-orange-100">Weekly Revenue</p>
+            <p className="text-sm font-medium text-white">Weekly Revenue</p>
             <p className="mt-1 truncate text-2xl font-bold">
               {formatRupiah(stats.weeklyRevenue)}
             </p>

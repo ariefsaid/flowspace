@@ -8,9 +8,21 @@ export interface StepperProps {
   className?: string;
 }
 
+/**
+ * WizardStepper — pill capsule variant (DESIGN.md wizard-stepper pattern).
+ *
+ * Each step renders as a rounded-full capsule containing the step number +
+ * label together. Active step: solid teal pill (bg-teal-500 text-white).
+ * Done step: teal pill with checkmark (number replaced). Pending step: slate
+ * tinted pill (bg-slate-100 text-gray-500).
+ *
+ * A11y: active <li> carries aria-current="step"; the step number + label
+ * remain visible inside the pill so active state is never conveyed by
+ * color alone (WCAG 1.4.1).
+ */
 export function Stepper({ steps, current, className }: StepperProps) {
   return (
-    <ol className={cn("flex items-center", className)}>
+    <ol className={cn("flex items-center gap-2 flex-wrap", className)}>
       {steps.map((step, i) => {
         const done = i < current;
         const active = i === current;
@@ -18,36 +30,36 @@ export function Stepper({ steps, current, className }: StepperProps) {
         return (
           <li
             key={step}
-            className={cn("flex items-center", !isLast && "flex-1")}
+            aria-current={active ? "step" : undefined}
+            className={cn("flex items-center", !isLast && "gap-2")}
           >
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
-                  done && "bg-teal-500 text-white",
-                  active && "bg-teal-500 text-white ring-4 ring-teal-100",
-                  !done && !active && "bg-slate-100 text-gray-500",
+            {/* Pill capsule — number + label together */}
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold",
+                done && "bg-teal-500 text-white",
+                active && "bg-teal-500 text-white",
+                !done && !active && "bg-slate-100 text-gray-500",
+              )}
+            >
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                {done ? (
+                  <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                ) : (
+                  i + 1
                 )}
-              >
-                {done ? <Check className="h-4 w-4" aria-hidden="true" /> : i + 1}
               </span>
-              <span
-                className={cn(
-                  "text-sm font-medium",
-                  active ? "text-gray-900" : "text-gray-500",
-                )}
-              >
-                {step}
-              </span>
-            </div>
+              {step}
+            </span>
+
+            {/* Connector chevron between steps */}
             {!isLast ? (
               <span
-                className={cn(
-                  "mx-3 h-px flex-1",
-                  done ? "bg-teal-500" : "bg-slate-200",
-                )}
+                className="text-gray-300 text-xs select-none"
                 aria-hidden="true"
-              />
+              >
+                &rsaquo;
+              </span>
             ) : null}
           </li>
         );

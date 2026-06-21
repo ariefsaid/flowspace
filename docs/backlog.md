@@ -25,9 +25,17 @@ Surfaces come from `docs/specs/0001-recon-app-surface.spec.md`.
 ## OUTSTANDING — next work
 - [ ] **Activate the dormant cafe 5% discount** now that booking exists — flip `resolveDiscountEligibility` to consult `getActiveBooking` (ADR-0011).
 - [ ] **`/admin/settings`** config hub (tiers/discounts, facilities CRUD, cafe-menu CRUD, print pricing) — currently static; wire the config we own, keep integration panels (print-server/UniFi/GA/email) simulated.
-- [ ] **Functional-push follow-ups (non-blocking, from review):** tier→discount + COLOR-rate as config (not constants); print-preview tier-discount display; users Add/Edit + booking "Tambah" stubs; `KEYCARD_TOKEN_SECRET` in prod env; admin date-filter wiring.
+- [ ] **⚠️ Rendered round-2 design review (Part C) — BLOCKED on local env, must complete.** The harden did the SDD spec (0004), source-level design audit (2 token fixes applied), and print→Supabase Storage; but the **rendered** pixel-diff vs the captured originals could NOT run locally — this machine has **two Supabase stacks (54xxx + 64xxx) + a stale `.env.local`** so `requireSession()` 500s every authenticated render (login validates against one stack, SSR against another), and `.env*` is sandbox-read-denied. Fix the local env (point `.env.local` at the `:64321/:64322` stack, or stop the other stack) OR run the render in a clean env (CI preview), then re-run `design-reviewer` on `review/built/*.png` vs `review/recon/*.png`.
+- [ ] **Functional-push follow-ups (non-blocking, from review):** tier→discount + COLOR-rate as config (not constants); print-preview tier-discount display; users Add/Edit + booking "Tambah" stubs; `KEYCARD_TOKEN_SECRET` in prod env; admin date-filter wiring; keycard vs dashboard QR color consistency.
 - [ ] **I-022 follow-ups (non-blocking):** guest-order rate-limit + line-count cap; `advanceOrderStatusAsActor` test-seam relocate; `canAdminSetOrderStatus()` symmetry; `updated_at` DB trigger; AC-id hygiene.
-- [ ] **External integrations** (each its own owner-gated ADR/issue): payment gateway (Midtrans/Xendit), PaperCut print server, UniFi WiFi vouchers, real dynamic-QR door access, ESB/ERP. + **Supabase Storage** for real print-file uploads (currently simulated).
+- [ ] **External integrations** (each its own owner-gated ADR/issue): payment gateway (Midtrans/Xendit), PaperCut print server, UniFi WiFi vouchers, real dynamic-QR door access, ESB/ERP. (Print **file upload** now uses Supabase Storage — done; only the physical printing is external.)
+
+## DONE in the workflow-conformance harden (branch `feat/verticals-harden`)
+- [x] **SDD spec backfilled** — `docs/specs/0004-domain-verticals.spec.md` (OBS/FR/AC mapped to existing tests).
+- [x] **Print file upload → Supabase Storage** (our stack; org-scoped path, MIME allowlist + size cap; no migration). Closes the one "functional without external ties" gap.
+- [x] **Coverage gap closed** — `PrintClient.test.tsx` + `uploads.test.ts` (unit 166).
+- [x] **Design source-lens fixes** — keycard QR → DESIGN.md tokens; print submit btn off-palette `teal-400`→primary; WifiCard gradient→flat info-card.
+- [x] **gpt-5.4 cross-family security review** (during the push) — no Critical; keycard fail-closed + cafe hydration org-scope fixes applied.
 
 > NB: the Phase 1–3 sections below are the ORIGINAL frontend roadmap — those pixel surfaces are built/merged. The real outstanding work is the **domain backend verticals above** + the external integrations under Tech debt.
 

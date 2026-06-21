@@ -7,7 +7,7 @@ import { QrCode, Calendar } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Card } from "@/components/ui/Card";
 import { cn } from "@/lib/cn";
-import { TOKEN_WINDOW_MS } from "@/lib/keycard/token";
+import { TOKEN_WINDOW_MS } from "@/lib/keycard/window";
 
 // ---------------------------------------------------------------------------
 // View model (server-read active booking → passed as props)

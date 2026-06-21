@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Key } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { TOKEN_WINDOW_MS } from "@/lib/keycard/token";
+import { TOKEN_WINDOW_MS } from "@/lib/keycard/window";
 
 const REFRESH_SECONDS = TOKEN_WINDOW_MS / 1000; // 30
 

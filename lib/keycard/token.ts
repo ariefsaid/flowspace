@@ -8,10 +8,13 @@
  *
  * Node runtime only (node:crypto) — never import from the Edge middleware.
  */
+// Server-only: imports node:crypto. Client components import the rotation window
+// from @/lib/keycard/window instead (no crypto), so this never enters the browser bundle.
 import { createHmac } from "node:crypto";
+import { TOKEN_WINDOW_MS } from "@/lib/keycard/window";
 
-/** 30s rotation window (recon: "rotating QR ~30s window"). */
-export const TOKEN_WINDOW_MS = 30_000;
+// Re-export so existing server callers keep importing it from here.
+export { TOKEN_WINDOW_MS };
 
 /**
  * Secret used to sign the token. ponytail: a stable dev default keeps local

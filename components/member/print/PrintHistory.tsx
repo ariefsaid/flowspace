@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { formatRupiah } from "@/lib/format";
-import type { PrintJob } from "@/lib/mock/types";
+import type { PrintJob } from "@/lib/types/views";
 
 interface PrintHistoryProps {
   jobs: PrintJob[];

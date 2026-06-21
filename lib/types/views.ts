@@ -1,8 +1,6 @@
 /**
- * Mock-data domain types (frontend-first; no DB).
- *
- * These mirror the recon observations (OBS-*) and are the shapes page builders
- * consume from `@/lib/mock/*`. They are intentionally lightweight and UI-facing.
+ * UI-facing view types (recon shapes, OBS-*). Lightweight presentation types
+ * consumed by client components — distinct from the DB row types in lib/db.
  */
 
 // ---------------------------------------------------------------------------

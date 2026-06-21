@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Wifi, Copy, Check } from "lucide-react";
-import type { WifiInfo } from "@/lib/mock/types";
+import type { WifiInfo } from "@/lib/types/views";
 
 interface WifiCardProps {
   wifi: WifiInfo;

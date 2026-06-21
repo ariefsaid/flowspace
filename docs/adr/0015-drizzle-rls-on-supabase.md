@@ -31,7 +31,9 @@ server is authoritative. Both are settled here so the rest of I-005 has no open 
 > **Revision (2026-06-16, I-005 CI fix):** the app DDL (`organizations`, `app_users`, enums) is **consolidated into
 > `supabase/migrations/0000_app_schema.sql`** — the single, ordered source of truth that a fresh `supabase start`
 > applies cleanly in one pass. `drizzle-orm` remains the **query layer** (`lib/db/schema.ts`); `drizzle-kit` is **no
-> longer the DDL authority** (the `drizzle/` artifacts are retained as reference/legacy, not run in CI). This un-does
+> longer the DDL authority**. (The committed `drizzle/` snapshot was removed 2026-06-21 — it had gone stale (only
+> `0000_init`, predating cafe/bookings/print/transactions) and a partial snapshot misleads more than none; `pnpm
+> dz:generate` regenerates it on demand for inspection, and it is not run in CI.) This un-does
 > the two-directory split below: a single ordered `supabase/migrations/` stream owns all DDL + platform wiring,
 > which is what a fresh `supabase start` actually applies. The `*.down.sql` pairs were removed from the apply path
 > (moved to `supabase/migrations/_down/`) because the Supabase CLI has no down-migration concept and applied them
@@ -40,7 +42,7 @@ server is authoritative. Both are settled here so the rest of I-005 has no open 
 > `migrate` would own app-table DDL from the Drizzle schema, with `supabase/migrations/*` reserved for
 > Supabase-platform concerns (RLS/Storage/auth-link/Realtime), accepting **two migration directories** and a
 > combined script that ran both. That split was **reversed** by the CI fix above: a fresh `supabase start` must
-> apply one ordered stream, so app DDL moved into `supabase/migrations/`. `drizzle/` is now reference-only.
+> apply one ordered stream, so app DDL moved into `supabase/migrations/`. (The `drizzle/` snapshot was later deleted — see the revision note above.)
 
 > **Migrations are NOT reversible in the down-migration sense.** The Supabase CLI has no `down` concept; migrations
 > are forward-only and re-applied fresh via `supabase db reset`. The `supabase/migrations/_down/*.sql` files are

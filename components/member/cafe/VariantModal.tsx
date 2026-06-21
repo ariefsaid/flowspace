@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/Button";
 import { formatRupiah } from "@/lib/format";
-import type { MenuItem } from "@/lib/mock";
+import type { MenuItem } from "@/lib/types/views";
 
 export interface VariantSelection {
   temp: "Hot" | "Cold";

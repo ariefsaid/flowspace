@@ -164,8 +164,10 @@ reset & email; OAuth; admin user-management writes; Postgres RLS.
 ## Traceability (owning layer per ADR-0010 — full table in the plan)
 | AC | Owning layer | Why |
 |----|--------------|-----|
-| AC-001, AC-002 | E2E (Playwright) | real login form → session → role redirect across the stack |
-| AC-003, AC-005 | E2E (Playwright) | real form error path |
+| AC-002 | E2E (Playwright) | real login form → session → role redirect across the stack (`e2e/AC-002-admin-login.spec.ts`) |
+| AC-001 | Unit (Vitest) | role→home mapping is pure logic (`lib/auth/route-policy.test.ts`); the I-004 rebalance (ADR-0010) pulled it down from E2E |
+| AC-003 | Unit (Vitest) | bad-credentials → generic no-enumeration error owned at the login-form unit layer (`app/(public)/login/__tests__/login-page.test.tsx`) |
+| AC-005 | Integration (Drizzle) | duplicate-email rejection is a data-layer contract (`app/(public)/signup/actions.int.test.ts`) |
 | AC-004 | Integration (Drizzle) | user-creation + Supabase-Auth credential contract owned at the data layer; e2e references it |
 | AC-010, AC-011, AC-012, AC-013, AC-014, AC-015 | E2E (Playwright) | middleware request→redirect is only honestly provable end-to-end |
 | AC-020 | Unit (Vitest) | jwt/session callback pure logic |

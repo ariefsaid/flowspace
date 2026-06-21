@@ -16,10 +16,14 @@
  * - The booking insert + the ledger row (recordTransaction) are atomic in one
  *   db.transaction — the domain write and the reporting write commit together.
  */
-import { and, eq, isNull, asc, desc } from "drizzle-orm";
+import { and, eq, isNull, asc, desc, gte, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import { bookings, facilities, type Booking, type Facility } from "@/lib/db/schema";
-import { recordTransaction } from "@/lib/db/transactions";
+import {
+  recordTransaction,
+  settleBookingTransaction,
+  setBookingTransactionAmount,
+} from "@/lib/db/transactions";
 import type {
   BookingFacilityType,
   BookingPaymentStatus,
@@ -125,13 +129,14 @@ export async function getActiveBooking(
   return row ?? null;
 }
 
-/** Admin: org bookings, newest first, optional status filter. */
+/** Admin: org bookings, newest first, optional status / since filter. */
 export function listBookings(
   orgId: string,
-  opts?: { status?: BookingStatus; limit?: number },
+  opts?: { status?: BookingStatus; since?: Date; limit?: number },
 ): Promise<Booking[]> {
   const conds = [eq(bookings.orgId, orgId)];
   if (opts?.status) conds.push(eq(bookings.status, opts.status));
+  if (opts?.since) conds.push(gte(bookings.createdAt, opts.since));
   return db
     .select()
     .from(bookings)
@@ -287,27 +292,33 @@ export async function completeBooking(
     amountRupiah = hours * booking.ratePerHourRupiah;
   }
 
-  // Compare-and-set on status: a concurrent complete/cancel that already moved
-  // this row off ACTIVE makes the WHERE match 0 rows → reject (lost-update guard).
-  const [updated] = await db
-    .update(bookings)
-    .set({
-      status: "COMPLETED",
-      endAt,
-      durationHours,
-      amountRupiah,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(bookings.id, id),
-        eq(bookings.orgId, orgId),
-        eq(bookings.status, "ACTIVE"),
-      ),
-    )
-    .returning();
-  if (!updated) throw new Error("INVALID_TRANSITION");
-  return updated;
+  // Compare-and-set on status (concurrent complete/cancel → 0 rows → reject), and
+  // sync the linked ledger row's amount in the SAME tx — a walk-in's BOOKING txn was
+  // created at 0 (open duration); its real charge is only known now, so revenue KPIs
+  // must see it. Status stays PENDING until the cashier approves (approvePayment).
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(bookings)
+      .set({
+        status: "COMPLETED",
+        endAt,
+        durationHours,
+        amountRupiah,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(bookings.id, id),
+          eq(bookings.orgId, orgId),
+          eq(bookings.status, "ACTIVE"),
+        ),
+      )
+      .returning();
+    if (!updated) throw new Error("INVALID_TRANSITION");
+
+    await setBookingTransactionAmount(orgId, id, amountRupiah, tx);
+    return updated;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -340,4 +351,76 @@ export async function cancelBooking(
     .returning();
   if (!updated) throw new Error("INVALID_TRANSITION");
   return updated;
+}
+
+// ---------------------------------------------------------------------------
+// Pending payments + cashier approve  [SEC][SoD] — ADMIN-only at the action layer
+// ---------------------------------------------------------------------------
+
+/**
+ * Admin pending-payments surface: bookings whose cashier payment is still
+ * WAITING_CASHIER, excluding CANCELLED. A walk-in lands here on creation; a
+ * scheduled booking lands here only if its payment has not been recorded.
+ * Newest first; org-scoped (cross-org rows never match).
+ */
+export function listPendingBookings(orgId: string): Promise<Booking[]> {
+  return db
+    .select()
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.orgId, orgId),
+        eq(bookings.paymentStatus, "WAITING_CASHIER"),
+        // ponytail: exclude CANCELLED explicitly. The status domain is
+        // ACTIVE/COMPLETED/CANCELLED, so IN (ACTIVE, COMPLETED) is equivalent
+        // to <> CANCELLED and reads as intent.
+        inArray(bookings.status, ["ACTIVE", "COMPLETED"]),
+      ),
+    )
+    .orderBy(desc(bookings.createdAt));
+}
+
+/**
+ * Cashier approves an offline payment for a WAITING_CASHIER booking [SEC][SoD].
+ * Atomic in one db.transaction: sets paymentStatus PAID_CASHIER (compare-and-set
+ * on WAITING_CASHIER so a concurrent approve/cancel is rejected, not silently
+ * overwritten) AND settles the linked BOOKING ledger row to COMPLETED so the
+ * amount counts toward revenue. Org-scoped: a cross-org id resolves to
+ * NOT_FOUND before any write.
+ *
+ * ponytail: the booking amount is NOT recomputed here — walk-in charges are
+ * computed by completeBooking (cap 4h). This action only records that the
+ * cashier accepted payment for the booking's current amount and settles the
+ * ledger row; the [SEC] money invariant is "amount stays server-derived".
+ */
+export async function approvePayment(
+  orgId: string,
+  id: string,
+): Promise<Booking> {
+  const [booking] = await db
+    .select()
+    .from(bookings)
+    .where(and(eq(bookings.id, id), eq(bookings.orgId, orgId)))
+    .limit(1);
+  if (!booking) throw new Error("NOT_FOUND");
+  if (booking.paymentStatus !== "WAITING_CASHIER") {
+    throw new Error("INVALID_TRANSITION");
+  }
+
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(bookings)
+      .set({ paymentStatus: "PAID_CASHIER", updatedAt: new Date() })
+      .where(
+        and(
+          eq(bookings.id, id),
+          eq(bookings.orgId, orgId),
+          eq(bookings.paymentStatus, "WAITING_CASHIER"),
+        ),
+      )
+      .returning();
+    if (!updated) throw new Error("INVALID_TRANSITION");
+    await settleBookingTransaction(orgId, id, tx);
+    return updated;
+  });
 }

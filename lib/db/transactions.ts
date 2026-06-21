@@ -89,3 +89,50 @@ export async function sumRevenueSince(orgId: string, since: Date): Promise<numbe
     );
   return row?.total ?? 0;
 }
+
+/**
+ * Settle the BOOKING ledger row linked to a booking to COMPLETED — called when
+ * the cashier approves an offline payment (approvePayment). Pass the caller's
+ * Drizzle tx so the settle is atomic with the booking payment-status write.
+ * Org + bookingId + type scoped (defence-in-depth; never touches another org).
+ */
+export async function settleBookingTransaction(
+  orgId: string,
+  bookingId: string,
+  txdb: Pick<typeof db, "update"> = db,
+): Promise<void> {
+  await txdb
+    .update(transactions)
+    .set({ status: "COMPLETED" })
+    .where(
+      and(
+        eq(transactions.orgId, orgId),
+        eq(transactions.bookingId, bookingId),
+        eq(transactions.type, "BOOKING"),
+      ),
+    );
+}
+
+/**
+ * Sync the BOOKING ledger row's amount to the booking's final charge — called by
+ * completeBooking once a walk-in's open duration is settled to an amount (the row
+ * was created at 0). Pass the caller's tx so it's atomic with the booking update.
+ * Org + bookingId + type scoped.
+ */
+export async function setBookingTransactionAmount(
+  orgId: string,
+  bookingId: string,
+  amountRupiah: number,
+  txdb: Pick<typeof db, "update"> = db,
+): Promise<void> {
+  await txdb
+    .update(transactions)
+    .set({ amountRupiah })
+    .where(
+      and(
+        eq(transactions.orgId, orgId),
+        eq(transactions.bookingId, bookingId),
+        eq(transactions.type, "BOOKING"),
+      ),
+    );
+}

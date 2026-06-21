@@ -54,6 +54,10 @@ export default defineConfig({
         process.env.SUPABASE_SERVICE_ROLE_KEY ?? LOCAL_SERVICE_ROLE_KEY,
       DATABASE_URL:
         process.env.DATABASE_URL ?? LOCAL_DB_URL,
+      // Keycard HMAC secret — `pnpm start` is a production build, where token.ts
+      // fails closed if this is unset. CI/e2e provide a test value like any deploy.
+      KEYCARD_TOKEN_SECRET:
+        process.env.KEYCARD_TOKEN_SECRET ?? "flowspace-keycard-e2e-secret",
       // Supabase local stack (and `next start`) needs this on localhost (non-HTTPS).
       AUTH_TRUST_HOST: "true",
     },

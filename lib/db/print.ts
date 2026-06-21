@@ -38,6 +38,23 @@ export function listPrintJobsByUser(
     .limit(limit);
 }
 
+/**
+ * Org-scoped listing of ALL print jobs for the admin "Laporan Print" report,
+ * newest first (member names are joined in the page via findProfilesByIds,
+ * matching the admin bookings pattern). AC-300 / FR-300, FR-301.
+ */
+export function listPrintJobsForAdmin(
+  orgId: string,
+  limit = 500,
+): Promise<PrintJob[]> {
+  return db
+    .select()
+    .from(printJobs)
+    .where(eq(printJobs.orgId, orgId))
+    .orderBy(desc(printJobs.createdAt))
+    .limit(limit);
+}
+
 // ---------------------------------------------------------------------------
 // P2: submitPrintJob  [SEC] — server-priced atomic submit
 // ---------------------------------------------------------------------------

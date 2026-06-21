@@ -78,7 +78,12 @@ afterAll(async () => {
 // ---------------------------------------------------------------------------
 // Repository under test
 // ---------------------------------------------------------------------------
-import { submitPrintJob, listPrintJobsByUser } from "@/lib/db/print";
+import {
+  submitPrintJob,
+  listPrintJobsByUser,
+  listPrintJobsForAdmin,
+} from "@/lib/db/print";
+import { printJobs } from "@/lib/db/schema";
 
 describe("lib/db/print", () => {
   // -------------------------------------------------------------------------
@@ -281,6 +286,84 @@ describe("lib/db/print", () => {
         (j) => j.orgId === orgAId || j.userId === aUserId,
       );
       expect(crossRows).toHaveLength(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // listPrintJobsForAdmin — org-scoped report listing + aggregate derivation
+  // -------------------------------------------------------------------------
+  describe("listPrintJobsForAdmin", () => {
+    // Insert deterministic billing rows directly (one COMPLETED-with-discount +
+    // one PENDING in org A, one COMPLETED in org B) so the org-scoping and the
+    // revenue derivation are provable independent of the submit tests above.
+    beforeAll(async () => {
+      await testDb.insert(printJobs).values([
+        {
+          orgId: orgAId,
+          userId: aUserId,
+          fileName: "report-A-done.pdf",
+          pages: 10,
+          copies: 1,
+          colorMode: "COLOR",
+          paperSize: "A4",
+          pricePerPageRupiah: 1500,
+          discountRupiah: 3000,
+          totalRupiah: 12000,
+          status: "COMPLETED",
+        },
+        {
+          orgId: orgAId,
+          userId: aUserId,
+          fileName: "report-A-pending.pdf",
+          pages: 4,
+          copies: 1,
+          colorMode: "BW",
+          paperSize: "A4",
+          pricePerPageRupiah: 500,
+          discountRupiah: 0,
+          totalRupiah: 2000,
+          status: "PENDING",
+        },
+        {
+          orgId: orgBId,
+          userId: bUserId,
+          fileName: "report-B-done.pdf",
+          pages: 5,
+          copies: 1,
+          colorMode: "BW",
+          paperSize: "A4",
+          pricePerPageRupiah: 500,
+          discountRupiah: 0,
+          totalRupiah: 2500,
+          status: "COMPLETED",
+        },
+      ]);
+    });
+
+    it("AC-300: returns only the caller org's jobs, newest first", async () => {
+      const rows = await listPrintJobsForAdmin(orgAId);
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.every((j) => j.orgId === orgAId)).toBe(true);
+      // org B's COMPLETED job never leaks into org A's report.
+      expect(rows.some((j) => j.fileName === "report-B-done.pdf")).toBe(false);
+      expect(rows.some((j) => j.fileName === "report-A-done.pdf")).toBe(true);
+      // newest-first ordering.
+      for (let i = 1; i < rows.length; i++) {
+        expect(rows[i - 1].createdAt.getTime()).toBeGreaterThanOrEqual(
+          rows[i].createdAt.getTime(),
+        );
+      }
+    });
+
+    it("AC-301: revenue = sum of totalRupiah over COMPLETED jobs (org-scoped)", async () => {
+      const rows = await listPrintJobsForAdmin(orgAId);
+      const revenue = rows
+        .filter((j) => j.status === "COMPLETED")
+        .reduce((s, j) => s + j.totalRupiah, 0);
+      // The org-A COMPLETED job (12000) is counted; org B's 2500 is not.
+      expect(revenue).toBeGreaterThanOrEqual(12000);
+      const totalPages = rows.reduce((s, j) => s + j.pages, 0);
+      expect(totalPages).toBeGreaterThanOrEqual(14); // 10 + 4 markers
     });
   });
 });

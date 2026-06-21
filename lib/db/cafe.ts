@@ -20,6 +20,7 @@ import {
   type CafeOrderItem,
 } from "@/lib/db/schema";
 import { computeOrderTotals } from "@/lib/cafe/pricing";
+import { recordTransaction } from "@/lib/db/transactions";
 import { generateOrderCode, nextStatus } from "@/lib/cafe/status";
 import type { CafeOrderStatus, OrderLineInput } from "@/lib/cafe/types";
 
@@ -174,6 +175,22 @@ export async function createOrder(input: {
           })),
         );
 
+        // Ledger row so the order appears in member /history + admin revenue.
+        await recordTransaction(
+          {
+            orgId,
+            userId: customerUserId,
+            type: "CAFE_ORDER",
+            description: guestName
+              ? `Pesanan Cafe (tamu: ${guestName})`
+              : "Pesanan Cafe",
+            amountRupiah: totals.totalRupiah,
+            discountRupiah: totals.discountRupiah,
+            cafeOrderId: newOrder.id,
+          },
+          tx,
+        );
+
         return newOrder;
       });
       return order;
@@ -248,6 +265,7 @@ export async function advanceOrderStatus(
  * but we select ONLY these three fields as a defence-in-depth [SEC].
  */
 async function attachRelations(
+  orgId: string,
   orders: CafeOrder[],
 ): Promise<CafeOrderWithRelations[]> {
   if (!orders.length) return [];
@@ -262,11 +280,13 @@ async function attachRelations(
   const customerIds = [
     ...new Set(orders.filter((o) => o.customerUserId).map((o) => o.customerUserId!)),
   ];
+  // Org-scope the customer lookup too (defence-in-depth, cross-family review): a
+  // cross-org customerUserId must never hydrate another org's name/email.
   const customers: { id: string; name: string; email: string }[] = customerIds.length
     ? await db
         .select({ id: appUsers.id, name: appUsers.name, email: appUsers.email })
         .from(appUsers)
-        .where(inArray(appUsers.id, customerIds))
+        .where(and(inArray(appUsers.id, customerIds), eq(appUsers.orgId, orgId)))
     : [];
 
   const itemsByOrder = new Map<string, CafeOrderItem[]>();
@@ -306,7 +326,7 @@ export async function listOrders(
     .orderBy(desc(cafeOrders.createdAt))
     .limit(opts?.limit ?? 200);
 
-  return attachRelations(rows);
+  return attachRelations(orgId, rows);
 }
 
 /**
@@ -327,7 +347,7 @@ export async function getOrder(
 
   if (!order) return null;
 
-  const [withRelations] = await attachRelations([order]);
+  const [withRelations] = await attachRelations(orgId, [order]);
   return withRelations ?? null;
 }
 

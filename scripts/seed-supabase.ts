@@ -19,8 +19,19 @@ import { createClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { eq } from "drizzle-orm";
-import { organizations, appUsers, cafeMenuItems } from "@/lib/db/schema";
-import type { Role, MembershipTier, CafeCategory } from "@/lib/db/enums";
+import {
+  organizations,
+  appUsers,
+  cafeMenuItems,
+  timeCreditPackages,
+  facilities,
+} from "@/lib/db/schema";
+import type {
+  Role,
+  MembershipTier,
+  CafeCategory,
+  FacilityType,
+} from "@/lib/db/enums";
 import { createId } from "@paralleldrive/cuid2";
 
 // ---------------------------------------------------------------------------
@@ -124,6 +135,26 @@ const CAFE_MENU: Array<{
 ];
 
 // ---------------------------------------------------------------------------
+// Time-credit packages (I-020) + facilities (I-021) — from recon, masked values.
+// ---------------------------------------------------------------------------
+const PACKAGES = [
+  { slug: "5h", name: "5 Hours", hours: 5, price: 75000, perHour: 15000, popular: false, sort: 1 },
+  { slug: "10h", name: "10 Hours", hours: 10, price: 140000, perHour: 14000, popular: true, sort: 2 },
+  { slug: "20h", name: "20 Hours", hours: 20, price: 260000, perHour: 13000, popular: false, sort: 3 },
+  { slug: "50h", name: "50 Hours", hours: 50, price: 600000, perHour: 12000, popular: false, sort: 4 },
+];
+
+const FACILITIES: Array<{ slug: string; name: string; type: FacilityType; rate: number }> = [
+  ...["A", "B", "C", "D", "E", "F", "G", "H", "I"].map((l) => ({
+    slug: `meja-${l.toLowerCase()}`,
+    name: `Meja ${l}`,
+    type: "COWORKING_SEAT" as FacilityType,
+    rate: 20000,
+  })),
+  { slug: "meeting-room-a", name: "Meeting Room A", type: "MEETING_ROOM", rate: 120000 },
+];
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
@@ -132,7 +163,9 @@ async function main() {
   });
 
   const sql = postgres(DATABASE_URL, { prepare: false });
-  const db = drizzle(sql, { schema: { organizations, appUsers, cafeMenuItems } });
+  const db = drizzle(sql, {
+    schema: { organizations, appUsers, cafeMenuItems, timeCreditPackages, facilities },
+  });
 
   // -- Org upsert (by slug) --------------------------------------------------
   const [existing] = await db
@@ -250,6 +283,49 @@ async function main() {
     }
   }
   console.log(`Seeded ${CAFE_MENU.length} cafe menu items into "${org.slug}".`);
+
+  // -- Time-credit packages (I-020) — idempotent ----------------------------
+  for (const p of PACKAGES) {
+    const id = `${org.id}__pkg-${p.slug}`;
+    const [existingPkg] = await db
+      .select()
+      .from(timeCreditPackages)
+      .where(eq(timeCreditPackages.id, id))
+      .limit(1);
+    if (!existingPkg) {
+      await db.insert(timeCreditPackages).values({
+        id,
+        orgId: org.id,
+        name: p.name,
+        hours: p.hours,
+        priceRupiah: p.price,
+        pricePerHourRupiah: p.perHour,
+        popular: p.popular,
+        sortOrder: p.sort,
+      });
+    }
+  }
+  console.log(`Seeded ${PACKAGES.length} time-credit packages.`);
+
+  // -- Facilities (I-021) — idempotent --------------------------------------
+  for (const f of FACILITIES) {
+    const id = `${org.id}__fac-${f.slug}`;
+    const [existingFac] = await db
+      .select()
+      .from(facilities)
+      .where(eq(facilities.id, id))
+      .limit(1);
+    if (!existingFac) {
+      await db.insert(facilities).values({
+        id,
+        orgId: org.id,
+        name: f.name,
+        type: f.type,
+        ratePerHourRupiah: f.rate,
+      });
+    }
+  }
+  console.log(`Seeded ${FACILITIES.length} facilities.`);
 
   await sql.end();
 }

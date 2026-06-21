@@ -5,9 +5,10 @@
  * Every org-scoped function takes `orgId` derived from the server session —
  * the client NEVER supplies it (ADR-0004).
  */
-import { and, eq, isNull, asc } from "drizzle-orm";
+import { and, eq, isNull, asc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import { appUsers, type AppUser } from "@/lib/db/schema";
+import type { MembershipTier } from "@/lib/db/enums";
 
 /**
  * Login lookup. Email is globally unique in the single-venue MVP so this
@@ -68,6 +69,30 @@ export async function listByOrg(orgId: string): Promise<AppUser[]> {
     .from(appUsers)
     .where(and(eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
     .orderBy(asc(appUsers.name));
+}
+
+/**
+ * Minimal profile lookup (id/name/email/tier) for a set of user ids within the
+ * org. Used by admin surfaces (pending payments, bookings) to attach the
+ * member display name to a booking row without selecting credential columns.
+ * Org-scoped: ids from another org never match. Returns [] for an empty input.
+ */
+export async function findProfilesByIds(
+  orgId: string,
+  ids: string[],
+): Promise<
+  { id: string; name: string; email: string; membershipTier: MembershipTier }[]
+> {
+  if (!ids.length) return [];
+  return db
+    .select({
+      id: appUsers.id,
+      name: appUsers.name,
+      email: appUsers.email,
+      membershipTier: appUsers.membershipTier,
+    })
+    .from(appUsers)
+    .where(and(eq(appUsers.orgId, orgId), inArray(appUsers.id, ids)));
 }
 
 /**

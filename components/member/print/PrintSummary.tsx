@@ -65,7 +65,7 @@ export function PrintSummary({
         <SummaryRow label="Harga Dasar" value={formatRupiah(hargaDasar)} />
         <div className="flex items-baseline justify-between">
           <span className="text-sm font-bold text-gray-900">Total</span>
-          <span className="text-base font-bold text-teal-600">
+          <span className="text-base font-bold text-blue-600">
             {formatRupiah(total)}
           </span>
         </div>

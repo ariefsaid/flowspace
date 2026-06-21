@@ -1,4 +1,5 @@
 import { startOfDay, subDays } from "date-fns";
+import Link from "next/link";
 import {
   Calendar,
   Activity,
@@ -113,12 +114,14 @@ export default async function AdminDashboardPage() {
           icon={Activity}
           accent="green"
         />
-        <StatTile
-          label="Pending Payments"
-          value={stats.pendingPayments}
-          icon={Clock}
-          accent="orange"
-        />
+        <Link href="/admin/pending" className="hover:opacity-90 transition-opacity">
+          <StatTile
+            label="Pending Payments"
+            value={stats.pendingPayments}
+            icon={Clock}
+            accent="orange"
+          />
+        </Link>
         <StatTile
           label="Total Users"
           value={stats.totalUsers}

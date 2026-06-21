@@ -344,6 +344,13 @@ are server-computed; the client never supplies `orgId`, a price, an amount, or a
 | AC-ADM-PEND-01..03 | Unit (RTL) | `app/(admin)/admin/pending/PendingClient.test.tsx` |
 | AC-ADM-USERS-01..04 | Unit (RTL) | `app/(admin)/admin/users/UsersClient.test.tsx` |
 | AC-ADM-ORDERS-01..05 | Unit (RTL) | `app/(admin)/admin/orders/page.test.tsx` |
+| AC-0239 | Unit (RTL) | `app/(member)/print/PrintClient.test.tsx` |
+| AC-0240 | Unit (RTL) | `app/(member)/print/PrintClient.test.tsx` |
+| AC-0241 | Unit | `lib/storage/uploads.test.ts` |
+| AC-0242 | Unit | `lib/storage/uploads.test.ts` |
+| AC-0242b | Unit | `lib/storage/uploads.test.ts` |
+| AC-0243 | Unit (node) | `app/(member)/print/actions.test.ts` |
+| AC-0244 | Unit (node) | `app/(member)/print/actions.test.ts` |
 
 ---
 
@@ -364,10 +371,11 @@ row here) — no new test needed, only an id:
    (two `it`s, both untagged — the header even says "AC-###" literally). Suggest `AC-250`.
 5. **FR-252 member-surface render + no-mock-import gates** — `TopupClient.test.tsx`, `DashboardClient.test.tsx`,
    `HistoryClient.test.tsx` (render-from-props + no-`lib/mock` gates). *All untagged.* Suggest `AC-252a/b/c`.
-6. **Member /print surface (`PrintClient.tsx`) has NO component test at all** — only the repo (`print.int.test.ts`)
-   and the e2e (AC-201) cover print. The client component's states (calculator total, "Saldo Setelah Print"
-   projection, history list, error surface) are unit-untested. This is a **real coverage gap**, not just an
-   untagged one — a `PrintClient.test.tsx` should be authored (suggest `AC-204` for the calculator/render states).
+6. **Member /print surface (`PrintClient.tsx`)** — now has component tests in
+   `app/(member)/print/PrintClient.test.tsx` (AC-0239: summary rendering, AC-0240: submit + error surface)
+   and action tests in `app/(member)/print/actions.test.ts` (AC-0243: file-required guard, AC-0244: upload-before-charge ordering).
+   Storage helpers are covered by `lib/storage/uploads.test.ts` (AC-0241: path scoping, AC-0242: MIME validation,
+   AC-0242b: magic-byte content validation). This gap is **closed**.
 
 ### Recon behavior with NO test (out of scope / simulated — confirm or schedule)
 - **Walk-in dashboard "Walk-in Aktif" running banner + provisional charge (OBS-213/240)** — rendered by

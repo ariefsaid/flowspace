@@ -48,7 +48,8 @@ describe("submitPrintJobAction", () => {
   });
 
   it("AC-0244: uploads BEFORE charging, and passes the storagePath to the job", async () => {
-    const pdf = new Blob([new Uint8Array([1, 2, 3])], { type: "application/pdf" });
+    // Use real PDF magic bytes (%PDF) so validatePrintMagicBytes passes
+    const pdf = new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31])], { type: "application/pdf" });
     await submitPrintJobAction(
       form({ fileName: "doc.pdf", pages: "1", copies: "1", colorMode: "BW" }, pdf),
     );
@@ -65,7 +66,8 @@ describe("submitPrintJobAction", () => {
 
   it("AC-0244: a failed upload prevents the charge (no orphan job)", async () => {
     vi.mocked(uploadPrintDocument).mockRejectedValueOnce(new Error("STORAGE_DOWN"));
-    const pdf = new Blob([new Uint8Array([1, 2, 3])], { type: "application/pdf" });
+    // Use real PDF magic bytes so magic validation passes; the upload mock throws STORAGE_DOWN
+    const pdf = new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31])], { type: "application/pdf" });
     await expect(
       submitPrintJobAction(form({ fileName: "doc.pdf", pages: "1", copies: "1", colorMode: "BW" }, pdf)),
     ).rejects.toThrow(/STORAGE_DOWN/);

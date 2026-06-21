@@ -87,6 +87,64 @@ export function buildPrintStoragePath(
   return `${orgId}/print/${jobId}/${safe}`;
 }
 
+// ---------------------------------------------------------------------------
+// Magic-byte signatures for content-type validation [SEC]
+// ---------------------------------------------------------------------------
+
+/**
+ * Map of MIME type prefixes to their required leading byte sequences.
+ * Only the MIME types in ALLOWED_PRINT_MIME_TYPES that have a known signature
+ * are listed here. Types without a known signature are not blocked.
+ */
+const MAGIC_BYTE_SIGNATURES: ReadonlyMap<string, readonly number[][]> = new Map([
+  ["application/pdf", [[0x25, 0x50, 0x44, 0x46]]],          // %PDF
+  ["image/png", [[0x89, 0x50, 0x4e, 0x47]]],                 // .PNG
+  ["image/jpeg", [[0xff, 0xd8, 0xff]]],                       // JFIF/EXIF
+  ["image/tiff", [
+    [0x49, 0x49, 0x2a, 0x00],                                 // II*\0 (little-endian)
+    [0x4d, 0x4d, 0x00, 0x2a],                                 // MM\0* (big-endian)
+  ]],
+  // OpenXML formats (docx/xlsx/pptx) share the ZIP container signature
+  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    [[0x50, 0x4b]]],
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    [[0x50, 0x4b]]],
+  ["application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    [[0x50, 0x4b]]],
+  // Legacy Office formats share the OLE2 compound document signature
+  ["application/msword",          [[0xd0, 0xcf, 0x11, 0xe0]]],
+  ["application/vnd.ms-excel",    [[0xd0, 0xcf, 0x11, 0xe0]]],
+  ["application/vnd.ms-powerpoint", [[0xd0, 0xcf, 0x11, 0xe0]]],
+]);
+
+/**
+ * Validate that a file's leading bytes match the claimed MIME type.
+ *
+ * Throws `Error("INVALID_FILE_CONTENT")` when the bytes do NOT match any
+ * known signature for the given MIME type. If the MIME type has no registered
+ * signature the function passes silently (unknown → don't block).
+ *
+ * [SEC]: call this server-side, after reading the raw bytes and before passing
+ * the file to Storage, to prevent MIME-spoofing (a client claiming "image/png"
+ * while uploading a shell script, etc.).
+ *
+ * @param buffer   - The raw file bytes (at least the first few bytes suffice,
+ *                   but a full Buffer / Uint8Array is fine).
+ * @param mimeType - The declared content type from the uploaded Blob.
+ */
+export function validatePrintMagicBytes(
+  buffer: Buffer | Uint8Array,
+  mimeType: string,
+): void {
+  const signatures = MAGIC_BYTE_SIGNATURES.get(mimeType);
+  if (!signatures) return; // unknown MIME — no signature to check, pass
+
+  const matches = signatures.some((sig) =>
+    sig.every((byte, i) => buffer[i] === byte),
+  );
+  if (!matches) throw new Error("INVALID_FILE_CONTENT");
+}
+
 /**
  * Validate a print file's MIME type and size before upload.
  *

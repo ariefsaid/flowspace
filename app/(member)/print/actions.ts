@@ -25,6 +25,7 @@ import {
   uploadPrintDocument,
   buildPrintStoragePath,
   validatePrintFile,
+  validatePrintMagicBytes,
 } from "@/lib/storage/uploads";
 import type { PrintColorMode } from "@/lib/db/enums";
 
@@ -61,6 +62,9 @@ export async function submitPrintJobAction(input: FormData) {
   const docId = createId();
   const storagePath = buildPrintStoragePath(user.orgId, docId, fileName);
   const arrayBuffer = await rawFile.arrayBuffer();
+  // Magic-byte check: ensure file content matches the claimed MIME [SEC].
+  // Must run AFTER arrayBuffer is read, BEFORE uploading to Storage.
+  validatePrintMagicBytes(Buffer.from(arrayBuffer), rawFile.type);
   await uploadPrintDocument(
     user.orgId,
     storagePath,

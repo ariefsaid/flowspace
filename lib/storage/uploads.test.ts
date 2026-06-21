@@ -12,6 +12,7 @@ import {
   ALLOWED_PRINT_MIME_TYPES,
   MAX_PRINT_FILE_SIZE_BYTES,
   validatePrintFile,
+  validatePrintMagicBytes,
 } from "./uploads";
 
 describe("buildPrintStoragePath", () => {
@@ -110,5 +111,80 @@ describe("validatePrintFile", () => {
     for (const mime of required) {
       expect(ALLOWED_PRINT_MIME_TYPES).toContain(mime);
     }
+  });
+});
+
+describe("validatePrintMagicBytes (AC-0242b)", () => {
+  // PDF magic: %PDF = 0x25 0x50 0x44 0x46
+  const pdfBytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]);
+  // PNG magic: 0x89 0x50 0x4e 0x47 ...
+  const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  // JPEG magic: 0xff 0xd8 0xff
+  const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+  // ZIP/OpenXML: PK = 0x50 0x4b
+  const zipBytes = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+  // OLE2 / Legacy Office: 0xd0 0xcf 0x11 0xe0
+  const oleBytes = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1]);
+
+  it("AC-0242b: PDF bytes pass for application/pdf", () => {
+    expect(() => validatePrintMagicBytes(pdfBytes, "application/pdf")).not.toThrow();
+  });
+
+  it("AC-0242b: PNG bytes labeled as image/png pass", () => {
+    expect(() => validatePrintMagicBytes(pngBytes, "image/png")).not.toThrow();
+  });
+
+  it("AC-0242b: JPEG bytes pass for image/jpeg", () => {
+    expect(() => validatePrintMagicBytes(jpegBytes, "image/jpeg")).not.toThrow();
+  });
+
+  it("AC-0242b: ZIP bytes pass for openxml docx MIME", () => {
+    expect(() =>
+      validatePrintMagicBytes(
+        zipBytes,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      )
+    ).not.toThrow();
+  });
+
+  it("AC-0242b: OLE bytes pass for application/msword", () => {
+    expect(() =>
+      validatePrintMagicBytes(oleBytes, "application/msword")
+    ).not.toThrow();
+  });
+
+  it("AC-0242b: PNG bytes labeled as application/pdf throw INVALID_FILE_CONTENT", () => {
+    expect(() =>
+      validatePrintMagicBytes(pngBytes, "application/pdf")
+    ).toThrow("INVALID_FILE_CONTENT");
+  });
+
+  it("AC-0242b: PDF bytes labeled as image/png throw INVALID_FILE_CONTENT", () => {
+    expect(() =>
+      validatePrintMagicBytes(pdfBytes, "image/png")
+    ).toThrow("INVALID_FILE_CONTENT");
+  });
+
+  it("AC-0242b: unknown MIME type passes regardless of bytes (don't block unknowns)", () => {
+    const randomBytes = Buffer.from([0x00, 0x01, 0x02, 0x03]);
+    expect(() =>
+      validatePrintMagicBytes(randomBytes, "application/octet-stream")
+    ).not.toThrow();
+  });
+
+  it("AC-0242b: TIFF little-endian (II) bytes pass for image/tiff", () => {
+    const tiffLE = Buffer.from([0x49, 0x49, 0x2a, 0x00]);
+    expect(() => validatePrintMagicBytes(tiffLE, "image/tiff")).not.toThrow();
+  });
+
+  it("AC-0242b: TIFF big-endian (MM) bytes pass for image/tiff", () => {
+    const tiffBE = Buffer.from([0x4d, 0x4d, 0x00, 0x2a]);
+    expect(() => validatePrintMagicBytes(tiffBE, "image/tiff")).not.toThrow();
+  });
+
+  it("AC-0242b: wrong bytes for image/tiff throw INVALID_FILE_CONTENT", () => {
+    expect(() =>
+      validatePrintMagicBytes(pdfBytes, "image/tiff")
+    ).toThrow("INVALID_FILE_CONTENT");
   });
 });

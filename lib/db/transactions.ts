@@ -91,43 +91,30 @@ export async function sumRevenueSince(orgId: string, since: Date): Promise<numbe
 }
 
 /**
- * Settle the BOOKING ledger row linked to a booking to COMPLETED — called when
- * the cashier approves an offline payment (approvePayment). Pass the caller's
- * Drizzle tx so the settle is atomic with the booking payment-status write.
- * Org + bookingId + type scoped (defence-in-depth; never touches another org).
+ * Patch the BOOKING ledger row linked to a booking.
+ *
+ * Replaces the two former helpers `settleBookingTransaction` (set status COMPLETED)
+ * and `setBookingTransactionAmount` (set amountRupiah). Pass only the fields you
+ * need to change; the WHERE clause is always org + bookingId + type='BOOKING'
+ * (defence-in-depth; never touches another org's rows).
+ *
+ * Pass the caller's Drizzle tx (`txdb`) so the update is atomic with the domain
+ * write (booking status / payment status flip).
+ *
+ * @param orgId     - Server-derived org (never client-supplied).
+ * @param bookingId - The booking whose ledger row to patch.
+ * @param patch     - Fields to set: { status?, amountRupiah? }.
+ * @param txdb      - Optional Drizzle transaction context (defaults to the global db).
  */
-export async function settleBookingTransaction(
+export async function updateBookingTransaction(
   orgId: string,
   bookingId: string,
+  patch: { status?: TransactionStatus; amountRupiah?: number },
   txdb: Pick<typeof db, "update"> = db,
 ): Promise<void> {
   await txdb
     .update(transactions)
-    .set({ status: "COMPLETED" })
-    .where(
-      and(
-        eq(transactions.orgId, orgId),
-        eq(transactions.bookingId, bookingId),
-        eq(transactions.type, "BOOKING"),
-      ),
-    );
-}
-
-/**
- * Sync the BOOKING ledger row's amount to the booking's final charge — called by
- * completeBooking once a walk-in's open duration is settled to an amount (the row
- * was created at 0). Pass the caller's tx so it's atomic with the booking update.
- * Org + bookingId + type scoped.
- */
-export async function setBookingTransactionAmount(
-  orgId: string,
-  bookingId: string,
-  amountRupiah: number,
-  txdb: Pick<typeof db, "update"> = db,
-): Promise<void> {
-  await txdb
-    .update(transactions)
-    .set({ amountRupiah })
+    .set(patch)
     .where(
       and(
         eq(transactions.orgId, orgId),

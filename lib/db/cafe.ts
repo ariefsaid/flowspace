@@ -14,11 +14,11 @@ import {
   cafeMenuItems,
   cafeOrders,
   cafeOrderItems,
-  appUsers,
   type CafeMenuItem,
   type CafeOrder,
   type CafeOrderItem,
 } from "@/lib/db/schema";
+import { findProfilesByIds } from "@/lib/db/users";
 import { computeOrderTotals } from "@/lib/cafe/pricing";
 import { recordTransaction } from "@/lib/db/transactions";
 import { generateOrderCode, nextStatus } from "@/lib/cafe/status";
@@ -280,14 +280,13 @@ async function attachRelations(
   const customerIds = [
     ...new Set(orders.filter((o) => o.customerUserId).map((o) => o.customerUserId!)),
   ];
-  // Org-scope the customer lookup too (defence-in-depth, cross-family review): a
-  // cross-org customerUserId must never hydrate another org's name/email.
-  const customers: { id: string; name: string; email: string }[] = customerIds.length
-    ? await db
-        .select({ id: appUsers.id, name: appUsers.name, email: appUsers.email })
-        .from(appUsers)
-        .where(and(inArray(appUsers.id, customerIds), eq(appUsers.orgId, orgId)))
-    : [];
+  // Delegate to the shared org-scoped profile lookup (findProfilesByIds already
+  // enforces orgId isolation; cross-org customerUserId never hydrates another org's
+  // name/email). We keep only { id, name, email } from the returned rows.
+  const profileRows = await findProfilesByIds(orgId, customerIds);
+  const customers: { id: string; name: string; email: string }[] = profileRows.map(
+    ({ id, name, email }) => ({ id, name, email }),
+  );
 
   const itemsByOrder = new Map<string, CafeOrderItem[]>();
   for (const item of allItems) {

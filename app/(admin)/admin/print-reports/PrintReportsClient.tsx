@@ -252,6 +252,9 @@ export function PrintReportsClient({
                           </span>
                           {job.discountRupiah > 0 && (
                             <span className="text-xs text-gray-400 line-through tabular-nums">
+                              <span className="sr-only">
+                                harga sebelum diskon{" "}
+                              </span>
                               {formatRupiah(job.grossRupiah)}
                             </span>
                           )}

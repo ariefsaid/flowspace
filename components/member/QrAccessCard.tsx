@@ -1,37 +1,52 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Key } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import { TOKEN_WINDOW_MS } from "@/lib/keycard/token";
 
-const REFRESH_SECONDS = 30;
-
-/** Generates a time-bucketed token so the QR changes every REFRESH_SECONDS. */
-function generateQrToken(memberId: string) {
-  const bucket = Math.floor(Date.now() / (REFRESH_SECONDS * 1000));
-  return `flowspace:access:${memberId}:${bucket}`;
-}
+const REFRESH_SECONDS = TOKEN_WINDOW_MS / 1000; // 30
 
 interface QrAccessCardProps {
-  memberId: string;
+  /**
+   * Server-signed, window-rotating token rendered as the QR value. The client
+   * only triggers rotation via `router.refresh()` — it NEVER signs the token.
+   * [SEC] (mirrors /keycard: lib/keycard/token is the single signer).
+   */
+  token: string;
 }
 
-export function QrAccessCard({ memberId }: QrAccessCardProps) {
-  const [token, setToken] = useState(() => generateQrToken(memberId));
-  const [secondsLeft, setSecondsLeft] = useState(() => {
-    const ms = Date.now();
-    return REFRESH_SECONDS - Math.floor((ms / 1000) % REFRESH_SECONDS);
-  });
+export function QrAccessCard({ token }: QrAccessCardProps) {
+  const router = useRouter();
+  const [secondsLeft, setSecondsLeft] = useState(() =>
+    REFRESH_SECONDS - Math.floor((Date.now() / 1000) % REFRESH_SECONDS),
+  );
 
+  // Per-second countdown drives the "Refreshes in Xs" display (cosmetic only).
   useEffect(() => {
-    const id = setInterval(() => {
-      const ms = Date.now();
-      const remaining = REFRESH_SECONDS - Math.floor((ms / 1000) % REFRESH_SECONDS);
-      setSecondsLeft(remaining);
-      setToken(generateQrToken(memberId));
+    const tick = setInterval(() => {
+      setSecondsLeft(
+        REFRESH_SECONDS - Math.floor((Date.now() / 1000) % REFRESH_SECONDS),
+      );
     }, 1000);
-    return () => clearInterval(id);
-  }, [memberId]);
+    return () => clearInterval(tick);
+  }, []);
+
+  // Re-fetch the RSC at each 30s window boundary so the server re-signs a fresh
+  // token for the new window. The token stays server-derived at all times.
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const msToNext = TOKEN_WINDOW_MS - (Date.now() % TOKEN_WINDOW_MS);
+    const timeout = setTimeout(() => {
+      router.refresh();
+      interval = setInterval(() => router.refresh(), TOKEN_WINDOW_MS);
+    }, msToNext);
+    return () => {
+      clearTimeout(timeout);
+      if (interval) clearInterval(interval);
+    };
+  }, [router]);
 
   return (
     <div className="flex flex-col items-center gap-3">

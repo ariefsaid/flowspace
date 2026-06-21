@@ -25,17 +25,21 @@ Surfaces come from `docs/specs/0001-recon-app-surface.spec.md`.
 ## OUTSTANDING — next work
 - [ ] **Activate the dormant cafe 5% discount** now that booking exists — flip `resolveDiscountEligibility` to consult `getActiveBooking` (ADR-0011).
 - [ ] **`/admin/settings`** config hub (tiers/discounts, facilities CRUD, cafe-menu CRUD, print pricing) — currently static; wire the config we own, keep integration panels (print-server/UniFi/GA/email) simulated.
-- [ ] **⚠️ Rendered round-2 design review (Part C) — BLOCKED on local env, must complete.** The harden did the SDD spec (0004), source-level design audit (2 token fixes applied), and print→Supabase Storage; but the **rendered** pixel-diff vs the captured originals could NOT run locally — this machine has **two Supabase stacks (54xxx + 64xxx) + a stale `.env.local`** so `requireSession()` 500s every authenticated render (login validates against one stack, SSR against another), and `.env*` is sandbox-read-denied. Fix the local env (point `.env.local` at the `:64321/:64322` stack, or stop the other stack) OR run the render in a clean env (CI preview), then re-run `design-reviewer` on `review/built/*.png` vs `review/recon/*.png`.
-- [ ] **Functional-push follow-ups (non-blocking, from review):** tier→discount + COLOR-rate as config (not constants); print-preview tier-discount display; users Add/Edit + booking "Tambah" stubs; `KEYCARD_TOKEN_SECRET` in prod env; admin date-filter wiring; keycard vs dashboard QR color consistency.
+- [ ] **Review minors (non-blocking, from the 4-reviewer battery):** magic-byte MIME validation for print uploads (currently trusts `Blob.type`; bucket is private so low risk); dedupe the two booking-ledger helpers (`settleBookingTransaction`/`setBookingTransactionAmount` → one `updateBookingTransaction`); `cafe.ts` customer hydration could call `users.findProfilesByIds`; print Total color teal-vs-original-blue (replica nuance — Director's call); admin "Pending Payments" KPI → link to `/admin/pending`; refresh spec 0004's "coverage gaps" note (PrintClient test now exists).
+- [ ] **Local-env note (ops, not code):** 3 Supabase CLI stacks run side-by-side — flowspace `64321/64322`, pmo-portal `54xxx`, gordi-mos `44xxx`. The repo `.env` must point at flowspace (`DATABASE_URL=…:64322`, `NEXT_PUBLIC_SUPABASE_URL=…:64321`); `lib/db/drizzle.ts` has no fallback so a wrong/stale `DATABASE_URL` breaks every server render. Re-seed (`pnpm db:seed:supabase`) after any `pnpm test:int` (integration tests truncate the shared dev DB).
+- [ ] **Functional-push follow-ups (non-blocking):** tier→discount + COLOR-rate as config (not constants); print-preview tier-discount display; users Add/Edit + booking "Tambah" stubs; `KEYCARD_TOKEN_SECRET` in prod env; admin date-filter wiring; keycard vs dashboard QR color consistency.
 - [ ] **I-022 follow-ups (non-blocking):** guest-order rate-limit + line-count cap; `advanceOrderStatusAsActor` test-seam relocate; `canAdminSetOrderStatus()` symmetry; `updated_at` DB trigger; AC-id hygiene.
 - [ ] **External integrations** (each its own owner-gated ADR/issue): payment gateway (Midtrans/Xendit), PaperCut print server, UniFi WiFi vouchers, real dynamic-QR door access, ESB/ERP. (Print **file upload** now uses Supabase Storage — done; only the physical printing is external.)
 
 ## DONE in the workflow-conformance harden (branch `feat/verticals-harden`)
 - [x] **SDD spec backfilled** — `docs/specs/0004-domain-verticals.spec.md` (OBS/FR/AC mapped to existing tests).
 - [x] **Print file upload → Supabase Storage** (our stack; org-scoped path, MIME allowlist + size cap; no migration). Closes the one "functional without external ties" gap.
-- [x] **Coverage gap closed** — `PrintClient.test.tsx` + `uploads.test.ts` (unit 166).
-- [x] **Design source-lens fixes** — keycard QR → DESIGN.md tokens; print submit btn off-palette `teal-400`→primary; WifiCard gradient→flat info-card.
-- [x] **gpt-5.4 cross-family security review** (during the push) — no Critical; keycard fail-closed + cafe hydration org-scope fixes applied.
+- [x] **Coverage gap closed** — `PrintClient.test.tsx` + `uploads.test.ts` + print action tests (unit 176, int 73, e2e 8).
+- [x] **Full 4-reviewer battery run** (by the book): spec-reviewer (matches spec), code-quality, design-reviewer (rendered round-2 on real screenshots), security-auditor (gpt-5.4 cross-family). All FIX-FIRST findings resolved:
+  - **[SEC]** print charged-orphan (app/bucket MIME mismatch + charge-before-upload) → migration 0007 widens bucket + upload-before-charge + file-required (AC-0243/0244); cafe hydration org-scoped; keycard fail-closed-in-prod.
+  - **Design (rendered)** wizard-stepper pill shape; admin orange-tile AA contrast (4.67:1); Riwayat empty states; keycard QR + print btn + WifiCard tokens.
+  - **Quality** AC-id collision de-duped; dual-mode print action removed (single FormData input).
+- [x] **Local env diagnosed + flowspace re-seeded** — the stale Prisma-era `.env` (DATABASE_URL→dead :5433) was the render blocker; correct flowspace env verified to render the app authenticated end-to-end.
 
 > NB: the Phase 1–3 sections below are the ORIGINAL frontend roadmap — those pixel surfaces are built/merged. The real outstanding work is the **domain backend verticals above** + the external integrations under Tech debt.
 

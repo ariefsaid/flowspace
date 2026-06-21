@@ -29,8 +29,9 @@
   components keep their interactivity and call the server actions).
 
 **Out (follow-up issues; tracked as OQ/FU below):** payment/checkout settlement; real-time push to the KDS
-(poll/manual-refresh is the MVP — FU-1); booking/“active session” domain (the 5% discount eligibility seam is
-stubbed server-side — FU-2 / OQ-1); print & transactions domains; admin menu CRUD (menu is seed-managed for now —
+(poll/manual-refresh is the MVP — FU-1); ~~booking/“active session” domain (the 5% discount eligibility seam is
+stubbed server-side — FU-2 / OQ-1)~~ **[RESOLVED 2026-06-21: the booking domain shipped and `resolveDiscountEligibility`
+now consults `getActiveBooking` — see AC-115]**; print & transactions domains; admin menu CRUD (menu is seed-managed for now —
 FU-3); POS member-discount rate reconciliation (POS mock shows 10%, member cafe shows 5% — OQ-2).
 
 ## Roles (server-trusted, from spec 0002)
@@ -146,9 +147,14 @@ an order for themselves but may **not** mutate order status.
   Given the same lines and `discountEligible: true`,
   When `computeOrderTotals` runs,
   Then `discountRupiah = round(82000 * 0.05) = 4100` and `totalRupiah = 77900`. (FR-112, NFR-100)
+- **AC-115** — Discount eligibility is resolved server-side from an active coworking session (OBS-070).
+  Given the session user, When `resolveDiscountEligibility(user)` runs,
+  Then it returns `true` only for a `MEMBER` who has an `ACTIVE` booking (consulted org-scoped via
+  `getActiveBooking`), and `false` for guests, non-members, and members with no active session — never trusting the
+  client. (Activates the ADR-0011 seam; supersedes the FU-2/OQ-1 "dormant until booking" deferral.)
 - **AC-112** — A member order persists with the member as customer and server totals.
   Given an authenticated member and a valid line list,
-  When `createOrder` persists the order (eligible=false in the no-booking MVP),
+  When `createOrder` persists the order (with or without an eligible discount),
   Then a `CafeOrder` exists with `customerUserId = member.id`, `guestName = null`, `status = NEW`, a unique per-org
   `code`, and `subtotal/discount/total` equal to the server computation (never a client value), with line snapshots
   of `nameSnapshot`/`unitPriceRupiah`. (FR-111, FR-112, FR-114, FR-115)
@@ -210,11 +216,14 @@ an order for themselves but may **not** mutate order status.
 | AC-124, AC-125 | Integration (Prisma) | cross-org isolation on mutate + reads |
 
 ## Open questions (need Director/owner sign-off)
-- **OQ-1 (discount eligibility seam):** the 5% member discount is gated on an "active coworking session" that has **no
-  DB domain yet** (booking is a later vertical). MVP: `createOrder` takes a server-resolved `discountEligible` boolean
-  that **defaults to `false`** (no member discount applied in this issue), with the seam wired so the booking vertical
-  flips it on. Confirm: ship member orders at full price now (discount math unit-tested, wired but dormant), vs. block
-  this vertical on booking? **Recommended: ship dormant** (ADR-0011). (FU-2)
+- **OQ-1 (discount eligibility seam): RESOLVED 2026-06-21.** Shipped dormant in this issue per the recommendation
+  below; the booking vertical later landed, so `resolveDiscountEligibility` now consults `getActiveBooking` and the
+  5% applies for a member with an `ACTIVE` session (see AC-115). (FU-2 closed.)
+  > _Open product nuance (security review, non-blocking):_ a walk-in booking stays `ACTIVE` until checkout, so a
+  > member who never closes their session keeps the discount past their actual presence. If OBS-070 means "physically
+  > present," gate on `startAt` recency. Owner OQ — flagged, not a security bug (still the member's own booking).
+  > _Original (kept for history):_ the 5% was gated on an active session with no DB domain yet; MVP shipped a
+  > server-resolved `discountEligible` defaulting to `false`, seam wired for the booking vertical to flip on.
 - **OQ-2 (POS discount rate):** member `/cafe` banner says **5%**; the POS mock hardcodes **10%**. The canonical
   member cafe discount is 5% (OBS-070). Confirm POS should also use 5% server-side (treat the 10% mock as a recon
   artifact to reconcile), or keep POS out of scope this issue (wire POS read-only menu + leave its checkout dormant).

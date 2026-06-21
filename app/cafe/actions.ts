@@ -29,7 +29,7 @@ async function resolveGuestOrgId(slug: string): Promise<string> {
  * Place an order for a member (authenticated) or guest (no session).
  *
  * Member path: orgId from session, customerUserId from session, discount via
- * resolveDiscountEligibility (dormant false per ADR-0011).
+ * resolveDiscountEligibility (5% for a member with an active session — ADR-0011).
  * Guest path: orgId resolved server-side by SEED_ORG_SLUG env, captures
  * guestName (required, non-empty), no discount.
  *

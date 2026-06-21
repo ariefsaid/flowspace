@@ -5,9 +5,9 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { formatRupiah } from "@/lib/format";
 
-/** Pricing constants (OBS-082 note: Rp 500/page B&W A4 base). */
+/** Pricing constants — must match the server (lib/print/pricing.ts): BW Rp500/page, COLOR Rp1500/page. */
 const BASE_PRICE_BW = 500;
-const BASE_PRICE_COLOR = 2000;
+const BASE_PRICE_COLOR = 1500;
 
 interface PrintSummaryProps {
   pages: number;
@@ -24,17 +24,17 @@ export function PrintSummary({
   copies,
   colorMode,
   paperSize,
-  duplex,
   printBalance,
   onSubmit,
 }: PrintSummaryProps) {
   const basePerPage = colorMode === "bw" ? BASE_PRICE_BW : BASE_PRICE_COLOR;
-  // Duplex halves the number of physical sheets but pages remain full
-  const effectiveSheets = duplex ? Math.ceil(pages / 2) : pages;
-  const hargaDasar = effectiveSheets * basePerPage;
+  const hargaDasar = pages * basePerPage;
   const total = hargaDasar * copies;
   const totalPages = pages * copies;
-  const saldoSetelahPrint = printBalance - Math.ceil(total / BASE_PRICE_BW);
+  // Sheets debited = pages × copies, matching the server (lib/db/print.ts).
+  // ponytail: tier discount is applied server-side; this preview shows the
+  // pre-discount total (a member is charged ≤ this) — exact-discount preview is a polish follow-up.
+  const saldoSetelahPrint = printBalance - totalPages;
 
   return (
     <Card className="p-6">

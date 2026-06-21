@@ -74,6 +74,27 @@ describe("PrintReportsClient mappers", () => {
   });
 });
 
+describe("print-reports source hygiene", () => {
+  it("no-mock-import gate: print-reports files do not import lib/mock", async () => {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const dir = path.resolve(__dirname);
+    const files = await fs.readdir(dir);
+    const srcFiles = files.filter(
+      (f) =>
+        (f.endsWith(".tsx") || f.endsWith(".ts")) &&
+        !f.endsWith(".test.tsx") &&
+        !f.endsWith(".test.ts"),
+    );
+    for (const file of srcFiles) {
+      const content = await fs.readFile(path.join(dir, file), "utf8");
+      expect(content, `${file} must not import lib/mock`).not.toMatch(
+        /from\s+["'].*lib\/mock["']/,
+      );
+    }
+  });
+});
+
 describe("PrintReportsClient render", () => {
   it("AC-302: renders a discounted row with derived % and struck-through gross", () => {
     render(

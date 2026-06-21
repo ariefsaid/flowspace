@@ -11,39 +11,9 @@ import {
 import { StatTile, Badge, Card } from "@/components/ui";
 import { formatRupiah, formatDateID } from "@/lib/format";
 import type { PrintColorMode, PrintJobStatus } from "@/lib/db/enums";
+import type { AdminPrintJobView, PrintReportsSummary } from "./derive";
 
-// ---------------------------------------------------------------------------
-// View model — one per print job, billing-detail shape (OBS-035).
-// Monetary fields are server-computed integers from the persisted job; the
-// discount % is derived for presentation only (NFR-300).
-// ---------------------------------------------------------------------------
-
-export interface AdminPrintJobView {
-  id: string;
-  user: string;
-  fileName: string;
-  pages: number;
-  colorMode: PrintColorMode;
-  paperSize: string;
-  /** Absolute discount in Rupiah (0 = none). */
-  discountRupiah: number;
-  /** Gross charge before discount (net + discount). */
-  grossRupiah: number;
-  /** Net charge after discount (the persisted total). */
-  netRupiah: number;
-  /** ISO timestamp. */
-  datetime: string;
-  status: PrintJobStatus;
-}
-
-export interface PrintReportsSummary {
-  totalJobs: number;
-  totalPages: number;
-  uniqueUsers: number;
-  /** Σ net charge over COMPLETED jobs. */
-  totalRevenue: number;
-  completedCount: number;
-}
+export type { AdminPrintJobView, PrintReportsSummary };
 
 // ---------------------------------------------------------------------------
 // Pure presentational mappers (AC-302) — exported for unit coverage.

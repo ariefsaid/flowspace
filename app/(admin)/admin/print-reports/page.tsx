@@ -9,11 +9,8 @@
 import { requireSession } from "@/lib/auth/session";
 import { listPrintJobsForAdmin } from "@/lib/db/print";
 import { findProfilesByIds } from "@/lib/db/users";
-import {
-  PrintReportsClient,
-  type AdminPrintJobView,
-  type PrintReportsSummary,
-} from "./PrintReportsClient";
+import { PrintReportsClient } from "./PrintReportsClient";
+import { toView, buildSummary } from "./derive";
 
 export default async function AdminPrintReportsPage() {
   const { orgId } = await requireSession();
@@ -25,28 +22,8 @@ export default async function AdminPrintReportsPage() {
   const profiles = await findProfilesByIds(orgId, memberIds);
   const nameById = new Map(profiles.map((p) => [p.id, p.name]));
 
-  const jobs: AdminPrintJobView[] = rows.map((r) => ({
-    id: r.id,
-    user: nameById.get(r.userId) ?? "—",
-    fileName: r.fileName,
-    pages: r.pages,
-    colorMode: r.colorMode,
-    paperSize: r.paperSize,
-    discountRupiah: r.discountRupiah,
-    grossRupiah: r.totalRupiah + r.discountRupiah,
-    netRupiah: r.totalRupiah,
-    datetime: r.createdAt.toISOString(),
-    status: r.status,
-  }));
-
-  const completed = jobs.filter((j) => j.status === "COMPLETED");
-  const summary: PrintReportsSummary = {
-    totalJobs: jobs.length,
-    totalPages: jobs.reduce((s, j) => s + j.pages, 0),
-    uniqueUsers: new Set(jobs.map((j) => j.user)).size,
-    totalRevenue: completed.reduce((s, j) => s + j.netRupiah, 0),
-    completedCount: completed.length,
-  };
+  const jobs = rows.map((r) => toView(r, nameById.get(r.userId) ?? "—"));
+  const summary = buildSummary(rows);
 
   return <PrintReportsClient jobs={jobs} summary={summary} />;
 }

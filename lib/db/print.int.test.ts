@@ -355,15 +355,16 @@ describe("lib/db/print", () => {
       }
     });
 
-    it("AC-301: revenue = sum of totalRupiah over COMPLETED jobs (org-scoped)", async () => {
+    it("AC-300: org B's COMPLETED revenue never leaks into org A's rows", async () => {
+      // The summary derivation itself is unit-owned (AC-301, derive.test.ts);
+      // here we prove the org-scoping the report's revenue depends on.
       const rows = await listPrintJobsForAdmin(orgAId);
       const revenue = rows
         .filter((j) => j.status === "COMPLETED")
         .reduce((s, j) => s + j.totalRupiah, 0);
       // The org-A COMPLETED job (12000) is counted; org B's 2500 is not.
       expect(revenue).toBeGreaterThanOrEqual(12000);
-      const totalPages = rows.reduce((s, j) => s + j.pages, 0);
-      expect(totalPages).toBeGreaterThanOrEqual(14); // 10 + 4 markers
+      expect(rows.some((j) => j.totalRupiah === 2500)).toBe(false);
     });
   });
 });

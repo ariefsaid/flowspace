@@ -17,3 +17,47 @@ export type DrinkTemperature = (typeof DRINK_TEMPERATURES)[number];
 
 export const SUGAR_LEVELS = ["NORMAL", "LESS", "NONE"] as const;
 export type SugarLevel = (typeof SUGAR_LEVELS)[number];
+
+// -- Booking domain (I-021) -------------------------------------------------
+export const BOOKING_FACILITY_TYPES = [
+  "WALKIN_COWORKING",
+  "WALKIN_MEETING",
+  "COWORKING_SEAT",
+  "MEETING_ROOM",
+  "FULL_ROOM",
+] as const;
+export type BookingFacilityType = (typeof BOOKING_FACILITY_TYPES)[number];
+
+export const BOOKING_STATUSES = ["ACTIVE", "COMPLETED", "CANCELLED"] as const;
+export type BookingStatus = (typeof BOOKING_STATUSES)[number];
+
+export const BOOKING_PAYMENT_STATUSES = [
+  "WAITING_CASHIER",
+  "PAID_CASHIER",
+  "PAID_ONLINE",
+  "PENDING",
+] as const;
+export type BookingPaymentStatus = (typeof BOOKING_PAYMENT_STATUSES)[number];
+
+export const FACILITY_TYPES = ["COWORKING_SEAT", "MEETING_ROOM"] as const;
+export type FacilityType = (typeof FACILITY_TYPES)[number];
+
+// -- Print domain (I-023) ---------------------------------------------------
+export const PRINT_COLOR_MODES = ["BW", "COLOR"] as const;
+export type PrintColorMode = (typeof PRINT_COLOR_MODES)[number];
+
+export const PRINT_JOB_STATUSES = ["PENDING", "READY", "COMPLETED"] as const;
+export type PrintJobStatus = (typeof PRINT_JOB_STATUSES)[number];
+
+// -- Transactions ledger (I-020/021/022/023 — unified reporting) ------------
+export const TRANSACTION_TYPES = [
+  "PACKAGE_PURCHASE",
+  "CAFE_ORDER",
+  "PRINT_JOB",
+  "BOOKING",
+  "PRINT_TOPUP",
+] as const;
+export type TransactionType = (typeof TRANSACTION_TYPES)[number];
+
+export const TRANSACTION_STATUSES = ["COMPLETED", "PENDING"] as const;
+export type TransactionStatus = (typeof TRANSACTION_STATUSES)[number];

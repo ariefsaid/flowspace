@@ -56,6 +56,7 @@ export function PrintClient({
   const [printer, setPrinter] = useState("");
   const [duplex, setDuplex] = useState(false);
   const [fileName, setFileName] = useState<string>("");
+  const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,6 +74,8 @@ export function PrintClient({
     const map: Record<string, string> = {
       INSUFFICIENT_BALANCE: "Saldo print tidak cukup untuk job ini.",
       INVALID_FILE: "Pilih file yang ingin dicetak terlebih dahulu.",
+      INVALID_FILE_TYPE: "Format file tidak didukung. Gunakan PDF, Word, Excel, PowerPoint, atau gambar.",
+      FILE_TOO_LARGE: "Ukuran file terlalu besar. Maksimal 10 MB.",
       INVALID_PAGES: "Jumlah halaman tidak valid.",
       INVALID_COPIES: "Jumlah copy tidak valid.",
       UNAUTHENTICATED: "Sesi berakhir, silakan masuk kembali.",
@@ -85,16 +88,19 @@ export function PrintClient({
     setError(null);
     setSubmitting(true);
     try {
-      await submitPrintJobAction({
-        // Generic default if the member hasn't picked a file yet (upload is
-        // simulated — no real storage this push, ADR defers hardware).
-        fileName: fileName || "dokumen.pdf",
-        pages: docPages,
-        copies,
-        colorMode: (colorMode === "bw" ? "BW" : "COLOR") as PrintColorMode,
-        paperSize,
-        duplex,
-      });
+      // Build a FormData payload so the server action can receive the file
+      // bytes without exposing the service-role key to the client.
+      const formData = new FormData();
+      formData.set("fileName", fileName || "dokumen.pdf");
+      formData.set("pages", String(docPages));
+      formData.set("copies", String(copies));
+      formData.set("colorMode", (colorMode === "bw" ? "BW" : "COLOR") as PrintColorMode);
+      formData.set("paperSize", paperSize);
+      formData.set("duplex", String(duplex));
+      if (file) {
+        formData.set("file", file);
+      }
+      await submitPrintJobAction(formData);
     } catch (err) {
       setError(toSubmitMessage(err));
       setSubmitting(false);
@@ -102,10 +108,11 @@ export function PrintClient({
     }
     setSubmitting(false);
     setFileName("");
+    setFile(null);
     startTransition(() => {
       router.refresh();
     });
-  }, [submitting, fileName, docPages, copies, colorMode, paperSize, duplex, router]);
+  }, [submitting, file, fileName, docPages, copies, colorMode, paperSize, duplex, router]);
 
   return (
     <div className="max-w-6xl space-y-6">
@@ -140,7 +147,12 @@ export function PrintClient({
         <div className="space-y-6">
           {/* ---- Upload card ---- */}
           <Card className="p-6">
-            <UploadDropzone onFileSelect={(file) => setFileName(file.name)} />
+            <UploadDropzone
+              onFileSelect={(f) => {
+                setFile(f);
+                setFileName(f.name);
+              }}
+            />
           </Card>
 
           {/* ---- Opsi Print card ---- */}

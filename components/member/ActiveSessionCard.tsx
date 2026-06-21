@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { DoorOpen } from "lucide-react";
 import { formatRupiah } from "@/lib/format";
-import type { ActiveSession } from "@/lib/mock/types";
+import type { ActiveSession } from "@/lib/types/views";
 
 interface ActiveSessionCardProps {
   session: ActiveSession;

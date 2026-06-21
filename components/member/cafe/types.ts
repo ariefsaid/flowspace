@@ -1,4 +1,4 @@
-import type { MenuItem } from "@/lib/mock";
+import type { MenuItem } from "@/lib/types/views";
 import type { VariantSelection } from "./VariantModal";
 
 export interface CartItem {

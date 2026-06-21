@@ -142,7 +142,7 @@ function toMockMenuItem(item: MenuItemView) {
     id: item.id,
     name: item.name,
     emoji: item.emoji,
-    category: (CATEGORY_LABEL[item.category] ?? item.category) as import("@/lib/mock/types").MenuCategory,
+    category: (CATEGORY_LABEL[item.category] ?? item.category) as import("@/lib/types/views").MenuCategory,
     price: item.priceRupiah,
     description: item.description,
     hasVariants: item.hasVariants,

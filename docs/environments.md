@@ -8,9 +8,16 @@
 | **prod** | A Supabase project — **cloud vs self-host + Indonesia data-residency deferred + owner-gated** | production | owner-approved only |
 
 ## Rules
-- **DB of record = `supabase/migrations/`** — one ordered source. `0000_app_schema.sql` (enums + `organizations` +
-  `app_users`) applies first, then `0001_auth_link` (FK to `auth.users`), `0002`/`0004` RLS, `0003` storage. The
-  Supabase CLI applies **every `.sql` in `supabase/migrations/` in filename order** at init — so down-migrations live
+- **DB of record = `supabase/migrations/`** — one ordered source. Applies every `.sql` in filename order; the
+  full set on `main` is `0000`–`0007`:
+  `0000_app_schema.sql` (enums + `organizations` + `app_users`) ·
+  `0001_auth_link.sql` (FK to `auth.users` + `current_org()`) ·
+  `0002_rls_app_users.sql` / `0004_rls_organizations.sql` (RLS) ·
+  `0003_storage_bucket.sql` (storage bucket) ·
+  `0005_cafe_domain.sql` (cafe tables + RLS + Realtime) ·
+  `0006_domain_verticals.sql` (bookings/packages/print/transactions) ·
+  `0007_print_storage.sql` (print-storage bucket widen).
+  The Supabase CLI applies **every `.sql` in `supabase/migrations/` in filename order** at init — so down-migrations live
   in `supabase/migrations/_down/` (the CLI has no down concept), never in the applied dir.
 - **`drizzle-orm` is the query layer** (`lib/db/schema.ts` mirrors the SQL); drizzle-kit is NOT the DDL authority.
 - **Fresh apply is the contract.** `pnpm exec supabase db reset` re-applies all migrations on an empty DB — this is

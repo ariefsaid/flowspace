@@ -1,7 +1,9 @@
 # Spec 0003 — Cafe domain (DB-backed menu + order lifecycle)
 
 - Status: Draft (for I-022)
-- Depends on: spec 0002 (auth/session/middleware/repository seam, merged in I-004); ADR-0001, ADR-0003, ADR-0004, ADR-0010.
+- Depends on: spec 0002 (auth/session/middleware/repository seam, merged in I-004); ADR-0004, ADR-0010, ADR-0011,
+  ADR-0012, ADR-0013, ADR-0014, ADR-0015 (ADR-0001/0003 superseded — the original Prisma/NextAuth stack is no longer
+  live; see `docs/adr/README.md`).
 - Source of behavior: the live product's cafe surfaces (recon) for `OBS-*`; net-new **server-side write behavior**
   (order creation, server-computed totals, status lifecycle, server-side authz on the mutation) as `FR-*`.
 - Purpose: replace the hardcoded cafe MOCK (`lib/mock/cafe.ts`, `lib/mock/barista.ts`, inline `adminOrders`) with a
@@ -218,6 +220,8 @@ an order for themselves but may **not** mutate order status.
   artifact to reconcile), or keep POS out of scope this issue (wire POS read-only menu + leave its checkout dormant).
   **Recommended: POS reads live menu; POS checkout deferred to a POS-specific issue** to avoid guessing its discount
   rule. (FU-3)
+  - **Resolution (2026-06-21):** POS now reads the **live** menu from `listMenu` (resolved); POS **checkout remains
+    deferred** to a POS-specific issue — `createOrder` from `/admin/pos` is not yet wired.
 - **OQ-3 (order-code format):** generate a 6-char lowercase base36 token rendered as `#xxxxxx` (matches `OBS-034`
   `#vohwrk`), uniqueness enforced by `@@unique([orgId, code])` with a bounded retry on collision. Confirm acceptable
   vs. a monotonic per-day counter (ADR-0012).

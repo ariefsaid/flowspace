@@ -1,6 +1,7 @@
 # Spec 0001 — Recon: live-product surface map
 
-- Status: Draft (admin + member + barista surfaces mapped via I-001; deeper per-surface capture pending per issue)
+- Status: Built — surfaces replicated + functional on `main` (2026-06-21); recon text retained as the observation
+  record.
 - Source: the live product (admin + member recon sessions, 2026-06-15). Framework confirmed: **Next.js App Router** +
   Tailwind + `next/font`; backend Postgres. Locale **Bahasa Indonesia**.
 - Purpose: enumerate every surface to replicate, as the backlog's source of truth. Each surface gets its own
@@ -50,7 +51,11 @@
 - OBS-032: `/admin/pending` — pending-payment approval queue. *Detail pending.*
 - OBS-033: `/admin/pos` — point-of-sale for counter cafe orders (with member discount). *Detail pending.*
 - OBS-034: `/admin/orders` — cafe order list + fulfillment status. *Detail pending.*
-- OBS-035: `/admin/print-reports` — per-user print jobs + charges (pages × B/W|color × size, discount). *Detail pending.*
+- OBS-035: `/admin/print-reports` — per-user print jobs + charges (pages × B/W|color × size, discount). *Detail
+  pending.*
+  - **Re-recon 2026-06-21:** the current live product redirects `/admin/print-reports` → `/dashboard`; the built page
+    (`app/(admin)/admin/print-reports/page.tsx`) is a static placeholder with hardcoded mock data — treat as
+    **deferred/unverified (owner OQ)**, not a confirmed original surface.
 - OBS-036: `/admin/settings` — pricing/packages/discount/tier configuration. *Detail pending.*
 
 ### Cross-cutting (observed)
@@ -146,13 +151,17 @@ right side member name + "Keluar".
   menu item cards (Pilih Variant / Tambah) as member `/cafe` but **no member discount**. Cart titled "Keranjang",
   empty state "Keranjang masih kosong". Checkout collects guest name.
 
-## Open recon items (before specing each surface)
-1. Admin sub-pages (`/admin/users|bookings|pending|orders|print-reports|settings`) — capture under a clean admin session.
-2. Variant modal contents (drink hot/cold + sugar options + price deltas) and cart/checkout flow on `/cafe`.
-3. Booking wizard steps 2–4 (time picker, interactive seat map, confirmation/payment) — capture each step.
-4. Exact design tokens (colors, type scale, spacing, radius, shadows) → `DESIGN.md` (design-architect Foundation, I-002).
-5. Each admin sub-page's table columns, filters, actions, modals, and empty/error states.
-6. Pricing source of truth & discount matrix (print base vs 20%; cafe 5%; coworking/meeting tier discounts) from admin Settings.
-7. Data model → `supabase/migrations/` (I-005): users, memberships+tiers, time-credit ledger, print-balance ledger,
-   bookings (walk-in vs scheduled, payment state machine), rooms/seats, cafe menu+variants+orders+order-status,
-   print jobs, transactions, wifi vouchers, QR/keycard tokens, settings.
+## Open recon items (RESOLVED — kept as history; all built on `main` as of 2026-06-21)
+
+> All seven items below are resolved. Tokens → `DESIGN.md`; data model → `supabase/migrations/` `0000`–`0007`;
+booking wizard → `app/(member)/booking/BookingClient.tsx`; admin sub-pages → all live (see `docs/backlog.md`).
+
+~~1. Admin sub-pages (`/admin/users|bookings|pending|orders|print-reports|settings`) — capture under a clean admin session.~~
+~~2. Variant modal contents (drink hot/cold + sugar options + price deltas) and cart/checkout flow on `/cafe`.~~
+~~3. Booking wizard steps 2–4 (time picker, interactive seat map, confirmation/payment) — capture each step.~~
+~~4. Exact design tokens (colors, type scale, spacing, radius, shadows) → `DESIGN.md` (design-architect Foundation, I-002).~~
+~~5. Each admin sub-page's table columns, filters, actions, modals, and empty/error states.~~
+~~6. Pricing source of truth & discount matrix (print base vs 20%; cafe 5%; coworking/meeting tier discounts) from admin Settings.~~
+~~7. Data model → `supabase/migrations/` (I-005): users, memberships+tiers, time-credit ledger, print-balance ledger,~~
+~~   bookings (walk-in vs scheduled, payment state machine), rooms/seats, cafe menu+variants+orders+order-status,~~
+~~   print jobs, transactions, wifi vouchers, QR/keycard tokens, settings.~~

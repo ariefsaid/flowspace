@@ -1,3 +1,5 @@
+> **SUPERSEDED by [docs/plans/2026-06-16-cafe-domain-supabase.md](2026-06-16-cafe-domain-supabase.md)** — this is the original Prisma I-022 plan, kept as history; the cafe domain shipped on Supabase+Drizzle (PR #3).
+
 # Plan — I-022 Cafe domain (DB-backed menu + order lifecycle)
 
 - Spec: `docs/specs/0003-cafe-domain.spec.md` · ADRs: 0011 (discount seam), 0012 (order code) · Pyramid: ADR-0010.

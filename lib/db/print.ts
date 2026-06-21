@@ -23,7 +23,7 @@ import type { PrintColorMode } from "@/lib/db/enums";
 
 /**
  * Org + user scoped print history, newest first (member /print surface).
- * AC-0234 / FR-231.
+ * AC-0237 / FR-243.
  */
 export function listPrintJobsByUser(
   orgId: string,
@@ -58,7 +58,7 @@ export function listPrintJobsByUser(
  *   no job, no ledger row, no debit (AC-0235, "no write").
  * - Job insert + balance debit + ledger write are all in ONE db.transaction.
  *
- * AC-0234, AC-0235, AC-0236 / FR-230–232.
+ * AC-0234, AC-0235, AC-0236 / FR-240–242.
  */
 export async function submitPrintJob(input: {
   orgId: string;
@@ -69,6 +69,7 @@ export async function submitPrintJob(input: {
   colorMode: PrintColorMode;
   paperSize?: string;
   duplex?: boolean;
+  storagePath?: string | null;
 }): Promise<PrintJob> {
   // --- Input validation (client-supplied scalars; bound before any DB work) ---
   const fileName = (input.fileName ?? "").trim().slice(0, 255);
@@ -134,6 +135,7 @@ export async function submitPrintJob(input: {
         pricePerPageRupiah: totals.pricePerPageRupiah,
         discountRupiah: totals.discountRupiah,
         totalRupiah: totals.totalRupiah,
+        storagePath: input.storagePath ?? null,
         status: "PENDING",
       })
       .returning();

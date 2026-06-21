@@ -80,10 +80,19 @@ test("AC-201 member submits a 1-page B&W print job: balance decreases by 1 and j
 
   // Sanity: the default 1-page BW job is affordable so the submit button is
   // enabled (PrintSummary disables submit when saldoSetelahPrint < 0).
+  // ── ARRANGE: pick a document — a print job now REQUIRES a file (it is
+  // uploaded to Supabase Storage before the job is charged). Set the hidden
+  // file input on the upload dropzone with a tiny in-memory PDF. ──
+  await page.setInputFiles('input[type="file"]', {
+    name: "dokumen.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"),
+  });
+
   const submitBtn = page.getByRole("button", { name: /Submit Print Job/ });
   await expect(submitBtn).toBeEnabled({ timeout: 10_000 });
 
-  // ── ACT: submit a 1-page B&W job (client defaults = 1 page / BW / 1 copy) ──
+  // ── ACT: submit the 1-page B&W job (client defaults = 1 page / BW / 1 copy) ──
   await submitBtn.click();
 
   // ── ASSERT (1): print balance decreased by exactly SHEETS_DEBITED ──

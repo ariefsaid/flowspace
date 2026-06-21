@@ -90,6 +90,25 @@ describe("HistoryClient", () => {
     expect(screen.queryByText("Meeting Room A")).toBeNull();
   });
 
+  it("shows empty state for Booking tab when bookings array is empty", () => {
+    render(<HistoryClient bookings={[]} transactions={transactions} />);
+
+    expect(
+      screen.getByText("Belum ada riwayat booking."),
+    ).toBeInTheDocument();
+    // Transaction rows must not bleed into the booking tab
+    expect(screen.queryByText("Pesanan Cafe")).toBeNull();
+  });
+
+  it("shows empty state for Transaksi tab when transactions array is empty", () => {
+    render(<HistoryClient bookings={bookings} transactions={[]} />);
+
+    fireEvent.click(screen.getByText("Transaksi (0)"));
+    expect(
+      screen.getByText("Belum ada transaksi."),
+    ).toBeInTheDocument();
+  });
+
   it("no-mock-import gate: history surface files do not import lib/mock", async () => {
     const fs = await import("node:fs/promises");
     const path = await import("node:path");

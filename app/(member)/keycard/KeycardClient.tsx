@@ -9,6 +9,11 @@ import { Card } from "@/components/ui/Card";
 import { cn } from "@/lib/cn";
 import { TOKEN_WINDOW_MS } from "@/lib/keycard/window";
 
+// DESIGN.md color tokens (QRCodeSVG needs literal color props, not classes):
+// background (#ffffff) + foreground (#020817 / slate-950). High-contrast for QR scannability.
+const QR_BG = "#ffffff";
+const QR_FG = "#020817";
+
 // ---------------------------------------------------------------------------
 // View model (server-read active booking → passed as props)
 // ---------------------------------------------------------------------------
@@ -89,8 +94,8 @@ function ActiveQrState({ booking, token }: ActiveQrProps) {
         <QRCodeSVG
           value={token}
           size={200}
-          bgColor="#ffffff"
-          fgColor="#0f172a"
+          bgColor={QR_BG}
+          fgColor={QR_FG}
           level="M"
           includeMargin={false}
         />

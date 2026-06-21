@@ -21,8 +21,7 @@ import { db } from "@/lib/db/drizzle";
 import { bookings, facilities, type Booking, type Facility } from "@/lib/db/schema";
 import {
   recordTransaction,
-  settleBookingTransaction,
-  setBookingTransactionAmount,
+  updateBookingTransaction,
 } from "@/lib/db/transactions";
 import type {
   BookingFacilityType,
@@ -316,7 +315,7 @@ export async function completeBooking(
       .returning();
     if (!updated) throw new Error("INVALID_TRANSITION");
 
-    await setBookingTransactionAmount(orgId, id, amountRupiah, tx);
+    await updateBookingTransaction(orgId, id, { amountRupiah }, tx);
     return updated;
   });
 }
@@ -420,7 +419,7 @@ export async function approvePayment(
       )
       .returning();
     if (!updated) throw new Error("INVALID_TRANSITION");
-    await settleBookingTransaction(orgId, id, tx);
+    await updateBookingTransaction(orgId, id, { status: "COMPLETED" }, tx);
     return updated;
   });
 }

@@ -65,7 +65,7 @@ export function PrintSummary({
         <SummaryRow label="Harga Dasar" value={formatRupiah(hargaDasar)} />
         <div className="flex items-baseline justify-between">
           <span className="text-sm font-bold text-gray-900">Total</span>
-          <span className="text-base font-bold text-teal-600">
+          <span className="text-base font-bold text-blue-600">
             {formatRupiah(total)}
           </span>
         </div>
@@ -91,7 +91,7 @@ export function PrintSummary({
       <Button
         variant="primary"
         size="lg"
-        className="mt-5 w-full gap-2 bg-teal-400 hover:bg-teal-500"
+        className="mt-5 w-full gap-2"
         onClick={onSubmit}
         disabled={saldoSetelahPrint < 0}
       >

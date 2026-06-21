@@ -294,6 +294,7 @@ export const printJobs = pgTable(
     pricePerPageRupiah: integer("price_per_page_rupiah").notNull(),
     discountRupiah: integer("discount_rupiah").notNull().default(0),
     totalRupiah: integer("total_rupiah").notNull(),
+    storagePath: text("storage_path"),
     status: printJobStatusEnum("status").notNull().default("PENDING"),
     createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),

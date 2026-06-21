@@ -22,9 +22,14 @@ export { TOKEN_WINDOW_MS };
  * existing only server-side is what makes the token unforgeable by the client.
  */
 function secret(): string {
-  return (
-    process.env.KEYCARD_TOKEN_SECRET ?? "flowspace-keycard-dev-secret"
-  );
+  const s = process.env.KEYCARD_TOKEN_SECRET;
+  if (s) return s;
+  // Fail closed outside local dev: a hardcoded fallback would let anyone mint
+  // valid tokens offline (cross-family security review). Dev keeps a default.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("KEYCARD_TOKEN_SECRET is required in production");
+  }
+  return "flowspace-keycard-dev-secret";
 }
 
 /** The 30s time-window index for a given instant. */

@@ -9,6 +9,7 @@ export default tseslint.config(
       ".next/**",
       "node_modules/**",
       "scripts/**",
+      "review/**",
       "coverage/**",
       "playwright-report/**",
       "test-results/**",

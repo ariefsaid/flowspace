@@ -20,6 +20,7 @@ import {
   type CafeOrderItem,
 } from "@/lib/db/schema";
 import { computeOrderTotals } from "@/lib/cafe/pricing";
+import { recordTransaction } from "@/lib/db/transactions";
 import { generateOrderCode, nextStatus } from "@/lib/cafe/status";
 import type { CafeOrderStatus, OrderLineInput } from "@/lib/cafe/types";
 
@@ -172,6 +173,22 @@ export async function createOrder(input: {
             temperature: pl.temperature,
             sugar: pl.sugar,
           })),
+        );
+
+        // Ledger row so the order appears in member /history + admin revenue.
+        await recordTransaction(
+          {
+            orgId,
+            userId: customerUserId,
+            type: "CAFE_ORDER",
+            description: guestName
+              ? `Pesanan Cafe (tamu: ${guestName})`
+              : "Pesanan Cafe",
+            amountRupiah: totals.totalRupiah,
+            discountRupiah: totals.discountRupiah,
+            cafeOrderId: newOrder.id,
+          },
+          tx,
         );
 
         return newOrder;

@@ -91,7 +91,7 @@ export function PrintSummary({
       <Button
         variant="primary"
         size="lg"
-        className="mt-5 w-full gap-2 bg-teal-400 hover:bg-teal-500"
+        className="mt-5 w-full gap-2"
         onClick={onSubmit}
         disabled={saldoSetelahPrint < 0}
       >

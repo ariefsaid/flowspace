@@ -38,7 +38,7 @@ function CopyButton({ text }: { text: string }) {
 
 export function WifiCard({ wifi }: WifiCardProps) {
   return (
-    <div className="rounded-xl border border-blue-100 bg-gradient-to-br from-blue-50/60 to-slate-50 p-4">
+    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
       <div className="mb-3 flex items-center gap-2">
         <Wifi className="h-4 w-4 text-blue-600" />
         <h3 className="text-sm font-semibold text-gray-800">WiFi Access</h3>

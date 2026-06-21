@@ -29,8 +29,9 @@
   components keep their interactivity and call the server actions).
 
 **Out (follow-up issues; tracked as OQ/FU below):** payment/checkout settlement; real-time push to the KDS
-(poll/manual-refresh is the MVP — FU-1); booking/“active session” domain (the 5% discount eligibility seam is
-stubbed server-side — FU-2 / OQ-1); print & transactions domains; admin menu CRUD (menu is seed-managed for now —
+(poll/manual-refresh is the MVP — FU-1); ~~booking/“active session” domain (the 5% discount eligibility seam is
+stubbed server-side — FU-2 / OQ-1)~~ **[RESOLVED 2026-06-21: the booking domain shipped and `resolveDiscountEligibility`
+now consults `getActiveBooking` — see AC-115]**; print & transactions domains; admin menu CRUD (menu is seed-managed for now —
 FU-3); POS member-discount rate reconciliation (POS mock shows 10%, member cafe shows 5% — OQ-2).
 
 ## Roles (server-trusted, from spec 0002)
@@ -146,6 +147,11 @@ an order for themselves but may **not** mutate order status.
   Given the same lines and `discountEligible: true`,
   When `computeOrderTotals` runs,
   Then `discountRupiah = round(82000 * 0.05) = 4100` and `totalRupiah = 77900`. (FR-112, NFR-100)
+- **AC-115** — Discount eligibility is resolved server-side from an active coworking session (OBS-070).
+  Given the session user, When `resolveDiscountEligibility(user)` runs,
+  Then it returns `true` only for a `MEMBER` who has an `ACTIVE` booking (consulted org-scoped via
+  `getActiveBooking`), and `false` for guests, non-members, and members with no active session — never trusting the
+  client. (Activates the ADR-0011 seam; supersedes the FU-3 "dormant until booking" deferral.)
 - **AC-112** — A member order persists with the member as customer and server totals.
   Given an authenticated member and a valid line list,
   When `createOrder` persists the order (eligible=false in the no-booking MVP),

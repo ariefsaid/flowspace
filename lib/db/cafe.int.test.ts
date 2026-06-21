@@ -241,6 +241,23 @@ describe("lib/db/cafe", () => {
       expect(crossnt?.nameSnapshot).toBe("Croissant");
     });
 
+    it("AC-112: createOrder persists the server-computed 5% discount when discountEligible", async () => {
+      // Same lines as above (subtotal 82000); eligible member → 5% off recorded.
+      const order = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [
+          { menuItemId: latteAId, qty: 1 },
+          { menuItemId: croissantAId, qty: 2 },
+        ],
+        discountEligible: true,
+      });
+      expect(order.subtotalRupiah).toBe(82000);
+      expect(order.discountRupiah).toBe(4100); // round(82000 * 0.05)
+      expect(order.totalRupiah).toBe(77900);
+    });
+
     it("AC-112: createOrder accepts the same item on two lines (multi-variant drink: hot + cold)", async () => {
       // A member orders one Latte hot + one Latte cold — two lines, same menuItemId.
       // The cross-org guard must validate distinct ids, not raw line count.

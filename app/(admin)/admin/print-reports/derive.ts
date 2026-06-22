@@ -1,7 +1,8 @@
 /**
- * Pure server-side derivation for the admin print report (spec 0005).
- * Extracted from the RSC so the row→view mapping and the summary aggregates are
- * directly unit-testable (AC-301, AC-302). No DB access, no client code.
+ * Pure server-side row→view mapping for the admin print report (spec 0005).
+ * Extracted from the RSC so the mapping is directly unit-testable (AC-302). No
+ * DB access, no client code. (Summary aggregates are computed in SQL by
+ * getPrintReportSummary — AC-301 — so they stay independent of the table cap.)
  */
 import type { PrintJob } from "@/lib/db/schema";
 import type { PrintColorMode, PrintJobStatus } from "@/lib/db/enums";
@@ -54,21 +55,5 @@ export function toView(row: PrintJob, userName: string): AdminPrintJobView {
     netRupiah: row.totalRupiah,
     datetime: row.createdAt.toISOString(),
     status: row.status,
-  };
-}
-
-/**
- * Server-side summary aggregates over the org's print jobs. Counts distinct
- * users by `userId` (not display name), and revenue = Σ net (totalRupiah) over
- * COMPLETED jobs. (FR-302)
- */
-export function buildSummary(rows: PrintJob[]): PrintReportsSummary {
-  const completed = rows.filter((r) => r.status === "COMPLETED");
-  return {
-    totalJobs: rows.length,
-    totalPages: rows.reduce((s, r) => s + r.pages, 0),
-    uniqueUsers: new Set(rows.map((r) => r.userId)).size,
-    totalRevenue: completed.reduce((s, r) => s + r.totalRupiah, 0),
-    completedCount: completed.length,
   };
 }

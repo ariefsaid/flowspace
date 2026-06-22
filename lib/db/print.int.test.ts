@@ -82,6 +82,7 @@ import {
   submitPrintJob,
   listPrintJobsByUser,
   listPrintJobsForAdmin,
+  getPrintReportSummary,
 } from "@/lib/db/print";
 import { printJobs } from "@/lib/db/schema";
 
@@ -356,8 +357,8 @@ describe("lib/db/print", () => {
     });
 
     it("AC-300: org B's COMPLETED revenue never leaks into org A's rows", async () => {
-      // The summary derivation itself is unit-owned (AC-301, derive.test.ts);
-      // here we prove the org-scoping the report's revenue depends on.
+      // getPrintReportSummary owns the aggregate proof (AC-301, below); here we
+      // prove the org-scoping the report's revenue depends on.
       const rows = await listPrintJobsForAdmin(orgAId);
       const revenue = rows
         .filter((j) => j.status === "COMPLETED")
@@ -365,6 +366,68 @@ describe("lib/db/print", () => {
       // The org-A COMPLETED job (12000) is counted; org B's 2500 is not.
       expect(revenue).toBeGreaterThanOrEqual(12000);
       expect(rows.some((j) => j.totalRupiah === 2500)).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getPrintReportSummary — SQL aggregates, exact, org-scoped, uncapped
+  // -------------------------------------------------------------------------
+  describe("getPrintReportSummary", () => {
+    let orgCId: string;
+    let c1: string;
+    let c2: string;
+
+    // A dedicated org with a KNOWN, fixed job set → exact-value assertions
+    // (the other orgs above carry extra rows from the submit tests).
+    beforeAll(async () => {
+      const [orgC] = await testDb
+        .insert(organizations)
+        .values({ name: "Print Org C", slug: "print-org-c-test" })
+        .returning();
+      orgCId = orgC.id;
+      const [u1] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgCId, email: "c1@x.test", name: "Cici", role: "MEMBER" })
+        .returning();
+      const [u2] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgCId, email: "c2@x.test", name: "Dodi", role: "MEMBER" })
+        .returning();
+      c1 = u1.id;
+      c2 = u2.id;
+      await testDb.insert(printJobs).values([
+        // c1: COMPLETED 12000 (10 pages) + PENDING 2000 (4 pages)
+        { orgId: orgCId, userId: c1, fileName: "c-done.pdf", pages: 10, copies: 1, colorMode: "COLOR", paperSize: "A4", pricePerPageRupiah: 1500, discountRupiah: 3000, totalRupiah: 12000, status: "COMPLETED" },
+        { orgId: orgCId, userId: c1, fileName: "c-pending.pdf", pages: 4, copies: 1, colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, discountRupiah: 0, totalRupiah: 2000, status: "PENDING" },
+        // c2: COMPLETED 3000 (6 pages)
+        { orgId: orgCId, userId: c2, fileName: "c-done2.pdf", pages: 6, copies: 1, colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, discountRupiah: 0, totalRupiah: 3000, status: "COMPLETED" },
+      ]);
+    });
+
+    it("AC-301: exact totals — jobs/pages/distinct-users/COMPLETED-revenue (org-scoped)", async () => {
+      const s = await getPrintReportSummary(orgCId);
+      expect(s).toEqual({
+        totalJobs: 3,
+        totalPages: 20, // 10 + 4 + 6
+        uniqueUsers: 2, // c1, c2 (distinct userId)
+        totalRevenue: 15000, // 12000 + 3000 COMPLETED; PENDING 2000 excluded
+        completedCount: 2,
+      });
+    });
+
+    it("AC-301: empty org → all zeros", async () => {
+      const [orgEmpty] = await testDb
+        .insert(organizations)
+        .values({ name: "Print Org Empty", slug: "print-org-empty-test" })
+        .returning();
+      const s = await getPrintReportSummary(orgEmpty.id);
+      expect(s).toEqual({
+        totalJobs: 0,
+        totalPages: 0,
+        uniqueUsers: 0,
+        totalRevenue: 0,
+        completedCount: 0,
+      });
     });
   });
 });

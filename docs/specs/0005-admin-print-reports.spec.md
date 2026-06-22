@@ -46,7 +46,7 @@ with billing detail) + summary aggregates. ADMIN-only (already enforced server-s
 | AC | Owning layer | Why |
 |----|--------------|-----|
 | AC-300 | Integration (Drizzle vs Supabase local) | org-scoping contract at the data layer (`lib/db/print.int.test.ts`) |
-| AC-301 | Unit (Vitest) | `buildSummary` is a pure aggregate over loaded rows (`print-reports/derive.test.ts`) |
+| AC-301 | Integration (Drizzle vs Supabase local) | `getPrintReportSummary` aggregates in SQL (uncapped) — exact totals proven against the DB (`lib/db/print.int.test.ts`) |
 | AC-302, AC-303 | Unit (Vitest/RTL) | pure presentational mapping (`toView`/mappers) + empty-state render |
 
 Admin authz (non-admin → redirect) is already owned by `e2e/AC-010-server-side-authz.spec.ts` — not re-proven here.

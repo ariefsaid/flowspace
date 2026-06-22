@@ -1,10 +1,9 @@
 /**
- * AC-301: buildSummary aggregates (jobs, pages, distinct users by userId,
- *         revenue = Σ net over COMPLETED) over a fixed job set.
  * AC-302: toView maps a persisted row to the billing view (gross/net derivation).
+ * (Summary aggregates — AC-301 — are SQL-owned: see lib/db/print.int.test.ts.)
  */
 import { describe, it, expect } from "vitest";
-import { toView, buildSummary } from "./derive";
+import { toView } from "./derive";
 import type { PrintJob } from "@/lib/db/schema";
 
 /** Minimal PrintJob factory — only the fields the derivation reads. */
@@ -56,32 +55,5 @@ describe("toView", () => {
       status: "COMPLETED",
     });
     expect(v.datetime).toBe("2026-06-15T08:01:00.000Z");
-  });
-});
-
-describe("buildSummary", () => {
-  it("AC-301: totals, distinct users (by userId), and COMPLETED revenue", () => {
-    const rows = [
-      job({ userId: "u1", pages: 10, totalRupiah: 12000, status: "COMPLETED" }),
-      job({ userId: "u1", pages: 4, totalRupiah: 2000, status: "PENDING" }),
-      job({ userId: "u2", pages: 6, totalRupiah: 3000, status: "COMPLETED" }),
-    ];
-    expect(buildSummary(rows)).toEqual({
-      totalJobs: 3,
-      totalPages: 20,
-      uniqueUsers: 2, // u1 (x2) + u2 — counted by id, not name
-      totalRevenue: 15000, // 12000 + 3000 (COMPLETED only; PENDING 2000 excluded)
-      completedCount: 2,
-    });
-  });
-
-  it("AC-301: empty input → all zeros", () => {
-    expect(buildSummary([])).toEqual({
-      totalJobs: 0,
-      totalPages: 0,
-      uniqueUsers: 0,
-      totalRevenue: 0,
-      completedCount: 0,
-    });
   });
 });

@@ -39,9 +39,11 @@ export function listPrintJobsByUser(
 }
 
 /**
- * Org-scoped listing of ALL print jobs for the admin "Laporan Print" report,
+ * Org-scoped listing of print jobs for the admin "Laporan Print" report table,
  * newest first (member names are joined in the page via findProfilesByIds,
- * matching the admin bookings pattern). AC-300 / FR-300, FR-301.
+ * matching the admin bookings pattern). The `limit` caps the rendered TABLE only
+ * — summary aggregates come from getPrintReportSummary (SQL, uncapped) so they
+ * never understate. AC-300 / FR-300, FR-301.
  */
 export function listPrintJobsForAdmin(
   orgId: string,
@@ -53,6 +55,42 @@ export function listPrintJobsForAdmin(
     .where(eq(printJobs.orgId, orgId))
     .orderBy(desc(printJobs.createdAt))
     .limit(limit);
+}
+
+export type PrintReportSummary = {
+  totalJobs: number;
+  totalPages: number;
+  uniqueUsers: number;
+  /** Σ net charge (totalRupiah) over COMPLETED jobs. */
+  totalRevenue: number;
+  completedCount: number;
+};
+
+/**
+ * Org-scoped print-report summary computed in SQL over ALL the org's jobs —
+ * independent of the table's row cap, so totals/revenue never understate on a
+ * high-volume org (security review M2). FR-302 / AC-301.
+ */
+export async function getPrintReportSummary(orgId: string): Promise<PrintReportSummary> {
+  const [row] = await db
+    .select({
+      totalJobs: sql<number>`count(*)::int`,
+      totalPages: sql<number>`coalesce(sum(${printJobs.pages}), 0)::int`,
+      uniqueUsers: sql<number>`count(distinct ${printJobs.userId})::int`,
+      totalRevenue: sql<number>`coalesce(sum(${printJobs.totalRupiah}) filter (where ${printJobs.status} = 'COMPLETED'), 0)::int`,
+      completedCount: sql<number>`count(*) filter (where ${printJobs.status} = 'COMPLETED')::int`,
+    })
+    .from(printJobs)
+    .where(eq(printJobs.orgId, orgId));
+  return (
+    row ?? {
+      totalJobs: 0,
+      totalPages: 0,
+      uniqueUsers: 0,
+      totalRevenue: 0,
+      completedCount: 0,
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------

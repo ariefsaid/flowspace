@@ -7,15 +7,20 @@
  * COMPLETED jobs. (FR-300..FR-303)
  */
 import { requireSession } from "@/lib/auth/session";
-import { listPrintJobsForAdmin } from "@/lib/db/print";
+import { listPrintJobsForAdmin, getPrintReportSummary } from "@/lib/db/print";
 import { findProfilesByIds } from "@/lib/db/users";
 import { PrintReportsClient } from "./PrintReportsClient";
-import { toView, buildSummary } from "./derive";
+import { toView } from "./derive";
 
 export default async function AdminPrintReportsPage() {
   const { orgId } = await requireSession();
 
-  const rows = await listPrintJobsForAdmin(orgId);
+  // Summary aggregates come from SQL over ALL jobs (uncapped); the table lists
+  // the newest rows up to listPrintJobsForAdmin's cap.
+  const [rows, summary] = await Promise.all([
+    listPrintJobsForAdmin(orgId),
+    getPrintReportSummary(orgId),
+  ]);
 
   // Attach member names in one org-scoped read (cross-org ids never match).
   const memberIds = [...new Set(rows.map((r) => r.userId))];
@@ -23,7 +28,6 @@ export default async function AdminPrintReportsPage() {
   const nameById = new Map(profiles.map((p) => [p.id, p.name]));
 
   const jobs = rows.map((r) => toView(r, nameById.get(r.userId) ?? "—"));
-  const summary = buildSummary(rows);
 
   return <PrintReportsClient jobs={jobs} summary={summary} />;
 }

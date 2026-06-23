@@ -30,7 +30,7 @@ let aUserId: string;
 let bUserId: string;
 
 beforeAll(async () => {
-  await testSql`TRUNCATE TABLE "transactions","print_jobs","app_users","organizations" RESTART IDENTITY CASCADE`;
+  await testSql`TRUNCATE TABLE "transactions","print_jobs","membership_tier_config","org_print_pricing","app_users","organizations" RESTART IDENTITY CASCADE`;
 
   const [orgA] = await testDb
     .insert(organizations)
@@ -68,10 +68,21 @@ beforeAll(async () => {
     .returning();
   aUserId = userA.id;
   bUserId = userB.id;
+
+  // Pricing config (I-027): the print discount is now config-driven, so the
+  // test orgs need tier-config rows for PREMIUM 20% / REGULAR 0% to apply.
+  await testDb.insert(membershipTierConfig).values([
+    { orgId: orgAId, tier: "REGULAR", cafeDiscountPct: 5, printDiscountPct: 0 },
+    { orgId: orgAId, tier: "PREMIUM", cafeDiscountPct: 5, printDiscountPct: 20 },
+    { orgId: orgAId, tier: "GOLD", cafeDiscountPct: 5, printDiscountPct: 20 },
+    { orgId: orgBId, tier: "REGULAR", cafeDiscountPct: 5, printDiscountPct: 0 },
+    { orgId: orgBId, tier: "PREMIUM", cafeDiscountPct: 5, printDiscountPct: 20 },
+    { orgId: orgBId, tier: "GOLD", cafeDiscountPct: 5, printDiscountPct: 20 },
+  ]);
 }, 30_000);
 
 afterAll(async () => {
-  await testSql`TRUNCATE TABLE "transactions","print_jobs","app_users","organizations" RESTART IDENTITY CASCADE`;
+  await testSql`TRUNCATE TABLE "transactions","print_jobs","membership_tier_config","org_print_pricing","app_users","organizations" RESTART IDENTITY CASCADE`;
   await testSql.end();
 }, 30_000);
 
@@ -84,7 +95,7 @@ import {
   listPrintJobsForAdmin,
   getPrintReportSummary,
 } from "@/lib/db/print";
-import { printJobs } from "@/lib/db/schema";
+import { printJobs, membershipTierConfig } from "@/lib/db/schema";
 
 describe("lib/db/print", () => {
   // -------------------------------------------------------------------------

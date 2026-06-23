@@ -19,6 +19,7 @@ import {
   type CafeOrderItem,
 } from "@/lib/db/schema";
 import { findProfilesByIds } from "@/lib/db/users";
+import { getTierDiscounts } from "@/lib/db/tier-config";
 import { computeOrderTotals } from "@/lib/cafe/pricing";
 import { recordTransaction } from "@/lib/db/transactions";
 import { generateOrderCode, nextStatus } from "@/lib/cafe/status";
@@ -141,7 +142,18 @@ export async function createOrder(input: {
     };
   });
 
-  const totals = computeOrderTotals(pricedLines, { discountEligible });
+  // Resolve the discount % server-side: only an eligible member (active session,
+  // AC-115) gets their tier's configured cafeDiscountPct; guests / ineligible /
+  // unconfigured → 0% (fail-safe). [SEC] never trust a client rate.
+  let discountPct = 0;
+  if (discountEligible && customerUserId) {
+    const [profile] = await findProfilesByIds(orgId, [customerUserId]);
+    if (profile) {
+      discountPct = (await getTierDiscounts(orgId, profile.membershipTier)).cafeDiscountPct;
+    }
+  }
+
+  const totals = computeOrderTotals(pricedLines, { discountPct });
 
   // Bounded retry on unique code collision (ADR-0012)
   const MAX_RETRIES = 5;

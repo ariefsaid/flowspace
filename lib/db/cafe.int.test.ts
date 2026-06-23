@@ -21,6 +21,7 @@ import {
   cafeMenuItems,
   cafeOrders,
   cafeOrderItems,
+  membershipTierConfig,
 } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -44,7 +45,7 @@ let orgBItemId: string;
 beforeAll(async () => {
   // Truncate via raw sql (postgres-js) to avoid Drizzle execute hang on
   // Supabase Postgres in the vitest worker environment.
-  await testSql`TRUNCATE TABLE "cafe_order_items","cafe_orders","cafe_menu_items","app_users","organizations" RESTART IDENTITY CASCADE`;
+  await testSql`TRUNCATE TABLE "cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","app_users","organizations" RESTART IDENTITY CASCADE`;
 
   // Seed two orgs
   const [orgA] = await testDb
@@ -79,6 +80,13 @@ beforeAll(async () => {
     .returning();
   aUserId = userA.id;
   bUserId = userB.id;
+
+  // Pricing config (I-027): the cafe discount is now config-driven — seed the
+  // member tier (REGULAR) cafe rate to 5% so an eligible order discounts.
+  await testDb.insert(membershipTierConfig).values([
+    { orgId: orgAId, tier: "REGULAR", cafeDiscountPct: 5, printDiscountPct: 0 },
+    { orgId: orgBId, tier: "REGULAR", cafeDiscountPct: 5, printDiscountPct: 0 },
+  ]);
 
   // Seed menu items for org A: 2 available + 1 unavailable + 1 archived
   const [latte] = await testDb
@@ -154,7 +162,7 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  await testSql`TRUNCATE TABLE "cafe_order_items","cafe_orders","cafe_menu_items","app_users","organizations" RESTART IDENTITY CASCADE`;
+  await testSql`TRUNCATE TABLE "cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","app_users","organizations" RESTART IDENTITY CASCADE`;
   await testSql.end();
 }, 30_000);
 

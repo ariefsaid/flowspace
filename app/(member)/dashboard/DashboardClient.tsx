@@ -275,7 +275,7 @@ export function DashboardClient({
             </span>
             <p className="mt-1 text-xs text-gray-500">{TIER_LABEL[tier]}</p>
           </div>
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-700">
             <TrendingUp className="h-5 w-5" aria-hidden="true" />
           </div>
         </div>

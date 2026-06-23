@@ -17,7 +17,7 @@ export function BrandMark({
 }: BrandMarkProps) {
   return (
     <span className={cn("inline-flex items-center gap-2", className)}>
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-teal-600 text-white shadow-sm">
+      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-teal-800 to-teal-900 text-white shadow-sm">
         <Layers className="h-5 w-5" aria-hidden="true" />
       </span>
       {showName ? (

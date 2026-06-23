@@ -484,7 +484,7 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
     <>
       <div className="container mx-auto px-4 py-6">
         {/* Header — full-width teal gradient band */}
-        <div className="-mx-4 mb-6 bg-gradient-to-br from-teal-500 to-teal-600 px-4 py-5">
+        <div className="-mx-4 mb-6 bg-gradient-to-br from-teal-800 to-teal-900 px-4 py-5">
           <div className="flex items-center gap-4">
             <Link href="/">
               <button
@@ -507,7 +507,7 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
         {/* Mode Guest info banner */}
         <div className="mb-6 flex gap-3 rounded-xl border border-orange-200 bg-orange-50 p-4">
           <div className="shrink-0 mt-0.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-100 text-orange-600">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-100 text-orange-700">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 className="h-4 w-4"

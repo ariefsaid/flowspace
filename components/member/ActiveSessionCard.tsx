@@ -44,7 +44,7 @@ export function ActiveSessionCard({ session }: ActiveSessionCardProps) {
   const runningCost = billed * session.tarifPerHour;
 
   return (
-    <div className="bg-gradient-to-br from-teal-500 to-teal-600 px-6 py-5 text-white">
+    <div className="bg-gradient-to-br from-teal-800 to-teal-900 px-6 py-5 text-white">
       {/* header row */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -75,13 +75,13 @@ export function ActiveSessionCard({ session }: ActiveSessionCardProps) {
           <p className="text-sm text-teal-50">
             Biaya sementara (pembulatan per jam):
           </p>
-          <p className="mt-0.5 text-xs text-teal-100">
+          <p className="mt-0.5 text-xs text-white">
             Tarif: {formatRupiah(session.tarifPerHour)}/jam
           </p>
         </div>
         <div className="text-right">
           <p className="text-2xl font-bold">{formatRupiah(runningCost)}</p>
-          <p className="mt-0.5 text-xs text-teal-100">
+          <p className="mt-0.5 text-xs text-white">
             Maks: {session.maxHours} jam
           </p>
         </div>

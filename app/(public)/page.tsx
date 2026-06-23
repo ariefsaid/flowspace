@@ -33,7 +33,7 @@ const btnVariants = {
     "bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-md hover:from-orange-600 hover:to-orange-600 h-11 px-5",
   // White outline button for CTA band
   ctaWhite:
-    "border-2 border-white bg-white text-orange-600 hover:bg-white/90 shadow-md h-11 px-6",
+    "border-2 border-white bg-white text-orange-700 hover:bg-white/90 shadow-md h-11 px-6",
   // Teal solid for membership CTA
   primary:
     "bg-teal-500 text-white hover:bg-teal-600 shadow-sm h-10 px-5 w-full",
@@ -142,7 +142,7 @@ export default function LandingPage() {
       {/* ------------------------------------------------------------------ */}
       {/* 1. Hero                                                              */}
       {/* ------------------------------------------------------------------ */}
-      <section className="bg-gradient-to-br from-teal-500 to-teal-600 px-4 py-20 text-white">
+      <section className="bg-gradient-to-br from-teal-800 to-teal-900 px-4 py-20 text-white">
         <div className="container mx-auto max-w-4xl text-center">
           {/* Pill badge */}
           <div className="mb-6 flex justify-center">

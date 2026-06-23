@@ -15,6 +15,9 @@ export type TierRow = {
   printDiscountPct: number;
 };
 
+/** Sane upper bound for a per-page print rate (Rp). The server re-validates positivity. */
+const RATE_MAX = 1_000_000;
+
 /** Parse a number input to an integer clamped to [min, max] (server re-validates). */
 function toInt(value: string, min = 0, max = Number.MAX_SAFE_INTEGER): number {
   const n = Math.trunc(Number(value));
@@ -88,6 +91,9 @@ export function TiersClient({
           <Printer className="h-5 w-5 text-teal-600" aria-hidden="true" />
           <h2 className="text-lg font-semibold text-gray-800">Harga Dasar Print</h2>
         </div>
+        <p id="print-rate-hint" className="mt-1 text-xs text-gray-500">
+          Angka positif dalam Rupiah per halaman (Rp 1–1.000.000).
+        </p>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="block">
             <span className="text-sm font-medium text-gray-700">
@@ -96,11 +102,13 @@ export function TiersClient({
             <Input
               type="number"
               min={1}
+              max={RATE_MAX}
+              aria-describedby="print-rate-hint"
               className="mt-1"
               value={pricing.bwRatePerPageRupiah}
               onChange={(e) => {
                 setStatus("idle");
-                setPricing((p) => ({ ...p, bwRatePerPageRupiah: toInt(e.target.value, 1) }));
+                setPricing((p) => ({ ...p, bwRatePerPageRupiah: toInt(e.target.value, 1, RATE_MAX) }));
               }}
             />
           </label>
@@ -111,11 +119,13 @@ export function TiersClient({
             <Input
               type="number"
               min={1}
+              max={RATE_MAX}
+              aria-describedby="print-rate-hint"
               className="mt-1"
               value={pricing.colorRatePerPageRupiah}
               onChange={(e) => {
                 setStatus("idle");
-                setPricing((p) => ({ ...p, colorRatePerPageRupiah: toInt(e.target.value, 1) }));
+                setPricing((p) => ({ ...p, colorRatePerPageRupiah: toInt(e.target.value, 1, RATE_MAX) }));
               }}
             />
           </label>
@@ -128,6 +138,9 @@ export function TiersClient({
           <Users className="h-5 w-5 text-teal-600" aria-hidden="true" />
           <h2 className="text-lg font-semibold text-gray-800">Diskon per Tier</h2>
         </div>
+        <p id="tier-discount-hint" className="mt-1 text-xs text-gray-500">
+          Persentase diskon 0–100% per tier.
+        </p>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -153,6 +166,7 @@ export function TiersClient({
                       min={0}
                       max={100}
                       aria-label={`Diskon cafe ${t.tier}`}
+                      aria-describedby="tier-discount-hint"
                       className="max-w-[7rem]"
                       value={t.cafeDiscountPct}
                       onChange={(e) =>
@@ -166,6 +180,7 @@ export function TiersClient({
                       min={0}
                       max={100}
                       aria-label={`Diskon print ${t.tier}`}
+                      aria-describedby="tier-discount-hint"
                       className="max-w-[7rem]"
                       value={t.printDiscountPct}
                       onChange={(e) =>

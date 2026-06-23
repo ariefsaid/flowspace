@@ -23,6 +23,7 @@ import {
   recordTransaction,
   updateBookingTransaction,
 } from "@/lib/db/transactions";
+import { WALKIN_MAX_HOURS, isWalkin, isScheduled } from "@/lib/booking/walkin";
 import type {
   BookingFacilityType,
   BookingPaymentStatus,
@@ -51,16 +52,6 @@ export type CreateBookingInput = {
 };
 
 const HOUR_MS = 3_600_000;
-/** Walk-in open coworking/meeting is charged per started hour, capped at 4h
- *  (recon: "MAX 4h charge"). Enforced in completeBooking. */
-const WALKIN_MAX_HOURS = 4;
-
-function isWalkin(t: BookingFacilityType): boolean {
-  return t === "WALKIN_COWORKING" || t === "WALKIN_MEETING";
-}
-function isScheduled(t: BookingFacilityType): boolean {
-  return t === "COWORKING_SEAT" || t === "MEETING_ROOM";
-}
 
 // ---------------------------------------------------------------------------
 // Facilities read model

@@ -132,12 +132,12 @@ function MenuItemCard({
 }
 
 // ---------------------------------------------------------------------------
-// The VariantModal and CartPanel expect the lib/mock MenuItem shape.
-// We bridge by adapting MenuItemView to the expected shape inline.
+// VariantModal / CartPanel / cartKey expect the shared cafe-component MenuItem
+// shape; we adapt our DB-sourced MenuItemView to it inline.
 // ---------------------------------------------------------------------------
 
-/** Adapt our DB-sourced MenuItemView to the shape VariantModal / CartPanel / cartKey expect. */
-function toMockMenuItem(item: MenuItemView) {
+/** Adapt our DB-sourced MenuItemView to the shared cafe-component MenuItem shape. */
+function toComponentMenuItem(item: MenuItemView) {
   return {
     id: item.id,
     name: item.name,
@@ -190,8 +190,8 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
   const totalCartQty = cartItems.reduce((s, i) => s + i.qty, 0);
 
   function addToCart(item: MenuItemView, variant?: VariantSelection) {
-    const mockItem = toMockMenuItem(item);
-    const key = cartKey(mockItem, variant);
+    const componentItem = toComponentMenuItem(item);
+    const key = cartKey(componentItem, variant);
     setCartItems((prev) => {
       const existing = prev.find((i) => i.key === key);
       if (existing) {
@@ -408,7 +408,7 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
       {/* ── Variant modal ── */}
       {variantItem && (
         <VariantModal
-          item={toMockMenuItem(variantItem)}
+          item={toComponentMenuItem(variantItem)}
           onClose={() => setVariantItem(null)}
           onConfirm={(_, variant) => {
             addToCart(variantItem, variant);

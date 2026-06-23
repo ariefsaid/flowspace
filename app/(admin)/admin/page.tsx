@@ -31,7 +31,7 @@ function statusTone(status: TransactionStatus): "completed" | "pending" {
  * Admin dashboard — server component. All KPIs are computed server-side from
  * org-scoped repository reads (ADR-0004); no client-supplied numbers. The
  * markup is unchanged from the mock-driven version — only the data source
- * swapped from lib/mock/* to the live Drizzle repositories.
+ * wired to the live Drizzle repositories (was a static mock during the FE-first phase).
  *
  * ponytail: counts reuse the list repositories (.length) instead of dedicated
  * COUNT queries — fine for a single-venue MVP; add COUNT helpers if a dashboard

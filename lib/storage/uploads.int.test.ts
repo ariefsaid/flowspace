@@ -14,7 +14,8 @@ import {
   deletePrintDocument,
 } from "@/lib/storage/uploads";
 
-const TEST_PATH = `smoke-test/${Date.now()}-test.pdf`;
+const TEST_ORG = "test-org";
+const TEST_PATH = `${TEST_ORG}/smoke-test/${Date.now()}-test.pdf`;
 
 afterAll(async () => {
   // Ensure the test object is removed even if the test fails.
@@ -34,11 +35,11 @@ describe("Storage seam — print-uploads bucket", () => {
 
       // Upload
       await expect(
-        uploadPrintDocument("test-org", TEST_PATH, content)
+        uploadPrintDocument(TEST_ORG, TEST_PATH, content)
       ).resolves.not.toThrow();
 
       // Signed URL
-      const url = await getSignedDownloadUrl(TEST_PATH);
+      const url = await getSignedDownloadUrl(TEST_ORG, TEST_PATH);
       expect(typeof url).toBe("string");
       expect(url.length).toBeGreaterThan(0);
       // The URL should point to the local Supabase Storage endpoint.

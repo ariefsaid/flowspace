@@ -13,7 +13,26 @@ import {
   MAX_PRINT_FILE_SIZE_BYTES,
   validatePrintFile,
   validatePrintMagicBytes,
+  getSignedDownloadUrl,
 } from "./uploads";
+
+describe("getSignedDownloadUrl org-scope guard", () => {
+  it("rejects a path outside the caller's org prefix before signing (no cross-org IDOR)", async () => {
+    await expect(getSignedDownloadUrl("org-a", "org-b/print/job/doc.pdf")).rejects.toThrow(
+      "FORBIDDEN_PATH",
+    );
+  });
+  it("rejects an empty orgId", async () => {
+    await expect(getSignedDownloadUrl("", "org-a/print/job/doc.pdf")).rejects.toThrow(
+      "FORBIDDEN_PATH",
+    );
+  });
+  it("rejects a traversal path even under the org prefix", async () => {
+    await expect(
+      getSignedDownloadUrl("org-a", "org-a/../org-b/doc.pdf"),
+    ).rejects.toThrow("FORBIDDEN_PATH");
+  });
+});
 
 describe("buildPrintStoragePath", () => {
   it("AC-0241: path starts with orgId (org-scoped)", () => {

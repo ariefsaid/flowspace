@@ -47,10 +47,11 @@ function assertPositiveInt(value: number, label: string): void {
 export async function updatePrintPricing(
   orgId: string,
   rates: { bwRatePerPageRupiah: number; colorRatePerPageRupiah: number },
+  txdb: Pick<typeof db, "insert"> = db,
 ): Promise<void> {
   assertPositiveInt(rates.bwRatePerPageRupiah, "bw");
   assertPositiveInt(rates.colorRatePerPageRupiah, "color");
-  await db
+  await txdb
     .insert(orgPrintPricing)
     .values({
       orgId,

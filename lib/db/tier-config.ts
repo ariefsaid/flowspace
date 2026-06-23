@@ -56,10 +56,11 @@ export async function updateTierDiscounts(
   orgId: string,
   tier: MembershipTier,
   rates: { cafeDiscountPct: number; printDiscountPct: number },
+  txdb: Pick<typeof db, "insert"> = db,
 ): Promise<void> {
   assertPct(rates.cafeDiscountPct, "cafe");
   assertPct(rates.printDiscountPct, "print");
-  await db
+  await txdb
     .insert(membershipTierConfig)
     .values({
       orgId,

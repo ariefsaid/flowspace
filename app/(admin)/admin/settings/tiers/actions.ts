@@ -9,6 +9,7 @@
  */
 import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/auth/session";
+import { db } from "@/lib/db/drizzle";
 import { updateTierDiscounts } from "@/lib/db/tier-config";
 import { updatePrintPricing } from "@/lib/db/print-pricing";
 import type { MembershipTier } from "@/lib/db/enums";
@@ -28,14 +29,20 @@ export async function savePricingConfigAction(input: SavePricingConfigInput) {
     throw new Error("FORBIDDEN");
   }
 
-  // Repos validate (range / positive-int) and reject before any write.
-  await updatePrintPricing(user.orgId, input.printPricing);
-  for (const t of input.tiers) {
-    await updateTierDiscounts(user.orgId, t.tier, {
-      cafeDiscountPct: t.cafeDiscountPct,
-      printDiscountPct: t.printDiscountPct,
-    });
-  }
+  // All-or-nothing: validate + persist print rates and every tier in ONE
+  // transaction so a mid-loop rejection never leaves a half-applied money
+  // config. The repos validate (range / positive-int) before any write.
+  await db.transaction(async (tx) => {
+    await updatePrintPricing(user.orgId, input.printPricing, tx);
+    for (const t of input.tiers) {
+      await updateTierDiscounts(
+        user.orgId,
+        t.tier,
+        { cafeDiscountPct: t.cafeDiscountPct, printDiscountPct: t.printDiscountPct },
+        tx,
+      );
+    }
+  });
 
   revalidatePath("/admin/settings/tiers");
 }

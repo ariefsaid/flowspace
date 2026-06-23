@@ -17,6 +17,10 @@ vi.mock("@/lib/db/tier-config", () => ({
 vi.mock("@/lib/db/print-pricing", () => ({
   updatePrintPricing: (...a: unknown[]) => updatePrintPricing(...a),
 }));
+// db.transaction just runs the callback with a stub tx (the repos are mocked).
+vi.mock("@/lib/db/drizzle", () => ({
+  db: { transaction: (fn: (tx: unknown) => unknown) => fn({}) },
+}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { savePricingConfigAction } from "./actions";
@@ -52,11 +56,17 @@ describe("savePricingConfigAction", () => {
   it("an ADMIN persists print pricing + each tier with the session orgId", async () => {
     requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
     await savePricingConfigAction(input);
-    expect(updatePrintPricing).toHaveBeenCalledWith("o1", input.printPricing);
+    expect(updatePrintPricing).toHaveBeenCalledWith(
+      "o1",
+      input.printPricing,
+      expect.anything(), // the tx handle
+    );
     expect(updateTierDiscounts).toHaveBeenCalledTimes(2);
-    expect(updateTierDiscounts).toHaveBeenCalledWith("o1", "PREMIUM", {
-      cafeDiscountPct: 5,
-      printDiscountPct: 20,
-    });
+    expect(updateTierDiscounts).toHaveBeenCalledWith(
+      "o1",
+      "PREMIUM",
+      { cafeDiscountPct: 5, printDiscountPct: 20 },
+      expect.anything(),
+    );
   });
 });

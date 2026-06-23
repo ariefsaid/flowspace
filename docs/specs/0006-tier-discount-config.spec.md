@@ -85,7 +85,8 @@ prices reflect config); they cannot reach the editor (middleware + the `(admin)`
 ## Traceability (owning layer per ADR-0010)
 | AC | Owning layer |
 |----|--------------|
-| AC-400, AC-401, AC-402, AC-403, AC-404, AC-407 | Integration (Drizzle vs Supabase local) — config + money paths + authz |
+| AC-400, AC-401, AC-402, AC-403, AC-407 | Integration (Drizzle vs Supabase local) — config + money paths |
+| AC-404 | Unit (Vitest) — the action's ADMIN role gate is pure logic (`tiers/actions.test.ts`, repos mocked); the DB writes it guards are covered by AC-403/407 |
 | AC-405 | Unit (RTL) — editor render + nav link |
 | AC-406 | Unit (Vitest) — pure pricing with explicit rates |
 

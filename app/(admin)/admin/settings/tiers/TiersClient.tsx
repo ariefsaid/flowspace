@@ -6,6 +6,7 @@ import { Users, Printer, Save, Check, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { Card, Input, Button } from "@/components/ui";
 import type { MembershipTier } from "@/lib/db/enums";
+import type { PrintPricing } from "@/lib/db/print-pricing";
 import { savePricingConfigAction } from "./actions";
 
 export type TierRow = {
@@ -14,15 +15,11 @@ export type TierRow = {
   printDiscountPct: number;
 };
 
-type PrintPricing = {
-  bwRatePerPageRupiah: number;
-  colorRatePerPageRupiah: number;
-};
-
-/** Parse a number input to a non-negative integer (server re-validates). */
-function toInt(value: string): number {
+/** Parse a number input to an integer clamped to [min, max] (server re-validates). */
+function toInt(value: string, min = 0, max = Number.MAX_SAFE_INTEGER): number {
   const n = Math.trunc(Number(value));
-  return Number.isFinite(n) && n >= 0 ? n : 0;
+  if (!Number.isFinite(n)) return min;
+  return Math.min(max, Math.max(min, n));
 }
 
 export function TiersClient({
@@ -45,7 +42,7 @@ export function TiersClient({
   ) {
     setStatus("idle");
     setTiers((prev) =>
-      prev.map((t) => (t.tier === tier ? { ...t, [field]: toInt(value) } : t)),
+      prev.map((t) => (t.tier === tier ? { ...t, [field]: toInt(value, 0, 100) } : t)),
     );
   }
 
@@ -103,7 +100,7 @@ export function TiersClient({
               value={pricing.bwRatePerPageRupiah}
               onChange={(e) => {
                 setStatus("idle");
-                setPricing((p) => ({ ...p, bwRatePerPageRupiah: toInt(e.target.value) }));
+                setPricing((p) => ({ ...p, bwRatePerPageRupiah: toInt(e.target.value, 1) }));
               }}
             />
           </label>
@@ -118,7 +115,7 @@ export function TiersClient({
               value={pricing.colorRatePerPageRupiah}
               onChange={(e) => {
                 setStatus("idle");
-                setPricing((p) => ({ ...p, colorRatePerPageRupiah: toInt(e.target.value) }));
+                setPricing((p) => ({ ...p, colorRatePerPageRupiah: toInt(e.target.value, 1) }));
               }}
             />
           </label>

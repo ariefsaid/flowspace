@@ -209,7 +209,9 @@ export async function uploadPrintDocument(
  * @returns       A signed URL valid for `SIGNED_URL_TTL_SECONDS`.
  */
 export async function getSignedDownloadUrl(orgId: string, path: string): Promise<string> {
-  if (!orgId || !path.startsWith(`${orgId}/`)) {
+  // Self-defending: reject traversal AND require the org prefix, so the guard
+  // holds even if a future caller passes a path not freshly built here.
+  if (!orgId || path.includes("..") || !path.startsWith(`${orgId}/`)) {
     throw new Error("FORBIDDEN_PATH");
   }
   const supabase = createSupabaseAdminClient();

@@ -27,6 +27,11 @@ describe("getSignedDownloadUrl org-scope guard", () => {
       "FORBIDDEN_PATH",
     );
   });
+  it("rejects a traversal path even under the org prefix", async () => {
+    await expect(
+      getSignedDownloadUrl("org-a", "org-a/../org-b/doc.pdf"),
+    ).rejects.toThrow("FORBIDDEN_PATH");
+  });
 });
 
 describe("buildPrintStoragePath", () => {

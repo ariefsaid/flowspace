@@ -25,13 +25,22 @@ import {
   cafeMenuItems,
   timeCreditPackages,
   facilities,
+  membershipTierConfig,
+  orgPrintPricing,
 } from "@/lib/db/schema";
-import type {
-  Role,
-  MembershipTier,
-  CafeCategory,
-  FacilityType,
+import {
+  MEMBERSHIP_TIERS,
+  type Role,
+  type MembershipTier,
+  type CafeCategory,
+  type FacilityType,
 } from "@/lib/db/enums";
+import { DEFAULT_CAFE_DISCOUNT_PCT } from "@/lib/cafe/pricing";
+import {
+  PRINT_RATE_BW,
+  PRINT_RATE_COLOR,
+  DEFAULT_PRINT_DISCOUNT_PCT,
+} from "@/lib/print/pricing";
 import { createId } from "@paralleldrive/cuid2";
 
 // ---------------------------------------------------------------------------
@@ -326,6 +335,39 @@ async function main() {
     }
   }
   console.log(`Seeded ${FACILITIES.length} facilities.`);
+
+  // -- Pricing config (I-027) — seed to current behaviour, idempotent ---------
+  for (const tier of MEMBERSHIP_TIERS) {
+    const id = `${org.id}__tiercfg-${tier}`;
+    const [existing] = await db
+      .select()
+      .from(membershipTierConfig)
+      .where(eq(membershipTierConfig.id, id))
+      .limit(1);
+    if (!existing) {
+      await db.insert(membershipTierConfig).values({
+        id,
+        orgId: org.id,
+        tier,
+        cafeDiscountPct: DEFAULT_CAFE_DISCOUNT_PCT, // 5% all tiers (flat, active-session)
+        printDiscountPct: DEFAULT_PRINT_DISCOUNT_PCT[tier], // 0 / 20 / 20
+      });
+    }
+  }
+  const [existingPrintPricing] = await db
+    .select()
+    .from(orgPrintPricing)
+    .where(eq(orgPrintPricing.orgId, org.id))
+    .limit(1);
+  if (!existingPrintPricing) {
+    await db.insert(orgPrintPricing).values({
+      id: `${org.id}__printpricing`,
+      orgId: org.id,
+      bwRatePerPageRupiah: PRINT_RATE_BW,
+      colorRatePerPageRupiah: PRINT_RATE_COLOR,
+    });
+  }
+  console.log(`Seeded pricing config (${MEMBERSHIP_TIERS.length} tiers + print rates).`);
 
   await sql.end();
 }

@@ -15,6 +15,8 @@ import { db } from "@/lib/db/drizzle";
 import { printJobs, appUsers, type PrintJob } from "@/lib/db/schema";
 import { recordTransaction } from "@/lib/db/transactions";
 import { computePrintTotal } from "@/lib/print/pricing";
+import { getPrintPricing } from "@/lib/db/print-pricing";
+import { getTierDiscounts } from "@/lib/db/tier-config";
 import type { PrintColorMode } from "@/lib/db/enums";
 
 // ---------------------------------------------------------------------------
@@ -146,12 +148,18 @@ export async function submitPrintJob(input: {
     .limit(1);
   if (!user) throw new Error("NOT_FOUND");
 
-  // --- Server-side pricing from the loaded tier ([SEC]) ---
+  // --- Server-side pricing from org config + the loaded tier ([SEC]) ---
+  const [pricing, tierDiscounts] = await Promise.all([
+    getPrintPricing(input.orgId),
+    getTierDiscounts(input.orgId, user.membershipTier),
+  ]);
   const totals = computePrintTotal({
     pages: input.pages,
     copies: input.copies,
     colorMode: input.colorMode,
-    tier: user.membershipTier,
+    bwRateRupiah: pricing.bwRatePerPageRupiah,
+    colorRateRupiah: pricing.colorRatePerPageRupiah,
+    discountPct: tierDiscounts.printDiscountPct,
   });
 
   const sheets = input.pages * input.copies;

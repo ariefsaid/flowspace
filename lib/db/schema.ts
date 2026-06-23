@@ -331,8 +331,41 @@ export const transactions = pgTable(
   ],
 );
 
+// Pricing configuration (I-027, spec 0006) — admin-editable discount + base rates.
+export const membershipTierConfig = pgTable(
+  "membership_tier_config",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    tier: membershipTierEnum("tier").notNull(),
+    cafeDiscountPct: integer("cafe_discount_pct").notNull().default(0),
+    printDiscountPct: integer("print_discount_pct").notNull().default(0),
+    createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("membership_tier_config_org_id_tier_idx").on(t.orgId, t.tier),
+    index("membership_tier_config_org_id_idx").on(t.orgId),
+  ],
+);
+
+export const orgPrintPricing = pgTable(
+  "org_print_pricing",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    bwRatePerPageRupiah: integer("bw_rate_per_page_rupiah").notNull(),
+    colorRatePerPageRupiah: integer("color_rate_per_page_rupiah").notNull(),
+    createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("org_print_pricing_org_id_idx").on(t.orgId)],
+);
+
 export type TimeCreditPackage = InferSelectModel<typeof timeCreditPackages>;
 export type Facility = InferSelectModel<typeof facilities>;
 export type Booking = InferSelectModel<typeof bookings>;
 export type PrintJob = InferSelectModel<typeof printJobs>;
 export type Transaction = InferSelectModel<typeof transactions>;
+export type MembershipTierConfig = InferSelectModel<typeof membershipTierConfig>;
+export type OrgPrintPricing = InferSelectModel<typeof orgPrintPricing>;

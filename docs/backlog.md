@@ -36,13 +36,17 @@ Surfaces come from `docs/specs/0001-recon-app-surface.spec.md`.
 - [ ] **I-022 follow-ups (non-blocking):** guest-order rate-limit + line-count cap; `advanceOrderStatusAsActor` test-seam relocate; `canAdminSetOrderStatus()` symmetry; `updated_at` DB trigger; AC-id hygiene.
 - [ ] **External integrations** (each its own owner-gated ADR/issue): payment gateway (Midtrans/Xendit), PaperCut print server, UniFi WiFi vouchers, real dynamic-QR door access, ESB/ERP. (Print **file upload** now uses Supabase Storage — done; only the physical printing is external.)
 
-### Part A charter audit follow-ups (2026-06-23) — all 8 areas cleared ≥85% (88–94%); these lift the sub-gaps
-- **a11y (Frontend a11y sub-lens was 80%):** [x] orange landing CTA band darkened to orange-700/800 (`page.tsx`, DONE 2026-06-23). Remaining: **modal keyboard a11y** — `VariantModal` + `GuestCafeClient` overlay lack `role="dialog"`/`aria-modal`/Escape/focus-trap, overlay dismiss is mouse-only (WCAG 2.1.1); extract a shared `EmptyState` primitive (6+ inline copies); add empty/error fallback to `DashboardClient` + `admin/settings/page`.
-- **Existing-repo (DRY):** dedupe `isWalkin()` + `WALKIN_MAX_HOURS` (defined 3×: `lib/db/bookings.ts`, `dashboard/page.tsx`, `BookingClient.tsx`) → one `lib/booking/*` predicate; delete 4 stale `lib/mock` comments (`CafeClient.tsx:135`, `DashboardClient.tsx:26`, `HistoryClient.tsx:18`, `admin/page.tsx:34`).
-- **Architecture:** no caching strategy yet (no `unstable_cache`/`revalidateTag`/segment `revalidate`) — aspirational per charter; reads are per-request RSC (correct-but-uncached). `next.config.ts` bare.
-- **Performance:** column-project hot list reads (`select()` pulls all columns on `listOrders`/`listBookings`); memoize the two largest clients (`GuestCafeClient` 721L, `BookingsClient` 531L).
-- **Security (Low, defense-in-depth — no Critical/High found):** add a render-boundary role guard to `/barista` (parity with the `(admin)` layout guard — currently middleware-only); add DB-level `CHECK` constraints on money/qty columns (app-layer validation is thorough but no DB last-line); `getSignedDownloadUrl(path)` must org-scope `path` when an admin print-download surface is wired (forward-looking IDOR).
-- **Process:** backfill the PR #4 `docs/plans/` artifact to retire the burst-waiver; re-add the changed-lines-precise ≥80% coverage gate to CI (policy-enforced today, not CI-mechanized).
+### Part A charter audit follow-ups (2026-06-23) — all 8 areas cleared ≥85% (88–94%)
+Hardening batch merged 2026-06-23 (`1fb8f19`, security review SHIP):
+- **DRY (Existing-repo): [x] DONE** — `lib/booking/walkin.ts` single source (`WALKIN_MAX_HOURS`/`isWalkin`/`isScheduled`), `bookings.ts`+`dashboard/page.tsx` repointed; 4 stale `lib/mock` comments removed; `toMockMenuItem`→`toComponentMenuItem`.
+- **Security (defense-in-depth): [x] DONE** — `/barista` render-boundary guard (BARISTA|ADMIN); migration 0009 DB `CHECK` constraints on money/qty (cafe/print/bookings/packages/facilities); `getSignedDownloadUrl(orgId, path)` org-prefix + traversal guard.
+- **Architecture: [x] partial** — `next.config.ts` production security headers + `poweredByHeader:false` DONE. Still open: **caching strategy** (no `unstable_cache`/`revalidateTag`; per-request RSC — aspirational, correctness-over-staleness on a money app); full CSP `script-src`/`style-src` (needs nonce tuning).
+- **Process: [x] partial** — PR #4 plan backfilled (`docs/plans/2026-06-17-domain-verticals.md`, retires the burst-waiver). Coverage gate: a **global** unit threshold is wrong here (repos are integration-covered; global unit lines ≈57%); the charter's ≥80%-**changed-lines** gate needs a diff-cover script + base ref in CI — scoped follow-up, not a misleading global floor.
+
+Still open (lift sub-gaps further, non-blocking):
+- **a11y:** modal keyboard a11y — `VariantModal` + `GuestCafeClient` overlay lack `role="dialog"`/`aria-modal`/Escape/focus-trap (WCAG 2.1.1); extract a shared `EmptyState` primitive (6+ copies); empty/error fallback on `DashboardClient` + `admin/settings/page`.
+- **Performance:** column-project hot list reads (`select()` on `listOrders`/`listBookings`); memoize `GuestCafeClient`/`BookingsClient`.
+- **Process:** changed-lines coverage gate (above).
 
 ### Doc/process follow-ups (from the 2026-06-21 cold audit)
 - **Domain-verticals plan (backfill or waive):** PR #4 (I-020/021/023/024 + admin console) was a burst with **no `docs/plans/` artifact** — spec `0004-domain-verticals.spec.md` holds the ACs. Treat as an **owner-approved burst waiver** (documented here) until/unless a backfilled `docs/plans/2026-06-17-domain-verticals.md` is wanted.

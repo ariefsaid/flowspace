@@ -273,7 +273,7 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
   return (
     <div className="max-w-6xl mx-auto space-y-5">
       {/* ── Page header (teal gradient bar) ── */}
-      <div className="flex items-center justify-between gap-4 rounded-xl bg-gradient-to-r from-teal-500 to-teal-600 px-5 py-4 shadow-md">
+      <div className="flex items-center justify-between gap-4 rounded-xl bg-gradient-to-r from-teal-800 to-teal-900 px-5 py-4 shadow-md">
         <div>
           <h1 className="text-2xl font-bold text-white">
             {BRAND_NAME} Cafe

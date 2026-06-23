@@ -133,9 +133,9 @@ export default async function AdminDashboardPage() {
       {/* Row 2 — 3 revenue tiles */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {/* Today's Revenue — teal */}
-        <div className="flex items-center justify-between gap-4 rounded-xl bg-gradient-to-br from-teal-500 to-teal-600 p-4 shadow-md text-white">
+        <div className="flex items-center justify-between gap-4 rounded-xl bg-gradient-to-br from-teal-800 to-teal-900 p-4 shadow-md text-white">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-teal-100">Today&apos;s Revenue</p>
+            <p className="text-sm font-medium text-white">Today&apos;s Revenue</p>
             <p className="mt-1 truncate text-2xl font-bold">
               {formatRupiah(stats.todayRevenue)}
             </p>

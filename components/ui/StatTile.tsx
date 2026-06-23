@@ -13,7 +13,7 @@ export interface StatTileProps {
 
 const accentClasses: Record<StatAccent, string> = {
   teal: "bg-teal-50 text-teal-600",
-  orange: "bg-orange-50 text-orange-600",
+  orange: "bg-orange-50 text-orange-700",
   blue: "bg-blue-50 text-blue-600",
   green: "bg-green-50 text-green-600",
   purple: "bg-purple-50 text-purple-600",

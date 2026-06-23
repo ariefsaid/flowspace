@@ -101,7 +101,7 @@ export function Step1Type({ selected, onSelect }: Step1TypeProps) {
             title="Walk-in Coworking"
             description="Tunjukkan nomor booking ke kasir. Durasi dihitung saat selesai (maks 4 jam biaya)."
             badge="Bayar di kasir saat selesai"
-            badgeClass="text-orange-600"
+            badgeClass="text-orange-700"
             badgePill
             selected={selected === "walkin-coworking"}
             onClick={() => onSelect("walkin-coworking")}
@@ -113,7 +113,7 @@ export function Step1Type({ selected, onSelect }: Step1TypeProps) {
             title="Walk-in Meeting Room"
             description="Gunakan meeting room sekarang. Pilih durasi yang diinginkan."
             badge="Mulai sekarang"
-            badgeClass="text-orange-600"
+            badgeClass="text-orange-700"
             badgePill
             selected={selected === "walkin-meeting"}
             onClick={() => onSelect("walkin-meeting")}

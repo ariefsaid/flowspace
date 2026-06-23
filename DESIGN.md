@@ -74,7 +74,8 @@ the two contrast-corrected tokens documented in **WCAG-AA divergence** below (ow
 - Hero / value gradient (white value text + white subtext): `bg-gradient-to-br from-teal-800 to-teal-900` —
   subtext is `text-white` (NOT `text-teal-100`). Both pass WCAG-AA across the whole gradient (worst case = teal-800 ≈ 5.55:1).
   **AA-corrected** from `from-teal-500 to-teal-600` + `text-teal-100` (failed AA). See divergence note.
-- Accent CTA gradient (large/bold white button text): `bg-gradient-to-r from-orange-500 to-orange-600` (text white, `shadow-md`) — unchanged; large bold white passes ≥3:1.
+- Accent CTA gradient (large/bold white **button** text): `bg-gradient-to-r from-orange-500 to-orange-600` (text white, `shadow-md`) — unchanged; large bold white passes ≥3:1.
+- Accent CTA **full-bleed band** carrying normal-size white **body** text (e.g. landing CTA section): `bg-gradient-to-r from-orange-700 to-orange-800` (text white) — darkened so small white body text clears AA 4.5:1 (see divergence note).
 - Accent TEXT on white (normal-size, e.g. emphasized words/prices): `text-orange-700` (4.78:1, AA pass).
   **AA-corrected** from `text-orange-600` (#ea580c, 3.56:1, failed AA normal text). See divergence note.
 - Print action gradient: `bg-gradient-to-r from-purple-500 to-purple-600`.
@@ -133,6 +134,7 @@ remain 1:1 with the original. Contrast computed via WCAG relative-luminance (sRG
 | Hero/value gradient endpoints (white **value** text, large/bold) | `from-teal-500 to-teal-600` | `from-teal-800 to-teal-900` | 2.30:1 (teal-500) | 5.55:1 (teal-800, worst case) | ≥3:1 (large) |
 | Hero/value gradient **subtext** (small) | `text-teal-100` on teal-500/600 | `text-white` on teal-800/900 | ≈2.2:1 | 5.55:1 (worst case, white on teal-800) | ≥4.5:1 (normal) |
 | Accent emphasis text on white (normal size) | `text-orange-600` (#ea580c) | `text-orange-700` (#c2410c) | 3.56:1 | 4.78:1 | ≥4.5:1 (normal) |
+| **Full-bleed orange CTA band** with white **body** subtext (landing OBS-005) | `from-orange-500 to-orange-600` + `text-white/90` | `from-orange-700 to-orange-800` + `text-white` | ≈2.4:1 (orange-500) | 4.78:1 (orange-700, worst case) | ≥4.5:1 (normal) |
 
 Notes:
 - **Lightest endpoint is the worst case** on a gradient. `from-teal-700 to-teal-800` was rejected: the teal-700 end

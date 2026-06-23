@@ -308,12 +308,12 @@ export default function LandingPage() {
       {/* ------------------------------------------------------------------ */}
       {/* 4. Orange CTA band (OBS-005)                                        */}
       {/* ------------------------------------------------------------------ */}
-      <section className="bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-20 text-white">
+      <section className="bg-gradient-to-r from-orange-700 to-orange-800 px-4 py-20 text-white">
         <div className="container mx-auto max-w-3xl text-center">
           <h2 className="mb-4 text-3xl font-bold text-white">
             Siap meningkatkan produktivitas Anda?
           </h2>
-          <p className="mb-8 text-base text-white/90">
+          <p className="mb-8 text-base text-white">
             Daftar sekarang dan mulai bekerja di ruang terbaik!
           </p>
           <Link

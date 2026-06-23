@@ -12,19 +12,13 @@ import { requireSession } from "@/lib/auth/session";
 import { getActiveBooking, listBookingsByUser } from "@/lib/db/bookings";
 import { findById } from "@/lib/db/users";
 import { generateKeycardToken } from "@/lib/keycard/token";
+import { WALKIN_MAX_HOURS, isWalkin } from "@/lib/booking/walkin";
 import {
   DashboardClient,
   type ActiveSessionView,
   type BookingPreviewView,
   type WifiView,
 } from "./DashboardClient";
-
-/** Walk-in cap (recon: "MAX 4h charge"). Mirrors bookings.ts WALKIN_MAX_HOURS. */
-const WALKIN_MAX_HOURS = 4;
-
-function isWalkin(t: string): boolean {
-  return t === "WALKIN_COWORKING" || t === "WALKIN_MEETING";
-}
 
 // ponytail: SIMULATED seeded WiFi credentials. The UniFi integration is a
 // deferred owner-gated issue (rules: "WiFi voucher SIMULATED"). Same for every

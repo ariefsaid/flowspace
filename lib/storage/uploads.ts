@@ -200,10 +200,18 @@ export async function uploadPrintDocument(
 /**
  * Get a short-lived signed download URL for a private print document.
  *
- * @param path - Object path within the bucket.
- * @returns    A signed URL valid for `SIGNED_URL_TTL_SECONDS`.
+ * [SEC]: the caller passes the server-derived `orgId`; the path MUST be inside
+ * that org's prefix (`<orgId>/…`). This prevents a cross-org storage IDOR when a
+ * download surface is wired — a path from another org throws before any signing.
+ *
+ * @param orgId - Server-derived org of the caller (never client-supplied).
+ * @param path  - Object path within the bucket (from buildPrintStoragePath).
+ * @returns       A signed URL valid for `SIGNED_URL_TTL_SECONDS`.
  */
-export async function getSignedDownloadUrl(path: string): Promise<string> {
+export async function getSignedDownloadUrl(orgId: string, path: string): Promise<string> {
+  if (!orgId || !path.startsWith(`${orgId}/`)) {
+    throw new Error("FORBIDDEN_PATH");
+  }
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase.storage
     .from(BUCKET)

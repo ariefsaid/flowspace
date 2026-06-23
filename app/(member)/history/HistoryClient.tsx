@@ -15,7 +15,7 @@ import { cn } from "@/lib/cn";
 
 // ---------------------------------------------------------------------------
 // View shapes — mapped server-side from DB rows, passed as props.
-// (Local types so this leaf does not import lib/mock.)
+// (Local types declared in this leaf; mapped from DB rows.)
 // ---------------------------------------------------------------------------
 
 export type BookingHistoryView = {

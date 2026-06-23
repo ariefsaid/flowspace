@@ -23,7 +23,7 @@ import type { MembershipTier } from "@/lib/db/enums";
 
 // ---------------------------------------------------------------------------
 // View shapes — structurally compatible with the shared leaf components'
-// prop types (ActiveSessionCard, WifiCard) WITHOUT importing lib/mock.
+// prop types (ActiveSessionCard, WifiCard); declared locally, no shared mock module.
 // ---------------------------------------------------------------------------
 
 export type ActiveSessionView = {

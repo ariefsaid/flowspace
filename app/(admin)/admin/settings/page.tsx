@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Settings,
 } from "lucide-react";
+import Link from "next/link";
 import { cn } from "@/lib/cn";
 
 interface SettingCard {
@@ -20,6 +21,8 @@ interface SettingCard {
   title: string;
   description: string;
   iconColor: string;
+  /** When set, the card navigates here (a built surface); otherwise it is inert. */
+  href?: string;
 }
 
 const settingCards: SettingCard[] = [
@@ -28,6 +31,7 @@ const settingCards: SettingCard[] = [
     title: "Kategori Membership",
     description: "Kelola tier membership dan diskon per kategori",
     iconColor: "text-teal-500",
+    href: "/admin/settings/tiers",
   },
   {
     icon: <Building2 className="h-8 w-8" />,
@@ -101,35 +105,44 @@ export default function AdminSettingsPage() {
 
       {/* Settings grid — 3 columns */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {settingCards.map((card) => (
-          <button
-            key={card.title}
-            type="button"
-            className={cn(
-              "group flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm p-6",
-              "text-left transition-all hover:shadow-md hover:border-slate-300",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40"
-            )}
-          >
-            {/* Top row: icon + chevron */}
-            <div className="flex items-start justify-between">
-              <div className={cn("flex-shrink-0", card.iconColor)}>
-                {card.icon}
+        {settingCards.map((card) => {
+          const cardClass = cn(
+            "group flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm p-6",
+            "text-left transition-all hover:shadow-md hover:border-slate-300",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40"
+          );
+          const inner = (
+            <>
+              {/* Top row: icon + chevron */}
+              <div className="flex items-start justify-between">
+                <div className={cn("flex-shrink-0", card.iconColor)}>
+                  {card.icon}
+                </div>
+                <ChevronRight className="h-5 w-5 text-gray-400 flex-shrink-0 transition-transform group-hover:translate-x-0.5" />
               </div>
-              <ChevronRight className="h-5 w-5 text-gray-400 flex-shrink-0 transition-transform group-hover:translate-x-0.5" />
-            </div>
 
-            {/* Text */}
-            <div className="mt-4">
-              <p className="text-base font-bold text-gray-900 leading-snug">
-                {card.title}
-              </p>
-              <p className="text-sm text-gray-500 mt-1 leading-snug">
-                {card.description}
-              </p>
-            </div>
-          </button>
-        ))}
+              {/* Text */}
+              <div className="mt-4">
+                <p className="text-base font-bold text-gray-900 leading-snug">
+                  {card.title}
+                </p>
+                <p className="text-sm text-gray-500 mt-1 leading-snug">
+                  {card.description}
+                </p>
+              </div>
+            </>
+          );
+
+          return card.href ? (
+            <Link key={card.title} href={card.href} className={cardClass}>
+              {inner}
+            </Link>
+          ) : (
+            <button key={card.title} type="button" className={cardClass}>
+              {inner}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

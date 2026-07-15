@@ -59,11 +59,11 @@ jobs:
     env:
       # Local Supabase CLI demo values (non-secret JWTs printed by `supabase status`;
       # identical on every local stack — safe to commit; prod supplies real values).
-      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:64321
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:34321
       NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
       SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:64322/postgres
-      TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:64322/postgres
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:34322/postgres
+      TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:34322/postgres
       AUTH_TRUST_HOST: 'true'
       SEED_ORG_SLUG: flowspace
     steps:

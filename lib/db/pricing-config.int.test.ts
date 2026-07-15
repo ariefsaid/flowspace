@@ -30,7 +30,7 @@ import { PRINT_RATE_COLOR } from "@/lib/print/pricing";
 
 const TEST_URL =
   process.env.TEST_DATABASE_URL ??
-  "postgresql://postgres:postgres@127.0.0.1:64322/postgres";
+  "postgresql://postgres:postgres@127.0.0.1:34322/postgres";
 const testSql = postgres(TEST_URL, { prepare: false, max: 3 });
 const testDb = drizzle(testSql, { schema });
 

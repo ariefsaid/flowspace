@@ -2,21 +2,21 @@ project_id = "flowspace"
 
 [api]
 enabled = true
-port = 64321
+port = 34321
 schemas = ["public", "storage", "graphql_public"]
 
 [db]
-port = 64322
+port = 34322
 
 [studio]
 enabled = true
-port = 64323
+port = 34323
 
 [inbucket]
-port = 64324
+port = 34324
 
 [analytics]
-port = 64327
+port = 34327
 
 [auth]
 enabled = true

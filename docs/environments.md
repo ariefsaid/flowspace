@@ -24,13 +24,13 @@
   exactly what CI does, so it's the load-bearing local check before a push. Never assume a pre-seeded stack.
 - **Local quickstart:**
   ```bash
-  pnpm sb:start                 # Supabase CLI local stack (API 64321 / DB 64322 for this project)
+  pnpm sb:start                 # Supabase CLI local stack (API 34321 / DB 34322 for this project)
   pnpm exec supabase db reset   # fresh apply of all migrations
   pnpm db:seed:supabase         # org + admin/member/barista (Supabase Auth users + app_users rows)
   pnpm dev                      # http://localhost:3000
   ```
-  Tests: `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:64322/postgres pnpm test:int` · `pnpm e2e` (seed first).
-  > Ports are 64321/64322 (not the 54321 default) to avoid clashing with other local Supabase projects on this host.
+  Tests: `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:34322/postgres pnpm test:int` · `pnpm e2e` (seed first).
+  > Ports are 34321/34322 (not the 54321 default) to avoid clashing with other local Supabase projects on this host.
 - **Secrets** (`SUPABASE_SERVICE_ROLE_KEY`, DB url, anon key) live in env / the host secret store — **never committed**.
   The **service-role key is server-only** — never `NEXT_PUBLIC_*`, never in a client/edge bundle. `.env.example` is the
   only env file in the repo (placeholders only; local stack uses the well-known Supabase demo keys).

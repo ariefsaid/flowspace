@@ -15,7 +15,7 @@ import { appUsers, organizations } from "@/lib/db/schema";
 
 const TEST_URL =
   process.env.TEST_DATABASE_URL ??
-  "postgresql://postgres:postgres@127.0.0.1:64322/postgres";
+  "postgresql://postgres:postgres@127.0.0.1:34322/postgres";
 
 /** Privileged connection — runs as the postgres superuser (service-role equivalent). */
 const rootSql = postgres(TEST_URL, { prepare: false, max: 3 });

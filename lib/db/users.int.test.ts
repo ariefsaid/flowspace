@@ -12,7 +12,7 @@ import { appUsers, organizations } from "@/lib/db/schema";
 
 const TEST_URL =
   process.env.TEST_DATABASE_URL ??
-  "postgresql://postgres:postgres@127.0.0.1:64322/postgres";
+  "postgresql://postgres:postgres@127.0.0.1:34322/postgres";
 
 /** Dedicated Drizzle + postgres-js client for test DB — never uses the app's singleton. */
 const testSql = postgres(TEST_URL, { prepare: false, max: 3 });
@@ -81,7 +81,7 @@ import {
 } from "@/lib/db/users";
 
 const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:64321";
+  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:34321";
 const SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY ??
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";

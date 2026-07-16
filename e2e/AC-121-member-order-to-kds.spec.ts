@@ -7,11 +7,11 @@
  * (FR-114, FR-130 — the ONE curated cross-stack e2e for the cafe domain)
  *
  * Strategy: two browser contexts in the same worker (Playwright config: 1 worker).
- *   1. Member context: login budi → /cafe → add Croissant (hasVariants:false) →
+ *   1. Member context: login budi → /cafe → add Paket A (hasVariants:false) →
  *      open cart → "Pesan Sekarang" → order placed.
  *   2. Barista context: login barista → /barista → click manual Refresh button
  *      (legitimate fallback per spec: "poll/manual-refresh is the MVP") →
- *      assert placed order appears in the "Pesanan Baru" column with "Croissant".
+ *      assert placed order appears in the "Pesanan Baru" column with "Paket A".
  *
  * Credentials: seeded dev-fallback values from scripts/seed-supabase.ts.
  * NEVER include real secrets — these are test-DB dev fallbacks only.
@@ -24,7 +24,7 @@ const BARISTA_EMAIL = "barista@flowspace.test";
 const BARISTA_PW = "dev-barista-pw";
 
 /** The no-variant food item present in the seed menu (hasVariants: false). */
-const TARGET_ITEM = "Croissant";
+const TARGET_ITEM = "Paket A";
 
 // ---------------------------------------------------------------------------
 // Helper — reused login pattern (matches all other AC-0xx specs in this suite)
@@ -66,23 +66,23 @@ test("AC-121 member order appears in the barista KDS as NEW", async ({
     // Barista should land on /barista (role-home redirect)
     await expect(baristaPage).toHaveURL(/\/barista/, { timeout: 10_000 });
 
-    // ── ACT (member): navigate to /cafe, add Croissant, checkout ──
+    // ── ACT (member): navigate to /cafe, add Paket A, checkout ──
     await memberPage.goto("/cafe");
     // Wait for the RSC to finish rendering the menu (h1 "FlowSpace Cafe" heading)
     await expect(memberPage.locator("h1").filter({ hasText: /cafe/i })).toBeVisible({
       timeout: 15_000,
     });
 
-    // Click the "Food" category filter to narrow view to food items (Croissant is Food)
+    // Click the "Food" category filter to narrow view to food items (Paket A is Food)
     await memberPage.getByRole("button", { name: "Food" }).click();
 
-    // Wait for Croissant to appear (it's a no-variant Food item — "Tambah" button)
+    // Wait for Paket A to appear (it's a no-variant Food item — "Tambah" button)
     const croissantHeading = memberPage.locator("h3").filter({ hasText: TARGET_ITEM }).first();
     await expect(croissantHeading).toBeVisible({ timeout: 10_000 });
 
-    // Click the "Tambah" button in the same card as the Croissant heading.
-    // Structure: h3[Croissant] → parent div (name row) → grandparent Card div → button[Tambah]
-    // Using Playwright's filter to find the specific "Tambah" button for Croissant.
+    // Click the "Tambah" button in the same card as the Paket A heading.
+    // Structure: h3[Paket A] → parent div (name row) → grandparent Card div → button[Tambah]
+    // Using Playwright's filter to find the specific "Tambah" button for Paket A.
     const tambahBtn = memberPage
       .locator("h3")
       .filter({ hasText: TARGET_ITEM })
@@ -92,11 +92,11 @@ test("AC-121 member order appears in the barista KDS as NEW", async ({
 
     // Open cart panel via the cart button (aria-label="Buka keranjang")
     await memberPage.getByRole("button", { name: "Buka keranjang" }).click();
-    // Verify Croissant is in the cart panel
+    // Verify Paket A is in the cart panel
     await expect(memberPage.locator("[role='dialog'], .fixed").getByText(TARGET_ITEM)).toBeVisible({
       timeout: 5_000,
     }).catch(async () => {
-      // fallback: just check any visible text with "Croissant"
+      // fallback: just check any visible text with "Paket A"
       await expect(memberPage.getByText(TARGET_ITEM).first()).toBeVisible({ timeout: 5_000 });
     });
 
@@ -120,9 +120,9 @@ test("AC-121 member order appears in the barista KDS as NEW", async ({
     await baristaPage.waitForTimeout(3_000);
 
     // ── ASSERT: the placed order appears in the "Pesanan Baru" (NEW) column ──
-    // Goal oracle: "Croissant" is visible in the KDS under the NEW column.
+    // Goal oracle: "Paket A" is visible in the KDS under the NEW column.
     // BaristaClient renders: h2 "PESANAN BARU (N)" → sibling OrderCards below it.
-    // Each OrderCard has order lines rendered as: <li><span>1×</span> Croissant</li>
+    // Each OrderCard has order lines rendered as: <li><span>1×</span> Paket A</li>
     const pesananBaruHeading = baristaPage.locator("h2").filter({
       hasText: /Pesanan Baru/i,
     });
@@ -131,7 +131,7 @@ test("AC-121 member order appears in the barista KDS as NEW", async ({
     // The NEW column is a flex column; its h2 and OrderCards share a parent div.
     const newColumnDiv = pesananBaruHeading.locator("xpath=parent::div");
 
-    // Goal: Croissant line appears in the NEW column (order is NEW status)
+    // Goal: Paket A line appears in the NEW column (order is NEW status)
     await expect(newColumnDiv.getByText(TARGET_ITEM).first()).toBeVisible({
       timeout: 10_000,
     });

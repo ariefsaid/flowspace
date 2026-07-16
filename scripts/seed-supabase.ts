@@ -6,9 +6,9 @@
  * table. Idempotent: re-running is safe (skips rows that already exist).
  *
  * Env vars read (with local-stack fallbacks matching `lib/supabase/env.ts`):
- *   NEXT_PUBLIC_SUPABASE_URL      — Supabase API URL (default: http://127.0.0.1:64321)
+ *   NEXT_PUBLIC_SUPABASE_URL      — Supabase API URL (default: http://127.0.0.1:34321)
  *   SUPABASE_SERVICE_ROLE_KEY     — service-role JWT (default: local demo key)
- *   DATABASE_URL                  — Postgres URL for Drizzle inserts (default: local 64322)
+ *   DATABASE_URL                  — Postgres URL for Drizzle inserts (default: local 34322)
  *   SEED_ORG_SLUG                 — org slug (default: "flowspace")
  *   SEED_ADMIN_EMAIL / _PASSWORD
  *   SEED_MEMBER_EMAIL / _PASSWORD
@@ -47,7 +47,7 @@ import { createId } from "@paralleldrive/cuid2";
 // Env resolution (same defaults as lib/supabase/env.ts — local Supabase CLI)
 // ---------------------------------------------------------------------------
 const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:64321";
+  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:34321";
 
 const SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY ??
@@ -55,7 +55,7 @@ const SERVICE_ROLE_KEY =
 
 const DATABASE_URL =
   process.env.DATABASE_URL ??
-  "postgresql://postgres:postgres@127.0.0.1:64322/postgres";
+  "postgresql://postgres:postgres@127.0.0.1:34322/postgres";
 
 const SEED_ORG_SLUG = process.env.SEED_ORG_SLUG ?? "flowspace";
 
@@ -105,9 +105,15 @@ const SEED_USERS: Array<{
 ];
 
 // ---------------------------------------------------------------------------
-// Cafe menu (I-022, FR-103). The 16 captured items from lib/mock/cafe.ts, seeded
-// into the org so all three menu surfaces render against real rows. Deterministic
-// id (`<orgId>__<slug>`) → idempotent (no-op if the row already exists).
+// Cafe menu (I-022, FR-103). Seeded into the org so all three menu surfaces
+// render against real rows. Deterministic id (`<orgId>__<slug>`) → idempotent.
+//
+// Menu = snacks + beverages + Paket A/B/C (the à-la-carte "ramesan" rice mains
+// are intentionally NOT seeded yet). Paket combos map to the FOOD category (no
+// dedicated PAKET category exists). Prices are the customer-facing menu-board
+// values (ESB stores ex-VAT; board ≈ ex-VAT ×1.10 rounded). hasVariants=false
+// throughout — hot/iced are already separate SKUs (Es… / …Panas).
+// ponytail: Paket→FOOD instead of a new enum, avoids a migration + UI-tab change.
 // ---------------------------------------------------------------------------
 const CATEGORY_MAP: Record<string, CafeCategory> = {
   Coffee: "COFFEE",
@@ -125,22 +131,44 @@ const CAFE_MENU: Array<{
   description: string;
   hasVariants: boolean;
 }> = [
-  { slug: "americano", name: "Americano", emoji: "☕", category: "Coffee", price: 25000, description: "Espresso dengan air panas, pahit yang bersih.", hasVariants: true },
-  { slug: "latte", name: "Latte", emoji: "🥛", category: "Coffee", price: 32000, description: "Espresso lembut dengan susu steamed.", hasVariants: true },
-  { slug: "cappuccino", name: "Cappuccino", emoji: "☕", category: "Coffee", price: 30000, description: "Espresso dengan foam susu tebal.", hasVariants: true },
-  { slug: "espresso", name: "Espresso", emoji: "☕", category: "Coffee", price: 20000, description: "Shot espresso pekat, sajian klasik.", hasVariants: true },
-  { slug: "matcha", name: "Matcha Latte", emoji: "🍵", category: "Non-Coffee", price: 35000, description: "Matcha premium dengan susu segar.", hasVariants: true },
-  { slug: "chocolate", name: "Chocolate", emoji: "🍫", category: "Non-Coffee", price: 28000, description: "Cokelat kental hangat atau dingin.", hasVariants: true },
-  { slug: "orange-juice", name: "Orange Juice", emoji: "🍊", category: "Non-Coffee", price: 22000, description: "Jus jeruk peras segar tanpa gula tambahan.", hasVariants: true },
-  { slug: "lemon-tea", name: "Lemon Tea", emoji: "🍋", category: "Non-Coffee", price: 20000, description: "Teh dengan perasan lemon segar.", hasVariants: true },
-  { slug: "tempe-orek", name: "Tempe Orek", emoji: "🍱", category: "Food", price: 4500, description: "Tempe manis pedas, lauk pendamping.", hasVariants: false },
-  { slug: "croissant", name: "Croissant", emoji: "🥐", category: "Food", price: 25000, description: "Croissant butter renyah, baru dipanggang.", hasVariants: false },
-  { slug: "sandwich", name: "Sandwich", emoji: "🥪", category: "Food", price: 35000, description: "Roti isi ayam, telur, dan sayuran.", hasVariants: false },
-  { slug: "salad", name: "Salad", emoji: "🥗", category: "Food", price: 45000, description: "Salad sayur segar dengan dressing.", hasVariants: false },
-  { slug: "nasi-rames", name: "Nasi Rames", emoji: "🍛", category: "Food", price: 40000, description: "Nasi dengan aneka lauk lengkap.", hasVariants: false },
-  { slug: "mie-goreng", name: "Mie Goreng", emoji: "🍜", category: "Food", price: 38000, description: "Mie goreng bumbu spesial dengan telur.", hasVariants: false },
-  { slug: "tahu-goreng", name: "Tahu Goreng", emoji: "🧆", category: "Snack", price: 25000, description: "Tahu goreng renyah dengan sambal.", hasVariants: false },
-  { slug: "chicken-wings", name: "Chicken Wings", emoji: "🍗", category: "Snack", price: 35000, description: "Sayap ayam goreng bumbu pedas manis.", hasVariants: false },
+  // -- Paket A/B/C (FOOD) --
+  { slug: "paket-a", name: "Paket A", emoji: "🍛", category: "Food", price: 25000, description: "Nasi putih, 1 lauk telur/tahu, 2 sayur, 1 pendamping, sambal.", hasVariants: false },
+  { slug: "paket-b", name: "Paket B", emoji: "🍛", category: "Food", price: 30000, description: "Nasi putih, 1 lauk protein, 1 sayur, 1 pendamping, sambal.", hasVariants: false },
+  { slug: "paket-c", name: "Paket C", emoji: "🍛", category: "Food", price: 35000, description: "Nasi putih, 1 lauk protein, 2 sayur, sambal.", hasVariants: false },
+  // -- Snacks (SNACK) --
+  { slug: "banana-bread", name: "Banana Bread", emoji: "🍌", category: "Snack", price: 7500, description: "Roti pisang lembut, panggang harian.", hasVariants: false },
+  { slug: "donat-kentang", name: "Donat Kentang", emoji: "🍩", category: "Snack", price: 7500, description: "Donat kentang empuk bertabur gula.", hasVariants: false },
+  // -- Beverages · Coffee (COFFEE) --
+  { slug: "es-kopi-susu-aren", name: "Es Kopi Susu Aren", emoji: "🧋", category: "Coffee", price: 25000, description: "Kopi susu dingin dengan gula aren.", hasVariants: false },
+  { slug: "es-kopi-susu-milo", name: "Es Kopi Susu Milo", emoji: "🧋", category: "Coffee", price: 25000, description: "Kopi susu dingin dengan Milo.", hasVariants: false },
+  { slug: "butter-scotch-latte", name: "Butter Scotch Latte", emoji: "🥤", category: "Coffee", price: 25000, description: "Latte manis dengan butter scotch.", hasVariants: false },
+  { slug: "es-kopi-susu", name: "Es Kopi Susu", emoji: "🧋", category: "Coffee", price: 22000, description: "Kopi susu dingin klasik.", hasVariants: false },
+  { slug: "kopi-susu-panas", name: "Kopi Susu Panas", emoji: "☕", category: "Coffee", price: 22000, description: "Kopi susu panas klasik.", hasVariants: false },
+  { slug: "es-kopi-sanger", name: "Es Kopi Sanger", emoji: "🧋", category: "Coffee", price: 22000, description: "Sanger khas Aceh, disajikan dingin.", hasVariants: false },
+  { slug: "kopi-sanger-panas", name: "Kopi Sanger Panas", emoji: "☕", category: "Coffee", price: 22000, description: "Sanger khas Aceh, disajikan panas.", hasVariants: false },
+  { slug: "es-kopi-hitam", name: "Es Kopi Hitam", emoji: "🧊", category: "Coffee", price: 20000, description: "Kopi hitam dingin tanpa susu.", hasVariants: false },
+  { slug: "kopi-hitam-panas", name: "Kopi Hitam Panas", emoji: "☕", category: "Coffee", price: 20000, description: "Kopi hitam panas tanpa susu.", hasVariants: false },
+  { slug: "kopi-saring-ijen", name: "Kopi Saring Ijen Fullwash", emoji: "☕", category: "Coffee", price: 20000, description: "Kopi saring single-origin Ijen fullwash.", hasVariants: false },
+  { slug: "kopi-saring-toraja", name: "Kopi Saring Toraja", emoji: "☕", category: "Coffee", price: 20000, description: "Kopi saring single-origin Toraja.", hasVariants: false },
+  { slug: "kopi-saring-tolu-batak", name: "Kopi Saring Tolu Batak", emoji: "☕", category: "Coffee", price: 18000, description: "Kopi saring single-origin Tolu Batak.", hasVariants: false },
+  { slug: "kopi-tubruk-ijen", name: "Kopi Tubruk Ijen Fullwash", emoji: "☕", category: "Coffee", price: 18000, description: "Kopi tubruk single-origin Ijen fullwash.", hasVariants: false },
+  { slug: "kopi-tubruk-toraja", name: "Kopi Tubruk Toraja", emoji: "☕", category: "Coffee", price: 18000, description: "Kopi tubruk single-origin Toraja.", hasVariants: false },
+  { slug: "kopi-tubruk-tolu-batak", name: "Kopi Tubruk Tolu Batak", emoji: "☕", category: "Coffee", price: 18000, description: "Kopi tubruk single-origin Tolu Batak.", hasVariants: false },
+  { slug: "kopi-hitam-botol", name: "Kopi Hitam Botol 150ml", emoji: "🍶", category: "Coffee", price: 20000, description: "Kopi hitam kemasan botol 150ml.", hasVariants: false },
+  { slug: "cappuccino-botol", name: "Cappuccino Botol 150ml", emoji: "🍶", category: "Coffee", price: 22000, description: "Cappuccino kemasan botol 150ml.", hasVariants: false },
+  { slug: "kopi-susu-aren-botol", name: "Kopi Susu Aren Botol 150ml", emoji: "🍶", category: "Coffee", price: 25000, description: "Kopi susu aren kemasan botol 150ml.", hasVariants: false },
+  // -- Beverages · Non-Coffee (NON_COFFEE) --
+  { slug: "es-matcha", name: "Es Matcha", emoji: "🍵", category: "Non-Coffee", price: 25000, description: "Matcha latte dingin.", hasVariants: false },
+  { slug: "matcha-panas", name: "Matcha Panas", emoji: "🍵", category: "Non-Coffee", price: 25000, description: "Matcha latte panas.", hasVariants: false },
+  { slug: "es-milo", name: "Es Milo", emoji: "🥤", category: "Non-Coffee", price: 25000, description: "Milo dingin creamy.", hasVariants: false },
+  { slug: "milo-panas", name: "Milo Panas", emoji: "☕", category: "Non-Coffee", price: 25000, description: "Milo panas creamy.", hasVariants: false },
+  { slug: "ice-lychee-tea", name: "Ice Lychee Tea", emoji: "🧋", category: "Non-Coffee", price: 20000, description: "Teh leci dingin menyegarkan.", hasVariants: false },
+  { slug: "soda-gembira", name: "Soda Gembira", emoji: "🥤", category: "Non-Coffee", price: 20000, description: "Soda susu sirup merah klasik.", hasVariants: false },
+  { slug: "es-teh-manis", name: "Es Teh Manis", emoji: "🧊", category: "Non-Coffee", price: 12000, description: "Teh manis dingin.", hasVariants: false },
+  { slug: "teh-manis-hangat", name: "Teh Manis Hangat", emoji: "🍵", category: "Non-Coffee", price: 12000, description: "Teh manis hangat.", hasVariants: false },
+  { slug: "es-teh-tawar", name: "Es Teh Tawar", emoji: "🧊", category: "Non-Coffee", price: 10000, description: "Teh tawar dingin.", hasVariants: false },
+  { slug: "teh-tawar-hangat", name: "Teh Tawar Hangat", emoji: "🍵", category: "Non-Coffee", price: 10000, description: "Teh tawar hangat.", hasVariants: false },
+  { slug: "aqua-330ml", name: "Aqua 330ml", emoji: "💧", category: "Non-Coffee", price: 5000, description: "Air mineral botol 330ml.", hasVariants: false },
 ];
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@
  * NEVER include real secrets — these are test-DB dev fallbacks only.
  */
 import { test, expect, type Page } from "@playwright/test";
+import { PDFDocument } from "pdf-lib";
 
 const MEMBER_EMAIL = "budi@flowspace.test";
 const MEMBER_PW = "dev-member-pw";
@@ -81,12 +82,17 @@ test("AC-201 member submits a 1-page B&W print job: balance decreases by 1 and j
   // Sanity: the default 1-page BW job is affordable so the submit button is
   // enabled (PrintSummary disables submit when saldoSetelahPrint < 0).
   // ── ARRANGE: pick a document — a print job now REQUIRES a file (it is
-  // uploaded to Supabase Storage before the job is charged). Set the hidden
-  // file input on the upload dropzone with a tiny in-memory PDF. ──
+  // uploaded to Supabase Storage before the job is charged). The goal of
+  // this test is print SUCCESS, so build a genuinely valid 1-page PDF (a
+  // bare magic-bytes stub has no page tree and the server correctly rejects
+  // it as INVALID_PDF — see lib/print/document-pages.test.ts).
+  const validPdf = await PDFDocument.create();
+  validPdf.addPage();
+  const validPdfBytes = await validPdf.save();
   await page.setInputFiles('input[type="file"]', {
     name: "dokumen.pdf",
     mimeType: "application/pdf",
-    buffer: Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"),
+    buffer: Buffer.from(validPdfBytes),
   });
 
   const submitBtn = page.getByRole("button", { name: /Submit Print Job/ });

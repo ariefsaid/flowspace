@@ -37,11 +37,12 @@ const rootDb = drizzle(rootSql, { schema });
 
 /**
  * The 12 business tables the I-046 REVOKE migration must lock down, plus the
- * 4 new print-parity tables (I-043, migration 0012/0013) that adopt the same
- * SELECT-only convention from their first migration (ADR-0015 addendum) —
- * `org_print_pricing` is re-created (renamed to `_legacy` + a new matrix
- * table under the same name) by migration 0012, so it must be re-proven here
- * too, not just inherited from I-046's original REVOKE.
+ * 4 new print-parity tables (I-043, migration 0012/0013) and the I-040
+ * `time_credit_lots` table (migration 0015) that adopt the same SELECT-only
+ * convention from their first migration (ADR-0015 addendum) — `org_print_pricing`
+ * is re-created (renamed to `_legacy` + a new matrix table under the same
+ * name) by migration 0012, so it must be re-proven here too, not just
+ * inherited from I-046's original REVOKE.
  */
 const BUSINESS_TABLES = [
   "app_users",
@@ -59,6 +60,7 @@ const BUSINESS_TABLES = [
   "printers",
   "print_agent_configs",
   "print_agent_rate_limit_events",
+  "time_credit_lots",
   "print_topup_packages",
 ] as const;
 

@@ -33,6 +33,24 @@ describe("cartLineKey", () => {
     const variant = cartLineKey("croissant", [{ variantName: "Size", optionName: "Large" }]);
     expect(noVariant).not.toBe(variant);
   });
+
+  it("[MONEY] never collides two DISTINCT selection sets even when a variant/option name contains '&' or '='", () => {
+    // A single-group selection whose option name itself looks like a second
+    // "name=value" pair vs. a genuinely two-group selection — a naive
+    // `name=option` joined by `&` produces the IDENTICAL string for both:
+    //   "A=x&B=y" (one group "A", option "x&B=y")
+    //   "A=x&B=y" (two groups: "A"="x", "B"="y")
+    // These are DIFFERENT selections (different priced combinations) and must
+    // never share a cart line / key.
+    const oneGroupWithAmpersandInOptionName = cartLineKey("kopi-susu", [
+      { variantName: "A", optionName: "x&B=y" },
+    ]);
+    const twoDistinctGroups = cartLineKey("kopi-susu", [
+      { variantName: "A", optionName: "x" },
+      { variantName: "B", optionName: "y" },
+    ]);
+    expect(oneGroupWithAmpersandInOptionName).not.toBe(twoDistinctGroups);
+  });
 });
 
 describe("addCartLine (AC-704)", () => {

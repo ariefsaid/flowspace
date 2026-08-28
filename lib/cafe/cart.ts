@@ -17,16 +17,29 @@ export interface CartLine {
  * Builds a stable cart-line key: the same set of selections (in any input
  * order) always produces the same key, and different combinations (or no
  * selections at all) never collide.
+ *
+ * Variant group/option names are free-form strings (lib/cafe/variants.ts only
+ * requires non-empty, not a restricted charset) and may legally contain `&`
+ * or `=`. A raw `${name}=${option}` joined by `&` is therefore NOT
+ * collision-free: a single group whose option name itself contains "&B=y"
+ * can produce the exact same string as two separate groups "A"="x","B"="y" —
+ * merging two DISTINCT, differently-priced selections under one cart line
+ * ([MONEY] undercharge). `JSON.stringify` of the normalized (sorted) array
+ * is used instead: JSON's own escaping makes the encoding unambiguous
+ * regardless of what characters the names contain.
  */
 export function cartLineKey(
   menuItemId: string,
   options?: VariantSelectionInput[] | null,
 ): string {
-  const sorted = [...(options ?? [])].sort((a, b) =>
-    a.variantName.localeCompare(b.variantName),
-  );
-  const optPart = sorted.map((o) => `${o.variantName}=${o.optionName}`).join("&");
-  return optPart ? `${menuItemId}::${optPart}` : menuItemId;
+  const sorted = [...(options ?? [])]
+    .map((o) => ({ variantName: o.variantName, optionName: o.optionName }))
+    .sort(
+      (a, b) =>
+        a.variantName.localeCompare(b.variantName) ||
+        a.optionName.localeCompare(b.optionName),
+    );
+  return sorted.length ? `${menuItemId}::${JSON.stringify(sorted)}` : menuItemId;
 }
 
 /**

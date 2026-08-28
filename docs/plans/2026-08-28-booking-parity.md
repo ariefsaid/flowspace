@@ -624,3 +624,12 @@ Open questions for the Director (aim zero):
 
 **No ADR** (regression plan) — advisory-lock-vs-exclusion is reversible and spec-permitted; it is documented in
 the Design section, not an ADR.
+## Director answers to open questions (2026-08-28)
+
+1. **Column naming:** bind to I-041's `meeting_discount_pct` / `getTierDiscounts(...).meetingDiscountPct` —
+   I-041 owns the column; spec 0007's migration-delta line has been corrected to match.
+2. **Full-room online booking:** confirmed, ships this pass (owner-approved OBS-812/AC-806).
+3. **Checkout discount timing:** approved as planned — recompute at checkout (ORIG re-applies at billing);
+   scheduled amounts stay frozen at create.
+4. **Transitional lot:** approved — one 90-day lot from any legacy aggregate. No production data exists yet;
+   revisit only at a real prod cutover.

@@ -20,6 +20,13 @@
  * (FR-852 "resolve one org scope"). `middleware.ts`/`route-policy.ts`
  * release `/api/cron/*` from the edge session gate (this route is its own
  * authority), matching the existing `/api/print-agent` pattern.
+ *
+ * [SEC] The org slug is read ONLY from env (`BOOKING_SWEEP_ORG_SLUG`,
+ * falling back to `SEED_ORG_SLUG`/the default seed org) — never from the
+ * request. A `?org=` query param used to be honored here, which meant any
+ * holder of the bearer secret (a real, org-agnostic job credential) could
+ * sweep an ARBITRARY org's rows just by changing the query string —
+ * cross-tenant reach the Bearer-secret auth was never meant to grant.
  */
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
@@ -43,7 +50,11 @@ async function handle(request: Request): Promise<Response> {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 }); // AC-837 — before any read/write
   }
 
-  const slug = new URL(request.url).searchParams.get("org") ?? process.env.SEED_ORG_SLUG ?? "flowspace";
+  // [SEC] The swept org is ALWAYS resolved server-side from env — never
+  // from the request. A `?org=` query param was previously honored, which
+  // meant any holder of the bearer secret could target an arbitrary org's
+  // rows by simply changing the query string (cross-tenant sweep/DoS).
+  const slug = process.env.BOOKING_SWEEP_ORG_SLUG ?? process.env.SEED_ORG_SLUG ?? "flowspace";
   const orgId = await resolveOrgIdBySlug(slug);
   if (!orgId) return NextResponse.json({ error: "ORG_NOT_FOUND" }, { status: 404 });
 

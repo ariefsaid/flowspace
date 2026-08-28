@@ -12,19 +12,22 @@ import { PDFDocument } from "pdf-lib";
  * Throws `INVALID_PDF` on corrupt/truncated/encrypted documents.
  */
 export async function getPdfPageCount(bytes: Uint8Array): Promise<number> {
-  let doc;
   try {
-    doc = await PDFDocument.load(bytes, {
+    const doc = await PDFDocument.load(bytes, {
       ignoreEncryption: false,
       updateMetadata: false,
       throwOnInvalidObject: true,
     });
+    const count = doc.getPageCount();
+    if (!Number.isInteger(count) || count <= 0) {
+      throw new Error("INVALID_PDF");
+    }
+    return count;
   } catch {
+    // Covers both PDFDocument.load failures AND getPageCount() throwing on
+    // a malformed/missing page tree (e.g. pdf-lib's internal TypeError
+    // "Cannot read properties of undefined (reading 'Pages')") — neither
+    // may ever escape as an uncaught error.
     throw new Error("INVALID_PDF");
   }
-  const count = doc.getPageCount();
-  if (!Number.isInteger(count) || count <= 0) {
-    throw new Error("INVALID_PDF");
-  }
-  return count;
 }

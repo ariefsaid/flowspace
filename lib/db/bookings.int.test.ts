@@ -1154,6 +1154,84 @@ describe("lib/db/bookings", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Lifecycle transitions (AC-807) — the locked I-040 state machine:
+  //   scheduled: PENDING → CONFIRMED → ACTIVE → COMPLETED|CANCELLED
+  //   walk-in:   PENDING → ACTIVE → COMPLETED|CANCELLED (RESTRICTED — never
+  //              CONFIRMED; approvePayment explicitly rejects a walk-in row).
+  // -------------------------------------------------------------------------
+  describe("AC-807: lifecycle transitions — scheduled full chain vs walk-in restricted chain", () => {
+    it("AC-807: a scheduled (cashier) booking walks the FULL chain PENDING→CONFIRMED→ACTIVE→COMPLETED", async () => {
+      // seatBId (not seatAId): several earlier tests in this file leave
+      // now-relative rows on seatAId (e.g. AC-836/845's PENDING fixture,
+      // never cleaned up since it's intentionally never transitioned) that
+      // would otherwise collide with this test's own real-"now" window.
+      const created = await createBooking({
+        orgId: orgAId, userId: aUserId, tier: "REGULAR",
+        facilityType: "COWORKING_SEAT", facilityId: seatBId, facilityName: "Meja B",
+        startAt: new Date(Date.now() - 60_000), endAt: new Date(Date.now() + HOUR),
+        paymentMethod: "cashier",
+      });
+      expect(created.status).toBe("PENDING");
+
+      const approved = await approvePayment(orgAId, created.id);
+      expect(approved.status).toBe("CONFIRMED");
+
+      await runStatusSweep(orgAId, new Date());
+      const [active] = await testDb.select().from(bookings).where(eq(bookings.id, created.id));
+      expect(active.status).toBe("ACTIVE");
+
+      const completed = await checkoutBooking(orgAId, created.id, "cash");
+      expect(completed.status).toBe("COMPLETED");
+    });
+
+    it("AC-807: a scheduled (cashier) booking can also reach the chain's CANCELLED branch (PENDING→CONFIRMED→CANCELLED, expired unactivated)", async () => {
+      const start = new Date("2026-09-05T09:00:00Z");
+      const created = await createBooking({
+        orgId: orgAId, userId: aUserId, tier: "REGULAR",
+        facilityType: "COWORKING_SEAT", facilityId: seatAId, facilityName: "Meja A",
+        startAt: start, endAt: new Date(start.getTime() + HOUR),
+        paymentMethod: "cashier",
+      });
+      const approved = await approvePayment(orgAId, created.id);
+      expect(approved.status).toBe("CONFIRMED");
+
+      // Sweep well after the booking's end — never activated, so it cancels.
+      await runStatusSweep(orgAId, new Date(start.getTime() + 2 * HOUR));
+      const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, created.id));
+      expect(fresh.status).toBe("CANCELLED");
+    });
+
+    it("AC-807: a walk-in booking walks the RESTRICTED chain PENDING→ACTIVE→COMPLETED, NEVER through CONFIRMED", async () => {
+      const created = await createBooking({
+        orgId: orgAId, userId: aUserId, tier: "REGULAR",
+        facilityType: "WALKIN_COWORKING", facilityName: "Walk-in Coworking",
+        paymentMethod: "cashier",
+      });
+      expect(created.status).toBe("PENDING");
+
+      // The CONFIRMED-transition function explicitly refuses a walk-in row —
+      // the restricted chain has no path through CONFIRMED at all.
+      await expect(approvePayment(orgAId, created.id)).rejects.toThrow(/INVALID_TRANSITION/);
+
+      const started = await approveAndStartWalkIn(orgAId, created.id);
+      expect(started.status).toBe("ACTIVE");
+
+      const completed = await checkoutBooking(orgAId, created.id, "cash");
+      expect(completed.status).toBe("COMPLETED");
+    });
+
+    it("AC-807: a walk-in booking can also reach the chain's CANCELLED branch directly from PENDING (never via CONFIRMED)", async () => {
+      const created = await createBooking({
+        orgId: orgAId, userId: aUserId, tier: "REGULAR",
+        facilityType: "WALKIN_MEETING", facilityName: "Walk-in Meeting Room",
+        paymentMethod: "cashier",
+      });
+      const cancelled = await cancelBooking(orgAId, created.id);
+      expect(cancelled.status).toBe("CANCELLED");
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // runStatusSweep (AC-838/AC-839)
   // -------------------------------------------------------------------------
   describe("runStatusSweep", () => {

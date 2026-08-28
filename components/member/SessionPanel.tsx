@@ -117,6 +117,10 @@ function WalkinPanel({ session }: { session: SessionView }) {
 function ScheduledPanel({ session, onExtend }: { session: SessionView; onExtend: (extraHours: number) => Promise<void> }) {
   const now = useNow();
   const [extending, setExtending] = useState(false);
+  // NFR-803: a reusable component must not depend on the CALLER to surface
+  // its own action's failure — render the error inline here regardless of
+  // whether the caller's onExtend also handles it upstream.
+  const [extendError, setExtendError] = useState<string | null>(null);
   const endMs = session.endAt ? new Date(session.endAt).getTime() : 0;
   const remainingMs = endMs - now;
   const overtime = remainingMs <= 0;
@@ -124,8 +128,11 @@ function ScheduledPanel({ session, onExtend }: { session: SessionView; onExtend:
 
   async function handleExtend() {
     setExtending(true);
+    setExtendError(null);
     try {
       await onExtend(EXTENSION_STEP_HOURS);
+    } catch (err) {
+      setExtendError(err instanceof Error ? err.message : "Gagal memperpanjang sesi.");
     } finally {
       setExtending(false);
     }
@@ -185,6 +192,11 @@ function ScheduledPanel({ session, onExtend }: { session: SessionView; onExtend:
               {extending ? "Memproses..." : "Perpanjang Sesi"}
             </button>
           </div>
+          {extendError && (
+            <p role="alert" className="mt-2 text-right text-xs font-medium text-red-100">
+              {extendError}
+            </p>
+          )}
         </>
       )}
     </div>

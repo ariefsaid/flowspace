@@ -51,6 +51,27 @@ describe("SessionPanel", () => {
     await waitFor(() => expect(onExtend).toHaveBeenCalledWith(1));
   });
 
+  it("NFR-803: an extension failure (EXTENSION_BLOCKED_BY_NEXT_BOOKING) renders an inline error within the panel itself, not silently swallowed", async () => {
+    const onExtend = vi.fn().mockRejectedValue(new Error("EXTENSION_BLOCKED_BY_NEXT_BOOKING"));
+    const session: SessionView = {
+      bookingId: "bk_1",
+      facilityName: "Meeting Room A",
+      bookingMode: "SCHEDULED",
+      startAt: iso(-90 * 60_000),
+      endAt: iso(5 * 60_000),
+      ratePerHourRupiah: 150_000,
+      maxHours: 4,
+    };
+    render(<SessionPanel session={session} onExtend={onExtend} />);
+    fireEvent.click(screen.getByRole("button", { name: /Perpanjang Sesi/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/EXTENSION_BLOCKED_BY_NEXT_BOOKING/i)).toBeInTheDocument(),
+    );
+    // The extending state resets so the affordance can be retried.
+    expect(screen.getByRole("button", { name: /Perpanjang Sesi/i })).toBeEnabled();
+  });
+
   it("AC-830: scheduled ACTIVE past end shows a red overtime warning and no completion/extension action", () => {
     const session: SessionView = {
       bookingId: "bk_2",

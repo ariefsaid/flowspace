@@ -65,7 +65,9 @@ the two contrast-corrected tokens documented in **WCAG-AA divergence** below (ow
   borders + `shadow-sm`, not heavy fills.
 - **Teal** is the brand/primary (buttons, active nav, links, KPI accents). **Orange** is the
   energetic accent/CTA (gradient buttons like "Order Cafe", hero word accent). **Purple** appears
-  only on the print quick-action.
+  on the print quick-action, and — reverse-engineered from the captured original's booking
+  floor-plan — on the full-room event facility (`purple-50/100/200/400/500/600`, e.g.
+  `FullRoomCard` in `FloorPlan.tsx`); both are legitimate purple usages, not new brand color.
 - Indonesian copy (`id-ID`). Currency `Rp` with dot thousands (e.g. `Rp 75.000`).
 
 ## Colors (use Tailwind palette classes directly — they match the original 1:1, except the two AA-corrected tokens)

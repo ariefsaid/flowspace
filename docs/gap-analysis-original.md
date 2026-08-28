@@ -121,7 +121,7 @@ booking discounts, or sweep.** Members can double-book, and purchased credits ar
   Admin orders page can delete orders (defect vs audit trail — keep our soft/status model).
 - FlowSpace: temperature/sugar enums exist on order items but **no price adjustment and seed has all
   `hasVariants:false`**; no notes; POS member lookup unverified; 6-char base36 codes.
-- Menu truth: our seed (31 items, incl. the Rumah Rames set from PR #6) diverges from ORIG's 15-item seed —
+- Menu truth: our seed (34 items, incl. the Rumah Rames set from PR #6) diverges from ORIG's 15-item seed —
   **owner to confirm which menu is current reality** (ORIG's seed may be stale vs the live venue).
 - Parity needs: priced variants, order notes, POS member-lookup discount (tier-driven, not ORIG's
   hardcoded 15%), menu reconciliation.

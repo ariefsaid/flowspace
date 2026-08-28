@@ -287,3 +287,11 @@ Each behavior task writes the named failing test first, runs the listed command 
 | AC-729 | `scripts/seed-supabase.int.test.ts` | Integration |
 
 **Coverage notes:** Existing spec-0003 ACs remain valid; this plan extends their order line and KDS assertions rather than superseding them. The changed pure logic and UI files must retain behavior-focused tests and meet the repository's ≥80% changed-line coverage gate.
+
+## Added task (Director, post-I-041 merge) — cafe cart preview discount (FR-730 / AC-730)
+- **[UI]** `components/member/cafe/CartPanel.tsx` + `app/(member)/cafe/CafeClient.tsx`: remove the hardcoded
+  5%; the RSC already resolves eligibility — pass the server-resolved `cafeDiscountPct` (from
+  `resolveDiscountEligibility` + `getTierDiscounts`) into the client and render THAT (0% / no line when
+  ineligible). Failing RTL test titled `AC-730` first (REGULAR→0%, GOLD→10%, ineligible→none), then wire.
+  Verify: `pnpm test:unit -- 'app/(member)/cafe/CafeClient.test.tsx'`. This closes a live main regression
+  I-041 introduced (REGULAR phantom 5%).

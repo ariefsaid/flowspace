@@ -81,6 +81,11 @@
 - **FR-728** (state-driven) — While an order is visible in the KDS, the barista view shall show its snapshotted options
   and notes, with notes visually highlighted, while retaining Realtime refresh and only NEW → PREPARING → READY →
   COMPLETED forward transitions.
+- **FR-730** (event-driven) — When the member cafe cart renders a discount preview, it shall display the
+  **server-resolved** discount percentage (the eligible member's tier `cafe_discount_pct`, or 0% when
+  ineligible), never a hardcoded rate. (Fixes a live regression: post-I-041 the cart hardcodes 5% in
+  `components/member/cafe/CartPanel.tsx` + `app/(member)/cafe/CafeClient.tsx`, so REGULAR members see a phantom
+  5% that checkout does not apply. The number shown must match what the server charges.)
 - **FR-729** (event-driven) — When the FlowSpace seed runs, it shall preserve all 34 current menu items and prices.
   Because the FlowSpace menu encodes temperature (and sweetness for teas) as separate same-price items
   (`es-*`/`*-panas` pairs; `*-manis`/`*-tawar`), the seed shall NOT add a Temperature group; it shall idempotently
@@ -134,6 +139,7 @@
 - **AC-727** — Given an archived/unavailable menu row, when any member, guest, or POS checkout references it, then the server rejects it even if the client still has its id. *(integration)*
 - **AC-728** — Given concurrent order creation with the same generated code, when a collision occurs, then the repository retries within its existing bounded code-generation policy and never writes duplicate org codes. *(integration)*
 - **AC-729** — Given the current 34-item FlowSpace seed, when variant flags are inspected, then exactly the items FR-729 includes carry the Sugar-only config, no seeded item carries a Temperature group, and the excluded bottled, soda, water, and unsweetened-tea items are non-variant. *(integration)*
+- **AC-730** — Given a REGULAR member (cafe 0%) and a GOLD member (cafe 10%) each with an ACTIVE booking, when the cart preview renders, then each shows its own server-resolved percentage (0% and 10%) and never a hardcoded 5%; an ineligible member shows 0% / no discount line. *(unit/RTL)*
 
 ## Migration / schema delta
 

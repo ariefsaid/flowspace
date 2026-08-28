@@ -1,0 +1,19 @@
+-- [SEC] time_credit_lots lockdown (I-040 security-fix round, finding: RLS
+-- SELECT-grant minor).
+--
+-- Migration 0015 gave `time_credit_lots` the same SELECT-only grant as the
+-- I-046/ADR-0015-addendum "new physical table" default (`org_print_pricing`,
+-- `printers`). That convention is wrong for THIS table specifically: its RLS
+-- policy is org-scoped only (`org_id = current_org()`), with no `user_id`
+-- filter — so any authenticated member's Data-API session could read EVERY
+-- member's lots (remaining hours, expiry) within their own org, not just
+-- their own. The dashboard reads the balance from the derived
+-- `app_users.time_credits` cache, never from lots directly, so the client
+-- never legitimately needs Data-API access to this table at all.
+--
+-- Fix: REVOKE the SELECT grant entirely — server-only from here on, same as
+-- `print_agent_configs`/`print_agent_rate_limit_events` (0012). RLS stays
+-- enabled + org-scoped as defense-in-depth for any future grant, but with no
+-- GRANT at all `authenticated` has zero privileges on this table (not even a
+-- same-org row).
+REVOKE SELECT ON TABLE "time_credit_lots" FROM authenticated;

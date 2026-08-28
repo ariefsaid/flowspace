@@ -238,6 +238,31 @@ describe("RLS write lockdown — scoped authenticated role cannot write", () => 
     }
   );
 
+  it("[SEC] time_credit_lots rejects scoped SELECT too (server-only, no Data-API grant — exposes other members' balances otherwise)", async () => {
+    // time_credit_lots previously carried a SELECT grant to `authenticated`
+    // (I-046/ADR-0015's default convention for new tables) — but a member's
+    // Data API session could then read ANY member's lots in their own org
+    // (no user_id filter in the RLS policy, only org_id), leaking other
+    // members' balances/expiries. The dashboard reads the balance from the
+    // derived app_users.timeCredits cache, never from lots directly, so the
+    // client never legitimately needs this table — lock it down like the
+    // print-agent credential tables (print_agent_configs pattern).
+    let caught: PgError | undefined;
+    const claims = JSON.stringify({ org_id: orgAId }).replace(/'/g, "''");
+    try {
+      await rootSql.begin(async (tx) => {
+        await tx.unsafe(`SET LOCAL ROLE authenticated`);
+        await tx.unsafe(`SET LOCAL "request.jwt.claims" = '${claims}'`);
+        return tx.unsafe(`SELECT org_id FROM "time_credit_lots"`);
+      });
+    } catch (err) {
+      caught = err as PgError;
+    }
+    expect(caught, `expected scoped SELECT on "time_credit_lots" to be denied`).toBeDefined();
+    expect(caught?.code).toBe("42501");
+    expect(caught?.message).toMatch(/permission denied for table time_credit_lots/i);
+  });
+
   it("AC-1003: scoped SELECT still works, and excludes cross-org rows", async () => {
     const claims = JSON.stringify({ org_id: orgAId }).replace(/'/g, "''");
     const rows = await rootSql.begin(async (tx) => {

@@ -35,12 +35,8 @@ import {
   type CafeCategory,
   type FacilityType,
 } from "@/lib/db/enums";
-import { DEFAULT_CAFE_DISCOUNT_PCT } from "@/lib/cafe/pricing";
-import {
-  PRINT_RATE_BW,
-  PRINT_RATE_COLOR,
-  DEFAULT_PRINT_DISCOUNT_PCT,
-} from "@/lib/print/pricing";
+import { PRINT_RATE_BW, PRINT_RATE_COLOR } from "@/lib/print/pricing";
+import { LOCKED_TIER_DISCOUNTS } from "@/lib/tier-discounts";
 import { createId } from "@paralleldrive/cuid2";
 
 // ---------------------------------------------------------------------------
@@ -364,23 +360,16 @@ async function main() {
   }
   console.log(`Seeded ${FACILITIES.length} facilities.`);
 
-  // -- Pricing config (I-027) — seed to current behaviour, idempotent ---------
+  // -- Pricing config (I-041, spec 0008) — 4-dim locked map, idempotent upsert ----
   for (const tier of MEMBERSHIP_TIERS) {
     const id = `${org.id}__tiercfg-${tier}`;
-    const [existing] = await db
-      .select()
-      .from(membershipTierConfig)
-      .where(eq(membershipTierConfig.id, id))
-      .limit(1);
-    if (!existing) {
-      await db.insert(membershipTierConfig).values({
-        id,
-        orgId: org.id,
-        tier,
-        cafeDiscountPct: DEFAULT_CAFE_DISCOUNT_PCT, // 5% all tiers (flat, active-session)
-        printDiscountPct: DEFAULT_PRINT_DISCOUNT_PCT[tier], // 0 / 20 / 20
+    await db
+      .insert(membershipTierConfig)
+      .values({ id, orgId: org.id, tier, ...LOCKED_TIER_DISCOUNTS[tier] })
+      .onConflictDoUpdate({
+        target: [membershipTierConfig.orgId, membershipTierConfig.tier],
+        set: { ...LOCKED_TIER_DISCOUNTS[tier], updatedAt: new Date() },
       });
-    }
   }
   const [existingPrintPricing] = await db
     .select()

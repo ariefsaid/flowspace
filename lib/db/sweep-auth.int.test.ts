@@ -32,7 +32,7 @@ const TEST_URL =
 const testSql = postgres(TEST_URL, { prepare: false, max: 3 });
 const testDb = drizzle(testSql, { schema });
 
-const SECRET = "test-sweep-secret";
+const SECRET = "test-sweep-secret-real-value"; // ≥20 chars — not "weak" (finding: reject placeholder/short secrets)
 const SLUG = "sweep-auth-org-test";
 const OTHER_SLUG = "sweep-auth-other-org-test";
 
@@ -129,6 +129,47 @@ describe("booking-status-sweep route — authenticated entry (AC-837/FR-852)", (
     expect(res.status).toBe(401);
     const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, toActivateId));
     expect(fresh.status).toBe("CONFIRMED");
+  });
+
+  it("[SEC] a wrong credential of a DIFFERENT length than the real secret still fails closed (401), never a 5xx/crash", async () => {
+    // A naive crypto.timingSafeEqual on mismatched-length buffers THROWS —
+    // this proves the length guard fails closed instead of erroring.
+    const res = await GET(
+      new Request(`http://localhost/api/cron/booking-status-sweep`, {
+        headers: { authorization: "Bearer x" }, // far shorter than SECRET
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("[SEC] an env secret set to the documented placeholder value is treated as unconfigured — 401 even with an exact-matching credential", async () => {
+    const original = process.env.BOOKING_SWEEP_SECRET;
+    process.env.BOOKING_SWEEP_SECRET = "REPLACE_WITH_A_RANDOM_SECRET";
+    try {
+      const res = await GET(
+        new Request(`http://localhost/api/cron/booking-status-sweep`, {
+          headers: { authorization: "Bearer REPLACE_WITH_A_RANDOM_SECRET" },
+        }),
+      );
+      expect(res.status).toBe(401);
+    } finally {
+      process.env.BOOKING_SWEEP_SECRET = original;
+    }
+  });
+
+  it("[SEC] a too-short env secret is treated as unconfigured — 401 even with an exact-matching credential", async () => {
+    const original = process.env.BOOKING_SWEEP_SECRET;
+    process.env.BOOKING_SWEEP_SECRET = "short";
+    try {
+      const res = await GET(
+        new Request(`http://localhost/api/cron/booking-status-sweep`, {
+          headers: { authorization: "Bearer short" },
+        }),
+      );
+      expect(res.status).toBe(401);
+    } finally {
+      process.env.BOOKING_SWEEP_SECRET = original;
+    }
   });
 
   it("with the correct BOOKING_SWEEP_SECRET, GET returns 200 and the repository sweep actually ran", async () => {

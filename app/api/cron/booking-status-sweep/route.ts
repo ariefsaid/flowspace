@@ -28,11 +28,40 @@
  * sweep an ARBITRARY org's rows just by changing the query string —
  * cross-tenant reach the Bearer-secret auth was never meant to grant.
  */
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import { organizations } from "@/lib/db/schema";
 import { runStatusSweep } from "@/lib/db/bookings";
+
+/** [SEC] A secret this short, or a known committed placeholder, is treated
+ *  as "not really configured" — fail closed rather than accept it verbatim
+ *  (guards a deploy that copied `.env.example` without generating a real
+ *  value). 20 chars comfortably exceeds any of the documented placeholders. */
+const MIN_SECRET_LENGTH = 20;
+const KNOWN_PLACEHOLDER_SECRETS = new Set([
+  "replace_with_a_random_secret",
+  "changeme",
+  "secret",
+  "password",
+]);
+
+function isWeakSweepSecret(secret: string): boolean {
+  return secret.length < MIN_SECRET_LENGTH || KNOWN_PLACEHOLDER_SECRETS.has(secret.toLowerCase());
+}
+
+/** [SEC] Constant-time comparison — a naive `!==` string compare leaks the
+ *  secret's length AND, on some engines, an early-exit timing signal on the
+ *  first mismatched byte. `timingSafeEqual` requires equal-length buffers
+ *  (throws otherwise) — the length check below keeps that fail-closed
+ *  rather than throwing. */
+function secretsMatch(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 async function resolveOrgIdBySlug(slug: string): Promise<string | null> {
   const [org] = await db
@@ -46,7 +75,8 @@ async function resolveOrgIdBySlug(slug: string): Promise<string | null> {
 async function handle(request: Request): Promise<Response> {
   const secret = process.env.BOOKING_SWEEP_SECRET;
   const auth = request.headers.get("authorization");
-  if (!secret || auth !== `Bearer ${secret}`) {
+  const presented = auth?.startsWith("Bearer ") ? auth.slice("Bearer ".length) : null;
+  if (!secret || isWeakSweepSecret(secret) || !presented || !secretsMatch(presented, secret)) {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 }); // AC-837 — before any read/write
   }
 

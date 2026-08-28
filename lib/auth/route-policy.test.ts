@@ -6,8 +6,16 @@ describe("route policy", () => {
     expect(requiredRolesFor("/api/print-agent/jobs")).toBe("public");
   });
 
-  it("FR-852: /api/cron/* releases the edge session gate — the route does its own Bearer job auth", () => {
+  it("FR-852: the booking-status-sweep route releases the edge session gate — it does its own Bearer job auth", () => {
     expect(requiredRolesFor("/api/cron/booking-status-sweep")).toBe("public");
+  });
+
+  it("[SEC] /api/cron/* is NOT a wildcard-public prefix — only the named sweep route is public; a hypothetical future cron route fails closed", () => {
+    // Only the EXACT sweep route (which does its own robust Bearer auth) is
+    // exempt — a future /api/cron/<something-else> route must not silently
+    // inherit "no session gate" just by living under the same prefix.
+    expect(requiredRolesFor("/api/cron/some-future-job")).not.toBe("public");
+    expect(requiredRolesFor("/api/cron")).not.toBe("public");
   });
   // ---------------------------------------------------------------------------
   // AC-015 — Public paths require no auth

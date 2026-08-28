@@ -1,12 +1,19 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Plus, Search, ShoppingCart, User } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { formatRupiah } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import { VariantPickerModal } from "@/components/cafe/VariantPickerModal";
+import { cartLineKey, addCartLine } from "@/lib/cafe/cart";
+import type { CartLine } from "@/lib/cafe/cart";
+import { lookupPosMemberAction, placePosOrder } from "./actions";
+import type { PosMemberLookup } from "./actions";
+import type { OrderLineInput, VariantConfig, VariantSelectionInput } from "@/lib/cafe/types";
 
 // ---------------------------------------------------------------------------
 // View shape — DB CafeMenuItem mapped to what this component consumes
@@ -21,6 +28,7 @@ export interface PosMenuItemView {
   priceRupiah: number;
   description: string;
   hasVariants: boolean;
+  variantConfig?: VariantConfig | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,11 +59,15 @@ function isHidden(id: string): boolean {
 // ---------------------------------------------------------------------------
 // Cart types
 // ---------------------------------------------------------------------------
-interface CartLine {
-  id: string;
+interface PosCartLine extends CartLine {
   name: string;
   price: number;
-  qty: number;
+}
+
+/** Renders an ordered set of selected variant options as "Group: Option, Group: Option". */
+function formatOptions(options: VariantSelectionInput[]): string | null {
+  if (!options.length) return null;
+  return options.map((o) => `${o.variantName}: ${o.optionName}`).join(", ");
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +81,23 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 
 const CATEGORY_ORDER = ["COFFEE", "NON_COFFEE", "FOOD", "SNACK"] as const;
+const NOTES_MAX_LENGTH = 500;
+
+/** Map placePosOrder/lookupPosMemberAction error sentinels to Indonesian copy. */
+function toPosErrorMessage(err: unknown): string {
+  const sentinel = err instanceof Error ? err.message : String(err);
+  const map: Record<string, string> = {
+    MEMBER_NOT_FOUND: "Member tidak ditemukan untuk email tersebut.",
+    INVALID_MENU_ITEMS: "Sebagian item tidak tersedia. Perbarui keranjang.",
+    INVALID_QUANTITY: "Jumlah pesanan tidak valid.",
+    INVALID_VARIANTS: "Pilihan variant tidak valid.",
+    MISSING_REQUIRED_VARIANT: "Lengkapi pilihan variant yang wajib diisi.",
+    INVALID_NOTES: "Catatan terlalu panjang (maksimal 500 karakter).",
+    EMPTY_ORDER: "Keranjang masih kosong.",
+    FORBIDDEN: "Anda tidak memiliki akses untuk aksi ini.",
+  };
+  return map[sentinel] ?? "Pesanan gagal diproses. Coba lagi.";
+}
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -78,10 +107,11 @@ interface MenuItemCardProps {
   name: string;
   price: number;
   isInCart: boolean;
+  hasVariants: boolean;
   onAdd: () => void;
 }
 
-function MenuItemCardRow({ name, price, isInCart, onAdd }: MenuItemCardProps) {
+function MenuItemCardRow({ name, price, isInCart, hasVariants, onAdd }: MenuItemCardProps) {
   return (
     <div
       className={cn(
@@ -98,9 +128,10 @@ function MenuItemCardRow({ name, price, isInCart, onAdd }: MenuItemCardProps) {
       <button
         type="button"
         onClick={onAdd}
-        className="ml-3 flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 hover:bg-slate-100 hover:text-gray-700 transition-colors flex-shrink-0"
-        aria-label={`Add ${name}`}
+        className="ml-3 flex h-7 items-center justify-center gap-1 rounded-lg px-2 text-gray-400 hover:bg-slate-100 hover:text-gray-700 transition-colors flex-shrink-0"
+        aria-label={hasVariants ? `Pilih variant ${name}` : `Add ${name}`}
       >
+        {hasVariants ? <span className="text-xs font-medium">Variant</span> : null}
         <Plus size={16} />
       </button>
     </div>
@@ -120,41 +151,105 @@ export interface PosClientProps {
 // ---------------------------------------------------------------------------
 
 export function PosClient({ menu }: PosClientProps) {
-  const [cart, setCart] = useState<CartLine[]>([]);
+  const router = useRouter();
+  const [, startTransition] = useTransition();
+
+  const [cart, setCart] = useState<PosCartLine[]>([]);
+  const [variantItem, setVariantItem] = useState<PosMenuItemView | null>(null);
+  const [notes, setNotes] = useState("");
+
   const [emailInput, setEmailInput] = useState("");
-  const [customerFound, setCustomerFound] = useState(false);
+  const [lookupResult, setLookupResult] = useState<PosMemberLookup | null>(null);
   const [lookupDone, setLookupDone] = useState(false);
+  const [lookupPending, setLookupPending] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
 
-  const addToCart = useCallback((id: string, name: string, price: number) => {
-    setCart((prev) => {
-      const existing = prev.find((l) => l.id === id);
-      if (existing) {
-        return prev.map((l) => l.id === id ? { ...l, qty: l.qty + 1 } : l);
-      }
-      return [...prev, { id, name, price, qty: 1 }];
-    });
+  const [checkoutPending, setCheckoutPending] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [checkoutSuccessCode, setCheckoutSuccessCode] = useState<string | null>(null);
+
+  const addToCart = useCallback((item: PosMenuItemView, options: VariantSelectionInput[] = []) => {
+    const priceAdjustment = options.reduce((sum, sel) => {
+      const group = item.variantConfig?.variants.find((g) => g.name === sel.variantName);
+      const option = group?.options.find((o) => o.name === sel.optionName);
+      return sum + (option?.priceAdjustment ?? 0);
+    }, 0);
+    const displayName = getDisplayName(item.id, item.name);
+    const key = cartLineKey(item.id, options);
+    setCart((prev) =>
+      addCartLine(prev, {
+        key,
+        menuItemId: item.id,
+        options,
+        qty: 1,
+        name: displayName,
+        price: item.priceRupiah + priceAdjustment,
+      }),
+    );
   }, []);
 
-  const decrementCart = useCallback((id: string) => {
-    setCart((prev) => {
-      const existing = prev.find((l) => l.id === id);
-      if (!existing) return prev;
-      if (existing.qty === 1) return prev.filter((l) => l.id !== id);
-      return prev.map((l) => l.id === id ? { ...l, qty: l.qty - 1 } : l);
-    });
+  const decrementCart = useCallback((key: string) => {
+    setCart((prev) =>
+      prev
+        .map((l) => (l.key === key ? { ...l, qty: l.qty - 1 } : l))
+        .filter((l) => l.qty > 0),
+    );
   }, []);
 
-  // Customer lookup is dormant (POS checkout out of scope per OQ-2).
-  // We keep the UI but do not wire the member lookup to a real query.
-  const handleLookup = useCallback(() => {
-    setCustomerFound(false);
-    setLookupDone(true);
-  }, []);
+  const handleLookup = useCallback(async () => {
+    const email = emailInput.trim();
+    if (!email) return;
+    setLookupPending(true);
+    setLookupError(null);
+    try {
+      const result = await lookupPosMemberAction(email);
+      setLookupResult(result);
+      setLookupDone(true);
+    } catch (err) {
+      setLookupError(toPosErrorMessage(err));
+      setLookupResult(null);
+      setLookupDone(true);
+    } finally {
+      setLookupPending(false);
+    }
+  }, [emailInput]);
 
+  const handleCheckout = useCallback(async () => {
+    setCheckoutPending(true);
+    setCheckoutError(null);
+    const lines: OrderLineInput[] = cart.map((l) => ({
+      menuItemId: l.menuItemId,
+      qty: l.qty,
+      options: l.options,
+    }));
+    try {
+      const order = await placePosOrder({
+        email: emailInput.trim() || undefined,
+        lines,
+        notes: notes.trim() || undefined,
+      });
+      setCheckoutSuccessCode(order.code);
+      setCart([]);
+      setNotes("");
+      setEmailInput("");
+      setLookupResult(null);
+      setLookupDone(false);
+      startTransition(() => {
+        router.refresh();
+      });
+    } catch (err) {
+      setCheckoutError(toPosErrorMessage(err));
+    } finally {
+      setCheckoutPending(false);
+    }
+  }, [cart, emailInput, notes, router, startTransition]);
+
+  // Preview-only discount % — the server re-derives eligibility/rate itself
+  // at checkout; this never authorizes the charge.
+  const discountPct = lookupResult?.hasActiveBooking ? lookupResult.cafeDiscountPct : 0;
   const subtotal = cart.reduce((sum, l) => sum + l.price * l.qty, 0);
-  const total = subtotal; // no discount wired (OQ-2: POS checkout dormant)
-
-  const cartIds = new Set(cart.map((l) => l.id));
+  const discountAmt = discountPct > 0 ? Math.round((subtotal * discountPct) / 100) : 0;
+  const total = subtotal - discountAmt;
 
   // Group visible items by category in the canonical order
   const visibleByCategory = CATEGORY_ORDER.map((cat) => ({
@@ -217,8 +312,11 @@ export function PosClient({ menu }: PosClientProps) {
                         key={item.id}
                         name={displayName}
                         price={item.priceRupiah}
-                        isInCart={cartIds.has(item.id)}
-                        onAdd={() => addToCart(item.id, displayName, item.priceRupiah)}
+                        isInCart={cart.some((l) => l.menuItemId === item.id)}
+                        hasVariants={item.hasVariants}
+                        onAdd={() =>
+                          item.hasVariants ? setVariantItem(item) : addToCart(item)
+                        }
                       />
                     );
                   })}
@@ -249,7 +347,8 @@ export function PosClient({ menu }: PosClientProps) {
                   setEmailInput(e.target.value);
                   if (lookupDone) {
                     setLookupDone(false);
-                    setCustomerFound(false);
+                    setLookupResult(null);
+                    setLookupError(null);
                   }
                 }}
                 onKeyDown={(e) => e.key === "Enter" && handleLookup()}
@@ -261,18 +360,27 @@ export function PosClient({ menu }: PosClientProps) {
                 onClick={handleLookup}
                 className="px-3"
                 aria-label="Search customer"
+                disabled={lookupPending}
               >
                 <Search size={16} />
               </Button>
             </div>
 
             {/* Lookup result */}
-            {lookupDone && (
+            {lookupPending && (
+              <p className="mt-3 text-xs text-gray-400">Mencari member…</p>
+            )}
+            {!lookupPending && lookupDone && (
               <div className="mt-3">
-                {customerFound ? (
+                {lookupError ? (
+                  <p className="text-xs text-red-600">{lookupError}</p>
+                ) : lookupResult ? (
                   <div className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2">
+                    <p className="text-xs font-semibold text-teal-700">{lookupResult.name}</p>
                     <p className="text-xs text-teal-600">
-                      Member found — discount pending POS checkout wiring (segera).
+                      {lookupResult.hasActiveBooking
+                        ? `Sesi aktif — diskon ${lookupResult.cafeDiscountPct}%`
+                        : "Tidak ada sesi aktif — tanpa diskon"}
                     </p>
                   </div>
                 ) : (
@@ -305,13 +413,18 @@ export function PosClient({ menu }: PosClientProps) {
                 <div className="space-y-2">
                   {cart.map((line) => (
                     <div
-                      key={line.id}
+                      key={line.key}
                       className="flex items-center justify-between gap-2"
                     >
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-gray-900">
                           {line.name}
                         </p>
+                        {formatOptions(line.options) && (
+                          <p className="truncate text-xs text-gray-500">
+                            {formatOptions(line.options)}
+                          </p>
+                        )}
                         <p className="text-xs text-orange-500">
                           {formatRupiah(line.price)}
                         </p>
@@ -320,7 +433,7 @@ export function PosClient({ menu }: PosClientProps) {
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
-                          onClick={() => decrementCart(line.id)}
+                          onClick={() => decrementCart(line.key)}
                           className="flex h-6 w-6 items-center justify-center rounded-lg border border-slate-200 text-gray-500 hover:bg-slate-100 text-sm font-bold"
                           aria-label="Decrease quantity"
                         >
@@ -332,7 +445,11 @@ export function PosClient({ menu }: PosClientProps) {
                         <button
                           type="button"
                           onClick={() =>
-                            addToCart(line.id, line.name, line.price)
+                            setCart((prev) =>
+                              prev.map((l) =>
+                                l.key === line.key ? { ...l, qty: l.qty + 1 } : l,
+                              ),
+                            )
                           }
                           className="flex h-6 w-6 items-center justify-center rounded-lg border border-slate-200 text-gray-500 hover:bg-slate-100"
                           aria-label="Increase quantity"
@@ -347,6 +464,25 @@ export function PosClient({ menu }: PosClientProps) {
                   ))}
                 </div>
 
+                {/* Notes */}
+                <div>
+                  <label
+                    htmlFor="pos-order-notes"
+                    className="mb-1 block text-xs font-medium text-gray-700"
+                  >
+                    Catatan (opsional)
+                  </label>
+                  <textarea
+                    id="pos-order-notes"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    maxLength={NOTES_MAX_LENGTH}
+                    rows={2}
+                    placeholder="mis. tanpa gula"
+                    className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                  />
+                </div>
+
                 {/* Divider */}
                 <div className="border-t border-slate-200" />
 
@@ -356,28 +492,66 @@ export function PosClient({ menu }: PosClientProps) {
                     <span>Subtotal</span>
                     <span>{formatRupiah(subtotal)}</span>
                   </div>
+                  {discountPct > 0 && (
+                    <div className="flex justify-between text-sm text-green-700">
+                      <span>Diskon ({discountPct}%)</span>
+                      <span>- {formatRupiah(discountAmt)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-base font-bold text-gray-900">
                     <span>Total</span>
                     <span>{formatRupiah(total)}</span>
                   </div>
                 </div>
 
-                {/* Checkout button — dormant per OQ-2 / FU-3 */}
+                {checkoutError && (
+                  <div
+                    role="alert"
+                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+                  >
+                    {checkoutError}
+                  </div>
+                )}
+
                 <Button
                   variant="accent"
                   size="lg"
                   className="w-full"
-                  disabled
-                  title="POS checkout segera hadir"
+                  onClick={handleCheckout}
+                  disabled={checkoutPending}
                 >
                   <ShoppingCart size={16} />
-                  Checkout (segera)
+                  {checkoutPending ? "Memproses…" : "Checkout"}
                 </Button>
+              </div>
+            )}
+
+            {checkoutSuccessCode && (
+              <div className="mt-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
+                Pesanan #{checkoutSuccessCode} berhasil dibuat.
               </div>
             )}
           </Card>
         </div>
       </div>
+
+      {/* Variant picker modal (I-044) */}
+      {variantItem && variantItem.variantConfig && (
+        <VariantPickerModal
+          item={{
+            name: getDisplayName(variantItem.id, variantItem.name),
+            emoji: variantItem.emoji,
+            description: variantItem.description,
+            priceRupiah: variantItem.priceRupiah,
+            variantConfig: variantItem.variantConfig,
+          }}
+          onClose={() => setVariantItem(null)}
+          onConfirm={(selections) => {
+            addToCart(variantItem, selections);
+            setVariantItem(null);
+          }}
+        />
+      )}
     </div>
   );
 }

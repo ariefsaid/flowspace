@@ -1,7 +1,8 @@
 /**
  * Admin POS page — server component.
- * Reads live menu from DB. POS checkout is dormant (OQ-2 / FU-3).
- * FR-102 / AC-101
+ * Reads live menu (+ variant config) from DB; checkout is wired via
+ * app/(admin)/admin/pos/actions.ts (I-044, FR-725/726).
+ * FR-102 / AC-101 / AC-719
  */
 import { requireSession } from "@/lib/auth/session";
 import { listMenu } from "@/lib/db/cafe";
@@ -20,6 +21,7 @@ export default async function AdminPosPage() {
     priceRupiah: m.priceRupiah,
     description: m.description,
     hasVariants: m.hasVariants,
+    variantConfig: m.variantConfig,
   }));
 
   return <PosClient menu={menu} />;

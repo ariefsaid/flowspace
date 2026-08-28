@@ -338,6 +338,8 @@ export const membershipTierConfig = pgTable(
     id: text("id").primaryKey().$defaultFn(() => createId()),
     orgId: text("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
     tier: membershipTierEnum("tier").notNull(),
+    coworkingDiscountPct: integer("coworking_discount_pct").notNull().default(0),
+    meetingDiscountPct: integer("meeting_discount_pct").notNull().default(0),
     cafeDiscountPct: integer("cafe_discount_pct").notNull().default(0),
     printDiscountPct: integer("print_discount_pct").notNull().default(0),
     createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),

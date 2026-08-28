@@ -422,12 +422,20 @@ export function listBookingsByUser(
 /**
  * The member's newest ACTIVE booking (the /keycard source), or null. Cross-org
  * ids never match (org-scoped WHERE). AC-### (I-024).
+ *
+ * Accepts an optional `dbLike` (the global `db` or a caller's `tx`) so a
+ * money-sensitive caller (e.g. `createOrder`'s cafe-discount eligibility,
+ * I-044 [MONEY]) can re-run this EXACT query inside its own transaction,
+ * immediately before the write, instead of trusting a value resolved earlier
+ * outside the transaction (TOCTOU: the booking could be cancelled in
+ * between).
  */
 export async function getActiveBooking(
   orgId: string,
   userId: string,
+  dbLike: Pick<typeof db, "select"> = db,
 ): Promise<Booking | null> {
-  const [row] = await db
+  const [row] = await dbLike
     .select()
     .from(bookings)
     .where(

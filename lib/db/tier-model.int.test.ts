@@ -31,6 +31,7 @@ import {
   membershipTierConfig,
   printers,
   orgPrintPricing,
+  bookings,
 } from "@/lib/db/schema";
 import {
   listTierConfig,
@@ -48,7 +49,7 @@ const TEST_URL =
 const testSql = postgres(TEST_URL, { prepare: false, max: 3 });
 const testDb = drizzle(testSql, { schema });
 
-const TRUNCATE = `TRUNCATE TABLE "transactions","print_jobs","cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","org_print_pricing","app_users","organizations" RESTART IDENTITY CASCADE`;
+const TRUNCATE = `TRUNCATE TABLE "bookings","transactions","print_jobs","cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","org_print_pricing","app_users","organizations" RESTART IDENTITY CASCADE`;
 
 let orgAId: string;
 let orgBId: string;
@@ -127,6 +128,31 @@ beforeAll(async () => {
   });
 
   // Org C — no config rows at all (the fail-closed / no-leak fixture below).
+
+  // I-044 [MONEY] TOCTOU fix: createOrder now re-derives cafe-discount
+  // eligibility from a LIVE ACTIVE booking (not just the caller's
+  // `discountEligible` flag) — every member fixture used with
+  // `discountEligible: true` below needs a real ACTIVE booking so these
+  // tests keep proving the TIER-CONFIG money path, not accidentally the
+  // booking-eligibility path (which is covered by lib/db/cafe.int.test.ts).
+  for (const userId of [regularAId, premiumAId, goldAId]) {
+    await testDb.insert(bookings).values({
+      orgId: orgAId,
+      userId,
+      facilityType: "WALKIN_COWORKING",
+      facilityName: "Walk-in Coworking",
+      ratePerHourRupiah: 10000,
+      status: "ACTIVE",
+    });
+  }
+  await testDb.insert(bookings).values({
+    orgId: orgBId,
+    userId: regularBId,
+    facilityType: "WALKIN_COWORKING",
+    facilityName: "Walk-in Coworking",
+    ratePerHourRupiah: 10000,
+    status: "ACTIVE",
+  });
 
   // Print-parity preconditions (I-043) — submitPrintJob requires an active
   // default printer + a resolved BW/A4 matrix cell; org A and org B both

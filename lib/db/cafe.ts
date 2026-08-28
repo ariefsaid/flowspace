@@ -19,6 +19,7 @@ import {
   type CafeOrderItem,
 } from "@/lib/db/schema";
 import { findProfilesByIds } from "@/lib/db/users";
+import { getActiveBooking } from "@/lib/db/bookings";
 import { getTierDiscounts } from "@/lib/db/tier-config";
 import { computeOrderTotals, priceOrderLines } from "@/lib/cafe/pricing";
 import { normalizeOrderNotes, assertOrderLineQuantity } from "@/lib/cafe/validation";
@@ -136,25 +137,35 @@ export async function createOrder(input: {
   // never alter a persisted order (FR-723, AC-708).
   const pricedLines = priceOrderLines(foundItems, lines);
 
-  // Resolve the discount % server-side: only an eligible member (active session,
-  // AC-115) gets their tier's configured cafeDiscountPct; guests / ineligible /
-  // unconfigured → 0% (fail-safe). [SEC] never trust a client rate.
-  let discountPct = 0;
-  if (discountEligible && customerUserId) {
-    const [profile] = await findProfilesByIds(orgId, [customerUserId]);
-    if (profile) {
-      discountPct = (await getTierDiscounts(orgId, profile.membershipTier)).cafeDiscountPct;
-    }
-  }
-
-  const totals = computeOrderTotals(pricedLines, { discountPct });
-
   // Bounded retry on unique code collision (ADR-0012)
   const MAX_RETRIES = 5;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const code = generateOrderCode();
     try {
       const order = await db.transaction(async (tx) => {
+        // Resolve the discount % server-side, INSIDE this transaction, right
+        // before the write: `discountEligible` from the caller is only a
+        // precondition (e.g. "this session's role qualifies") — it is NEVER
+        // trusted as the final eligibility decision. The live ACTIVE-booking
+        // check is re-run here (against `tx`, not a value resolved earlier in
+        // the request) so a booking cancelled between the caller's earlier
+        // check and this commit does not still grant the discount ([MONEY]
+        // TOCTOU fix, AC-115). Guests / ineligible / unconfigured → 0%
+        // (fail-safe). [SEC] never trust a client rate.
+        let discountPct = 0;
+        if (discountEligible && customerUserId) {
+          const activeBooking = await getActiveBooking(orgId, customerUserId, tx);
+          if (activeBooking) {
+            const [profile] = await findProfilesByIds(orgId, [customerUserId]);
+            if (profile) {
+              discountPct = (await getTierDiscounts(orgId, profile.membershipTier))
+                .cafeDiscountPct;
+            }
+          }
+        }
+
+        const totals = computeOrderTotals(pricedLines, { discountPct });
+
         const [newOrder] = await tx
           .insert(cafeOrders)
           .values({

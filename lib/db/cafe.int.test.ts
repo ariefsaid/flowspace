@@ -30,6 +30,7 @@ import {
   cafeOrders,
   cafeOrderItems,
   membershipTierConfig,
+  bookings,
 } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -54,7 +55,7 @@ let variantLatteAId: string;
 beforeAll(async () => {
   // Truncate via raw sql (postgres-js) to avoid Drizzle execute hang on
   // Supabase Postgres in the vitest worker environment.
-  await testSql`TRUNCATE TABLE "cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","app_users","organizations" RESTART IDENTITY CASCADE`;
+  await testSql`TRUNCATE TABLE "bookings","cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","app_users","organizations" RESTART IDENTITY CASCADE`;
 
   // Seed two orgs
   const [orgA] = await testDb
@@ -208,7 +209,7 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  await testSql`TRUNCATE TABLE "cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","app_users","organizations" RESTART IDENTITY CASCADE`;
+  await testSql`TRUNCATE TABLE "bookings","cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","app_users","organizations" RESTART IDENTITY CASCADE`;
   await testSql.end();
 }, 30_000);
 
@@ -298,7 +299,22 @@ describe("lib/db/cafe", () => {
       expect(crossnt?.nameSnapshot).toBe("Croissant");
     });
 
-    it("AC-112: createOrder persists the server-computed 5% discount when discountEligible", async () => {
+    it("AC-112: createOrder persists the server-computed 5% discount when discountEligible AND the member has a live ACTIVE booking", async () => {
+      // Give aUserId a live ACTIVE booking — the discount is only granted when
+      // createOrder's own re-check (not just the caller's `discountEligible`
+      // flag) finds one (I-044 [MONEY] TOCTOU fix).
+      const [activeBooking] = await testDb
+        .insert(bookings)
+        .values({
+          orgId: orgAId,
+          userId: aUserId,
+          facilityType: "WALKIN_COWORKING",
+          facilityName: "Walk-in Coworking",
+          ratePerHourRupiah: 10000,
+          status: "ACTIVE",
+        })
+        .returning();
+
       // Same lines as above (subtotal 82000); eligible member → 5% off recorded.
       const order = await createOrder({
         orgId: orgAId,
@@ -313,6 +329,61 @@ describe("lib/db/cafe", () => {
       expect(order.subtotalRupiah).toBe(82000);
       expect(order.discountRupiah).toBe(4100); // round(82000 * 0.05)
       expect(order.totalRupiah).toBe(77900);
+
+      // Clean up: complete the booking so it doesn't linger ACTIVE for other
+      // tests in this file.
+      await testDb
+        .update(bookings)
+        .set({ status: "COMPLETED" })
+        .where(eq(bookings.id, activeBooking.id));
+    });
+
+    it("[MONEY] AC-115/TOCTOU: a booking cancelled between eligibility-resolve and order-write gets 0% discount, not the stale value", async () => {
+      // Simulates the real race across the two live callers (app/cafe/actions.ts,
+      // app/(admin)/admin/pos/actions.ts): the action resolves `discountEligible`
+      // from a snapshot read, THEN (before createOrder's write lands) the
+      // member's booking is cancelled. createOrder must re-derive eligibility
+      // itself, live, immediately before the write — never trust the
+      // already-stale boolean the action passed in.
+      const [staleBooking] = await testDb
+        .insert(bookings)
+        .values({
+          orgId: orgAId,
+          userId: aUserId,
+          facilityType: "WALKIN_COWORKING",
+          facilityName: "Walk-in Coworking",
+          ratePerHourRupiah: 10000,
+          status: "ACTIVE",
+        })
+        .returning();
+
+      // Step 1: the action's earlier eligibility check would have resolved
+      // `discountEligible = true` here (there IS an ACTIVE booking at this
+      // point in time).
+      const staleDiscountEligible = true;
+
+      // Step 2: the booking is cancelled — e.g. the member cancels their
+      // coworking session in a separate request — before the order commits.
+      await testDb
+        .update(bookings)
+        .set({ status: "CANCELLED" })
+        .where(eq(bookings.id, staleBooking.id));
+
+      // Step 3: createOrder is called with the now-STALE `discountEligible`
+      // boolean from step 1. A vulnerable implementation trusts it blindly and
+      // still applies the 5% discount; the fixed implementation re-checks
+      // live and finds no ACTIVE booking → 0% discount.
+      const order = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }], // subtotal 32000
+        discountEligible: staleDiscountEligible,
+      });
+
+      expect(order.subtotalRupiah).toBe(32000);
+      expect(order.discountRupiah).toBe(0);
+      expect(order.totalRupiah).toBe(32000);
     });
 
     it("AC-112 / AC-704: createOrder accepts the same item on two lines (multi-variant drink: hot + cold)", async () => {

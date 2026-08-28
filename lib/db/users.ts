@@ -13,12 +13,18 @@ import type { MembershipTier } from "@/lib/db/enums";
 /**
  * Login lookup. Email is globally unique in the single-venue MVP so this
  * query is intentionally NOT org-scoped. Do NOT expose this to the client.
+ *
+ * Normalizes (trim + lowercase) before matching the case-sensitive email
+ * unique index — the same normalization `createMember`/`findMemberByEmail`
+ * apply at write/lookup, so a mixed-case input never misses a lowercase-
+ * stored row [SEC].
  */
 export async function findByEmail(email: string): Promise<AppUser | null> {
+  const normalized = email.trim().toLowerCase();
   const [u] = await db
     .select()
     .from(appUsers)
-    .where(eq(appUsers.email, email))
+    .where(eq(appUsers.email, normalized))
     .limit(1);
   return u ?? null;
 }
@@ -132,6 +138,11 @@ export async function findMemberByEmail(
 /**
  * Signup path: creates a MEMBER in the given org, linked to a Supabase auth.users row.
  * Password is managed by Supabase Auth — no password column on app_users (AC-023, ADR-0014 §1).
+ *
+ * Lowercases `email` at write (defence-in-depth — the signup action already
+ * lowercases before calling this) so every stored row is normalized and
+ * every lookup (`findByEmail`/`findMemberByEmail`, both of which also
+ * lowercase) stays consistent regardless of caller casing [SEC].
  */
 export async function createMember(input: {
   orgId: string;
@@ -144,7 +155,7 @@ export async function createMember(input: {
     .values({
       orgId: input.orgId,
       authUserId: input.authUserId,
-      email: input.email,
+      email: input.email.trim().toLowerCase(),
       name: input.name,
       role: "MEMBER",
     })

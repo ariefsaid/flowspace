@@ -28,6 +28,18 @@ const sampleMenu: GuestMenuItemView[] = [
     priceRupiah: 25000,
     description: "Espresso dengan air panas.",
     hasVariants: true,
+    variantConfig: {
+      variants: [
+        {
+          name: "Temperature",
+          required: true,
+          options: [
+            { name: "Hot", priceAdjustment: 0 },
+            { name: "Cold", priceAdjustment: 3000 },
+          ],
+        },
+      ],
+    },
   },
   {
     id: "item-croissant",
@@ -159,6 +171,47 @@ describe("GuestCafeClient (AC-101)", () => {
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+  });
+
+  it("AC-702/AC-703: opening the picker on Americano shows the configured group and adjusted price on Cold", async () => {
+    render(<GuestCafeClient menu={sampleMenu} />);
+    fireEvent.click(screen.getByRole("button", { name: /pilih variant/i }));
+    expect(await screen.findByText("Temperature")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cold" }));
+    expect(screen.getByText(/tambah ke keranjang.*rp 28\.000/i)).toBeInTheDocument();
+  });
+
+  it("AC-704: adding Hot then Cold keeps them as two separate lines; checkout sends generic options + trimmed notes", async () => {
+    render(<GuestCafeClient menu={sampleMenu} />);
+
+    // Add Hot (default)
+    fireEvent.click(screen.getByRole("button", { name: /pilih variant/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /tambah ke keranjang/i }));
+
+    // Add Cold
+    fireEvent.click(screen.getByRole("button", { name: /pilih variant/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cold" }));
+    fireEvent.click(screen.getByRole("button", { name: /tambah ke keranjang/i }));
+
+    const checkoutBtn = await screen.findByRole("button", { name: /checkout/i });
+    fireEvent.click(checkoutBtn);
+
+    fireEvent.change(screen.getByPlaceholderText(/masukkan nama/i), {
+      target: { value: "Budi" },
+    });
+    fireEvent.change(screen.getByLabelText(/catatan/i), {
+      target: { value: "  less ice  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /pesan sekarang/i }));
+
+    await waitFor(() => expect(placeOrder).toHaveBeenCalled());
+    const calls = vi.mocked(placeOrder).mock.calls;
+    const call = calls[calls.length - 1][0];
+    expect(call.guestName).toBe("Budi");
+    expect(call.notes).toBe("less ice");
+    expect(call.lines).toHaveLength(2);
+    expect(call.lines.every((l) => "options" in l)).toBe(true);
+    expect(call.lines.every((l) => !("price" in l) && !("unitPriceRupiah" in l))).toBe(true);
   });
 
   it("no-mock-import gate: guest cafe files do not import lib/mock/cafe", async () => {

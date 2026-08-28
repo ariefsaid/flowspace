@@ -19,8 +19,14 @@ import {
   type CafeOrderItem,
 } from "@/lib/db/schema";
 import { findProfilesByIds } from "@/lib/db/users";
+import { getActiveBookingForUpdate } from "@/lib/db/bookings";
 import { getTierDiscounts } from "@/lib/db/tier-config";
-import { computeOrderTotals } from "@/lib/cafe/pricing";
+import { computeOrderTotals, priceOrderLines } from "@/lib/cafe/pricing";
+import {
+  normalizeOrderNotes,
+  assertOrderLineQuantity,
+  assertOrderLineCount,
+} from "@/lib/cafe/validation";
 import { recordTransaction } from "@/lib/db/transactions";
 import { generateOrderCode, nextStatus } from "@/lib/cafe/status";
 import type { CafeOrderStatus, OrderLineInput } from "@/lib/cafe/types";
@@ -73,8 +79,11 @@ export function listMenu(orgId: string): Promise<CafeMenuItem[]> {
  * - The order + items are inserted in a single DB transaction.
  * - On (org_id, code) unique violation the code is regenerated up to 5×;
  *   after 5 failures CODE_GENERATION_FAILED is thrown (ADR-0012).
+ * - Variant selections are validated against each item's LIVE `variant_config`
+ *   and priced server-side (base + validated adjustment); no client price/
+ *   adjustment is ever trusted (I-044, FR-721/722, [SEC] money-integrity fix).
  *
- * AC-112, AC-113, AC-114, AC-125 / FR-111–115.
+ * AC-107, AC-112, AC-113, AC-114, AC-125, AC-707, AC-708, AC-709, AC-727 / FR-111–115, FR-720–723.
  */
 export async function createOrder(input: {
   orgId: string;
@@ -82,24 +91,29 @@ export async function createOrder(input: {
   guestName: string | null;
   lines: OrderLineInput[];
   discountEligible: boolean;
+  notes?: string | null;
 }): Promise<CafeOrder> {
   const { orgId, customerUserId, guestName, lines, discountEligible } = input;
 
   // Guard: reject empty lines BEFORE any DB access
   if (!lines.length) throw new Error("EMPTY_ORDER");
 
+  // Guard: cap distinct lines BEFORE any DB access — a bot/script flooding
+  // thousands of qty:1 lines (bypassing the client's cart-merge UI entirely,
+  // since this is a server action) must be rejected up front, on every order
+  // path (member/guest/POS share this one boundary) ([MONEY]/DoS).
+  assertOrderLineCount(lines);
+
   // Guard: every line qty must be a positive integer within a sane bound. qty is
   // client-supplied and is multiplied into the server-computed total — a negative/
   // zero/fractional qty would manipulate the bill, and an enormous qty overflows
   // int4 (price × qty). Reject the whole order before any write ([SEC]).
-  const MAX_QTY_PER_LINE = 99;
-  if (
-    lines.some(
-      (l) => !Number.isInteger(l.qty) || l.qty <= 0 || l.qty > MAX_QTY_PER_LINE,
-    )
-  ) {
-    throw new Error("INVALID_QUANTITY");
-  }
+  for (const l of lines) assertOrderLineQuantity(l.qty);
+
+  // Guard: normalize/validate notes BEFORE any DB access (trim, blank→null,
+  // 500 Unicode-code-point cap → INVALID_NOTES). The DB CHECK repeats this as
+  // a defence-in-depth backstop, not the primary gate.
+  const normalizedNotes = normalizeOrderNotes(input.notes);
 
   // Look up each requested item within this org only (cross-org guard [SEC]).
   // Validate against DISTINCT ids: a single item may appear on multiple lines
@@ -126,34 +140,12 @@ export async function createOrder(input: {
     throw new Error("INVALID_MENU_ITEMS");
   }
 
-  // Build a price map keyed by id
-  const priceMap = new Map(foundItems.map((i) => [i.id, i]));
-
-  // Build priced lines (snapshot name + price from the looked-up DB row)
-  const pricedLines = lines.map((l) => {
-    const item = priceMap.get(l.menuItemId)!;
-    return {
-      menuItemId: l.menuItemId,
-      nameSnapshot: item.name,
-      qty: l.qty,
-      unitPriceRupiah: item.priceRupiah,
-      temperature: l.temperature ?? null,
-      sugar: l.sugar ?? null,
-    };
-  });
-
-  // Resolve the discount % server-side: only an eligible member (active session,
-  // AC-115) gets their tier's configured cafeDiscountPct; guests / ineligible /
-  // unconfigured → 0% (fail-safe). [SEC] never trust a client rate.
-  let discountPct = 0;
-  if (discountEligible && customerUserId) {
-    const [profile] = await findProfilesByIds(orgId, [customerUserId]);
-    if (profile) {
-      discountPct = (await getTierDiscounts(orgId, profile.membershipTier)).cafeDiscountPct;
-    }
-  }
-
-  const totals = computeOrderTotals(pricedLines, { discountPct });
+  // Price each line against the LIVE looked-up rows: validates every selected
+  // variant group/option (rejects unknown/missing-required/hasVariants=false
+  // selections) and computes unitPriceRupiah = base + validated adjustments.
+  // Snapshots (name, price, options) are taken here so a later menu edit can
+  // never alter a persisted order (FR-723, AC-708).
+  const pricedLines = priceOrderLines(foundItems, lines);
 
   // Bounded retry on unique code collision (ADR-0012)
   const MAX_RETRIES = 5;
@@ -161,6 +153,37 @@ export async function createOrder(input: {
     const code = generateOrderCode();
     try {
       const order = await db.transaction(async (tx) => {
+        // Resolve the discount % server-side, INSIDE this transaction, right
+        // before the write: `discountEligible` from the caller is only a
+        // precondition (e.g. "this session's role qualifies") — it is NEVER
+        // trusted as the final eligibility decision. The live ACTIVE-booking
+        // check is re-run here (against `tx`, ROW-LOCKED via `FOR UPDATE`,
+        // not a value resolved earlier in the request) so a concurrent
+        // cancel cannot land between the recheck and this write — it blocks
+        // on the lock until this transaction commits or rolls back ([MONEY]
+        // TOCTOU fix, AC-115, fix round 2 item 2: a plain re-check alone
+        // still left an unlocked window). Guests / ineligible / unconfigured
+        // → 0% (fail-safe). [SEC] never trust a client rate.
+        let discountPct = 0;
+        if (discountEligible && customerUserId) {
+          const activeBooking = await getActiveBookingForUpdate(orgId, customerUserId, tx);
+          if (activeBooking) {
+            // [SEC][POOL] Both calls below pass `tx` — the SAME connection
+            // this transaction already holds. Defaulting to the global `db`
+            // here would check out a SECOND pooled connection while this
+            // transaction's own connection is still held, the exact
+            // pool-exhaustion deadlock class `getTierDiscounts` is already
+            // documented against (I-040; I-044 fix round 2, item 3).
+            const [profile] = await findProfilesByIds(orgId, [customerUserId], tx);
+            if (profile) {
+              discountPct = (await getTierDiscounts(orgId, profile.membershipTier, tx))
+                .cafeDiscountPct;
+            }
+          }
+        }
+
+        const totals = computeOrderTotals(pricedLines, { discountPct });
+
         const [newOrder] = await tx
           .insert(cafeOrders)
           .values({
@@ -168,6 +191,7 @@ export async function createOrder(input: {
             code,
             customerUserId,
             guestName,
+            notes: normalizedNotes,
             status: "NEW",
             subtotalRupiah: totals.subtotalRupiah,
             discountRupiah: totals.discountRupiah,
@@ -182,8 +206,11 @@ export async function createOrder(input: {
             nameSnapshot: pl.nameSnapshot,
             qty: pl.qty,
             unitPriceRupiah: pl.unitPriceRupiah,
-            temperature: pl.temperature,
-            sugar: pl.sugar,
+            // Legacy compatibility columns — new writes never populate them
+            // (NFR-044-04); the canonical shape is variantOptions.
+            temperature: null,
+            sugar: null,
+            variantOptions: pl.variantOptions,
           })),
         );
 
@@ -207,11 +234,21 @@ export async function createOrder(input: {
       });
       return order;
     } catch (err) {
-      // Detect unique-violation on (org_id, code) — Postgres error code 23505
-      const pgErr = err as { code?: string; message?: string };
+      // Detect unique-violation on (org_id, code) — Postgres error code 23505.
+      // Drizzle wraps the driver error (`DrizzleQueryError`), putting the real
+      // PostgresError on `.cause` — check both the outer error AND `.cause` so
+      // this retry actually fires regardless of wrapper shape ([SEC] a silent
+      // rethrow here would surface a spurious 500 on a benign code collision
+      // instead of retrying, AC-728).
+      const pgErr = err as {
+        code?: string;
+        message?: string;
+        cause?: { code?: string; message?: string };
+      };
+      const code = pgErr.code ?? pgErr.cause?.code;
+      const message = pgErr.message ?? pgErr.cause?.message ?? "";
       const isUniqueViolation =
-        pgErr.code === "23505" ||
-        (pgErr.message ?? "").includes("cafe_orders_org_id_code_key");
+        code === "23505" || message.includes("cafe_orders_org_id_code_key");
       if (!isUniqueViolation) throw err;
       if (attempt === MAX_RETRIES - 1) throw new Error("CODE_GENERATION_FAILED");
       // else: retry with a new code

@@ -1,18 +1,19 @@
-import type { MenuItem } from "@/lib/types/views";
-import type { VariantSelection } from "./VariantModal";
+import type { VariantSelectionInput } from "@/lib/cafe/types";
+import { cartLineKey } from "@/lib/cafe/cart";
 
 export interface CartItem {
-  /** Unique key = itemId + variant string (for deduplication). */
+  /** Unique key = itemId + ordered selections (for deduplication, I-044). */
   key: string;
   id: string;
   name: string;
   emoji: string;
+  /** Display-only unit price (base + selected adjustments); the server recomputes it (I-044, [SEC]). */
   price: number;
   qty: number;
-  variant?: VariantSelection;
+  options: VariantSelectionInput[];
 }
 
-export function cartKey(item: MenuItem, variant?: VariantSelection): string {
-  if (!variant) return item.id;
-  return `${item.id}__${variant.temp}__${variant.sugar}`;
+/** Stable cart key for a menu item + its selections (I-044; delegates to the shared cart helper). */
+export function cartKey(menuItemId: string, options: VariantSelectionInput[]): string {
+  return cartLineKey(menuItemId, options);
 }

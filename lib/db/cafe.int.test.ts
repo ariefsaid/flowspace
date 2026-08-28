@@ -11,7 +11,15 @@
  * AC-124: advanceOrderStatus on a cross-org order forbids, no write
  * AC-125: listOrders / getOrder returns org-scoped orders with items + customer
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// Mock only generateOrderCode (keep nextStatus real) so AC-728 can force a
+// collision deterministically; default implementation delegates to the real
+// generator so every other test still gets a real random 6-char code.
+vi.mock("@/lib/cafe/status", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/cafe/status")>();
+  return { ...actual, generateOrderCode: vi.fn(actual.generateOrderCode) };
+});
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "@/lib/db/schema";
@@ -22,6 +30,7 @@ import {
   cafeOrders,
   cafeOrderItems,
   membershipTierConfig,
+  bookings,
 } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -41,11 +50,12 @@ let bUserId: string;
 let latteAId: string;
 let croissantAId: string;
 let orgBItemId: string;
+let variantLatteAId: string;
 
 beforeAll(async () => {
   // Truncate via raw sql (postgres-js) to avoid Drizzle execute hang on
   // Supabase Postgres in the vitest worker environment.
-  await testSql`TRUNCATE TABLE "cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","app_users","organizations" RESTART IDENTITY CASCADE`;
+  await testSql`TRUNCATE TABLE "bookings","cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","app_users","organizations" RESTART IDENTITY CASCADE`;
 
   // Seed two orgs
   const [orgA] = await testDb
@@ -119,6 +129,43 @@ beforeAll(async () => {
     .returning();
   croissantAId = croissant.id;
 
+  // Variant-enabled item (I-044): Temperature (required) × Sugar (required).
+  const [variantLatte] = await testDb
+    .insert(cafeMenuItems)
+    .values({
+      orgId: orgAId,
+      name: "Kopi Susu",
+      emoji: "🧋",
+      category: "COFFEE",
+      priceRupiah: 22000,
+      description: "Kopi susu with configurable variants",
+      hasVariants: true,
+      variantConfig: {
+        variants: [
+          {
+            name: "Temperature",
+            required: true,
+            options: [
+              { name: "Hot", priceAdjustment: 0 },
+              { name: "Cold", priceAdjustment: 3000 },
+            ],
+          },
+          {
+            name: "Sugar",
+            required: true,
+            options: [
+              { name: "Normal Sugar", priceAdjustment: 0 },
+              { name: "Less Sugar", priceAdjustment: 0 },
+              { name: "No Sugar", priceAdjustment: 0 },
+            ],
+          },
+        ],
+      },
+      available: true,
+    })
+    .returning();
+  variantLatteAId = variantLatte.id;
+
   // Unavailable item — should NOT appear in listMenu
   await testDb.insert(cafeMenuItems).values({
     orgId: orgAId,
@@ -162,7 +209,7 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  await testSql`TRUNCATE TABLE "cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","app_users","organizations" RESTART IDENTITY CASCADE`;
+  await testSql`TRUNCATE TABLE "bookings","cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","app_users","organizations" RESTART IDENTITY CASCADE`;
   await testSql.end();
 }, 30_000);
 
@@ -178,6 +225,55 @@ import {
   setOrderStatus,
 } from "@/lib/db/cafe";
 import { advanceOrderStatusAsActor } from "@/lib/cafe/authz";
+import { generateOrderCode } from "@/lib/cafe/status";
+
+const mockedGenerateOrderCode = generateOrderCode as unknown as ReturnType<typeof vi.fn>;
+
+// ---------------------------------------------------------------------------
+// Deterministic ROW-LOCK barrier (fix round 2, item 2): proves createOrder's
+// in-tx active-booking recheck takes a REAL `SELECT ... FOR UPDATE` on the
+// booking row, not a plain unlocked SELECT. A holder transaction grabs the
+// row lock FIRST (via `FOR UPDATE`), starts both racing ops, and polls
+// `pg_locks` (NOT-granted rows) until the expected number of backends are
+// genuinely BLOCKED waiting on a lock before releasing — the exact same
+// technique (a `pg_locks`-based, not `pg_stat_activity`-based, poll — the
+// latter proved unreliably slow to update within a short deadline in this
+// environment) the advisory-lock barrier in lib/db/bookings.int.test.ts
+// uses, generalized from `locktype = 'advisory'` to ANY not-granted lock
+// (a row-level FOR UPDATE wait has no fixed advisory key to target). If
+// createOrder's recheck were still a plain unlocked SELECT, it
+// would never contend for this row's lock at all — the waiter count would
+// never reach `waiters` and this helper would time out, which IS the RED
+// signal for the unfixed code.
+// ---------------------------------------------------------------------------
+async function runWithRowLockBarrier(
+  bookingId: string,
+  waiters: number,
+  // Heterogeneous ops (e.g. createOrder resolving CafeOrder vs. a raw update
+  // resolving something else) — callers narrow each settled result's `.value`
+  // themselves.
+  ops: Array<() => Promise<unknown>>,
+): Promise<PromiseSettledResult<unknown>[]> {
+  let racePromise!: Promise<PromiseSettledResult<unknown>[]>;
+  await testSql.begin(async (holder) => {
+    await holder`select * from bookings where id = ${bookingId} for update`;
+    racePromise = Promise.allSettled(ops.map((op) => op()));
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      const rows = await holder.unsafe<{ n: number }[]>(
+        `select count(*)::int as n from pg_locks where not granted and pid <> pg_backend_pid()`,
+      );
+      if (Number(rows[0]?.n ?? 0) >= waiters) break;
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for ${waiters} row-lock waiter(s) on booking ${bookingId}`);
+      }
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    // Returning here ends the holder's transaction (COMMIT), releasing the
+    // row lock and letting every genuinely-waiting op proceed for real.
+  });
+  return racePromise;
+}
 
 describe("lib/db/cafe", () => {
   // -------------------------------------------------------------------------
@@ -216,7 +312,7 @@ describe("lib/db/cafe", () => {
   // C2 — createOrder (member path + cross-org rejection)
   // -------------------------------------------------------------------------
   describe("createOrder — member + cross-org guard", () => {
-    it("AC-112: createOrder persists member order with server totals, NEW, unique code, line snapshots", async () => {
+    it("AC-112 / AC-723: createOrder persists member order with server totals, NEW, unique code, line snapshots", async () => {
       const order = await createOrder({
         orgId: orgAId,
         customerUserId: aUserId,
@@ -249,7 +345,22 @@ describe("lib/db/cafe", () => {
       expect(crossnt?.nameSnapshot).toBe("Croissant");
     });
 
-    it("AC-112: createOrder persists the server-computed 5% discount when discountEligible", async () => {
+    it("AC-112: createOrder persists the server-computed 5% discount when discountEligible AND the member has a live ACTIVE booking", async () => {
+      // Give aUserId a live ACTIVE booking — the discount is only granted when
+      // createOrder's own re-check (not just the caller's `discountEligible`
+      // flag) finds one (I-044 [MONEY] TOCTOU fix).
+      const [activeBooking] = await testDb
+        .insert(bookings)
+        .values({
+          orgId: orgAId,
+          userId: aUserId,
+          facilityType: "WALKIN_COWORKING",
+          facilityName: "Walk-in Coworking",
+          ratePerHourRupiah: 10000,
+          status: "ACTIVE",
+        })
+        .returning();
+
       // Same lines as above (subtotal 82000); eligible member → 5% off recorded.
       const order = await createOrder({
         orgId: orgAId,
@@ -264,30 +375,316 @@ describe("lib/db/cafe", () => {
       expect(order.subtotalRupiah).toBe(82000);
       expect(order.discountRupiah).toBe(4100); // round(82000 * 0.05)
       expect(order.totalRupiah).toBe(77900);
+
+      // Clean up: complete the booking so it doesn't linger ACTIVE for other
+      // tests in this file.
+      await testDb
+        .update(bookings)
+        .set({ status: "COMPLETED" })
+        .where(eq(bookings.id, activeBooking.id));
     });
 
-    it("AC-112: createOrder accepts the same item on two lines (multi-variant drink: hot + cold)", async () => {
-      // A member orders one Latte hot + one Latte cold — two lines, same menuItemId.
-      // The cross-org guard must validate distinct ids, not raw line count.
+    it("[MONEY] AC-115/TOCTOU: a booking cancelled between eligibility-resolve and order-write gets 0% discount, not the stale value", async () => {
+      // Simulates the real race across the two live callers (app/cafe/actions.ts,
+      // app/(admin)/admin/pos/actions.ts): the action resolves `discountEligible`
+      // from a snapshot read, THEN (before createOrder's write lands) the
+      // member's booking is cancelled. createOrder must re-derive eligibility
+      // itself, live, immediately before the write — never trust the
+      // already-stale boolean the action passed in.
+      const [staleBooking] = await testDb
+        .insert(bookings)
+        .values({
+          orgId: orgAId,
+          userId: aUserId,
+          facilityType: "WALKIN_COWORKING",
+          facilityName: "Walk-in Coworking",
+          ratePerHourRupiah: 10000,
+          status: "ACTIVE",
+        })
+        .returning();
+
+      // Step 1: the action's earlier eligibility check would have resolved
+      // `discountEligible = true` here (there IS an ACTIVE booking at this
+      // point in time).
+      const staleDiscountEligible = true;
+
+      // Step 2: the booking is cancelled — e.g. the member cancels their
+      // coworking session in a separate request — before the order commits.
+      await testDb
+        .update(bookings)
+        .set({ status: "CANCELLED" })
+        .where(eq(bookings.id, staleBooking.id));
+
+      // Step 3: createOrder is called with the now-STALE `discountEligible`
+      // boolean from step 1. A vulnerable implementation trusts it blindly and
+      // still applies the 5% discount; the fixed implementation re-checks
+      // live and finds no ACTIVE booking → 0% discount.
+      const order = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }], // subtotal 32000
+        discountEligible: staleDiscountEligible,
+      });
+
+      expect(order.subtotalRupiah).toBe(32000);
+      expect(order.discountRupiah).toBe(0);
+      expect(order.totalRupiah).toBe(32000);
+    });
+
+    it("[HIGH][MONEY] TOCTOU (row lock): createOrder's active-booking recheck genuinely row-locks the booking — a concurrent cancel cannot land between the recheck and the order write (deterministic lock barrier)", async () => {
+      const [booking] = await testDb
+        .insert(bookings)
+        .values({
+          orgId: orgAId,
+          userId: aUserId,
+          facilityType: "WALKIN_COWORKING",
+          facilityName: "Walk-in Coworking",
+          ratePerHourRupiah: 10000,
+          status: "ACTIVE",
+        })
+        .returning();
+
+      const orderOp = () =>
+        createOrder({
+          orgId: orgAId,
+          customerUserId: aUserId,
+          guestName: null,
+          lines: [{ menuItemId: latteAId, qty: 1 }], // subtotal 32000
+          discountEligible: true,
+        });
+      const cancelOp = () =>
+        testDb.update(bookings).set({ status: "CANCELLED" }).where(eq(bookings.id, booking.id));
+
+      // The barrier itself is the proof: it requires 2 backends to be
+      // GENUINELY blocked, simultaneously, on this exact booking row before
+      // it releases. A plain unlocked SELECT (the pre-fix code) never
+      // contends for the row lock at all — only `cancelOp`'s UPDATE would
+      // ever show up as a waiter, the count would never reach 2, and this
+      // call would throw a timeout (the RED signal for the unfixed code).
+      const [orderResult, cancelResult] = await runWithRowLockBarrier(
+        booking.id,
+        2,
+        [orderOp, cancelOp],
+      );
+
+      expect(orderResult.status).toBe("fulfilled");
+      expect(cancelResult.status).toBe("fulfilled");
+      const order = (orderResult as PromiseFulfilledResult<Awaited<ReturnType<typeof createOrder>>>)
+        .value;
+
+      const [freshBooking] = await testDb.select().from(bookings).where(eq(bookings.id, booking.id));
+      expect(freshBooking.status).toBe("CANCELLED"); // the cancel always eventually applies
+
+      // The row lock makes the two operations strictly serialize on this
+      // booking row — there is NO interleaving where cancel's UPDATE commits
+      // WHILE order's transaction is between its recheck and its insert.
+      // Whichever op actually won the lock queue after the barrier released,
+      // the discount is self-consistent with a fully-serialized ordering:
+      if (order.discountRupiah > 0) {
+        // order's row-locked recheck won the queue first (read ACTIVE,
+        // applied the discount, then committed) — cancel's UPDATE was
+        // BLOCKED (proven by the barrier above) until order's whole
+        // transaction released the lock, so it could only land AFTER.
+        expect(order.discountRupiah).toBe(1600); // 5% of 32000
+        expect(order.totalRupiah).toBe(30400);
+      } else {
+        // cancel's UPDATE won the queue first and committed before order's
+        // row-locked recheck re-read the row — order correctly saw
+        // CANCELLED and applied 0%.
+        expect(order.discountRupiah).toBe(0);
+        expect(order.totalRupiah).toBe(32000);
+      }
+    });
+
+    it("AC-112 / AC-704: createOrder accepts the same item on two lines (multi-variant drink: hot + cold)", async () => {
+      // A member orders one Kopi Susu hot + one Kopi Susu cold — two lines,
+      // same menuItemId. The cross-org guard must validate distinct ids, not
+      // raw line count.
       const order = await createOrder({
         orgId: orgAId,
         customerUserId: aUserId,
         guestName: null,
         lines: [
-          { menuItemId: latteAId, qty: 1, temperature: "HOT", sugar: "NORMAL" },
-          { menuItemId: latteAId, qty: 1, temperature: "COLD", sugar: "LESS" },
+          {
+            menuItemId: variantLatteAId,
+            qty: 1,
+            options: [
+              { variantName: "Temperature", optionName: "Hot" },
+              { variantName: "Sugar", optionName: "Normal Sugar" },
+            ],
+          },
+          {
+            menuItemId: variantLatteAId,
+            qty: 1,
+            options: [
+              { variantName: "Temperature", optionName: "Cold" },
+              { variantName: "Sugar", optionName: "Less Sugar" },
+            ],
+          },
         ],
         discountEligible: false,
       });
-      expect(order.subtotalRupiah).toBe(64000); // 32000 × 2
+      expect(order.subtotalRupiah).toBe(47000); // 22000 (Hot) + 25000 (Cold +3000)
       const items = await testDb
         .select()
         .from(cafeOrderItems)
         .where(eq(cafeOrderItems.orderId, order.id));
       expect(items).toHaveLength(2);
-      expect(items.filter((i) => i.menuItemId === latteAId)).toHaveLength(2);
-      const temps = items.map((i) => i.temperature).sort();
-      expect(temps).toEqual(["COLD", "HOT"]);
+      expect(items.filter((i) => i.menuItemId === variantLatteAId)).toHaveLength(2);
+      const temps = items
+        .map((i) => (i.variantOptions as { variantName: string; optionName: string }[]).find((o) => o.variantName === "Temperature")?.optionName)
+        .sort();
+      expect(temps).toEqual(["Cold", "Hot"]);
+      // Legacy compatibility columns are never populated by new writes (NFR-044-04)
+      expect(items.every((i) => i.temperature === null && i.sugar === null)).toBe(true);
+    });
+
+    it("AC-707: a variant order line snapshots group/option/adjustment in variant_options", async () => {
+      const order = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [
+          {
+            menuItemId: variantLatteAId,
+            qty: 1,
+            options: [
+              { variantName: "Temperature", optionName: "Cold" },
+              { variantName: "Sugar", optionName: "No Sugar" },
+            ],
+          },
+        ],
+        discountEligible: false,
+      });
+      const [item] = await testDb
+        .select()
+        .from(cafeOrderItems)
+        .where(eq(cafeOrderItems.orderId, order.id));
+      expect(item.unitPriceRupiah).toBe(25000); // 22000 + 3000
+      expect(item.variantOptions).toEqual([
+        { variantName: "Temperature", optionName: "Cold", priceAdjustmentRupiah: 3000 },
+        { variantName: "Sugar", optionName: "No Sugar", priceAdjustmentRupiah: 0 },
+      ]);
+    });
+
+    it("AC-708: a later menu rename/reprice does not alter a prior order's line snapshots", async () => {
+      const order = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+      });
+      const [before] = await testDb
+        .select()
+        .from(cafeOrderItems)
+        .where(eq(cafeOrderItems.orderId, order.id));
+      expect(before.nameSnapshot).toBe("Latte");
+      expect(before.unitPriceRupiah).toBe(32000);
+
+      // Rename + reprice the live menu row after the order was placed
+      await testDb
+        .update(cafeMenuItems)
+        .set({ name: "Latte Deluxe", priceRupiah: 99000 })
+        .where(eq(cafeMenuItems.id, latteAId));
+
+      const [after] = await testDb
+        .select()
+        .from(cafeOrderItems)
+        .where(eq(cafeOrderItems.orderId, order.id));
+      expect(after.nameSnapshot).toBe("Latte");
+      expect(after.unitPriceRupiah).toBe(32000);
+
+      // Restore for subsequent tests in this file
+      await testDb
+        .update(cafeMenuItems)
+        .set({ name: "Latte", priceRupiah: 32000 })
+        .where(eq(cafeMenuItems.id, latteAId));
+    });
+
+    it("AC-705: a missing required variant group is rejected, no write", async () => {
+      const [{ count: before }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      await expect(
+        createOrder({
+          orgId: orgAId,
+          customerUserId: aUserId,
+          guestName: null,
+          lines: [
+            {
+              menuItemId: variantLatteAId,
+              qty: 1,
+              options: [{ variantName: "Temperature", optionName: "Hot" }], // Sugar omitted
+            },
+          ],
+          discountEligible: false,
+        }),
+      ).rejects.toThrow(/MISSING_REQUIRED_VARIANT/);
+      const [{ count: after }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      expect(after).toBe(before);
+    });
+
+    it("AC-712: order notes are trimmed and persisted; blank notes store null", async () => {
+      const withNotes = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+        notes: "  less sugar please  ",
+      });
+      expect(withNotes.notes).toBe("less sugar please");
+
+      const withBlank = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+        notes: "   ",
+      });
+      expect(withBlank.notes).toBeNull();
+
+      const [{ count: before }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      await expect(
+        createOrder({
+          orgId: orgAId,
+          customerUserId: aUserId,
+          guestName: null,
+          lines: [{ menuItemId: latteAId, qty: 1 }],
+          discountEligible: false,
+          notes: "a".repeat(501),
+        }),
+      ).rejects.toThrow(/INVALID_NOTES/);
+      const [{ count: after }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      expect(after).toBe(before);
+    });
+
+    it("AC-728: retries within the bounded code-generation policy after a collision, never duplicate org codes", async () => {
+      const existing = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+      });
+      mockedGenerateOrderCode
+        .mockReturnValueOnce(existing.code) // forces a unique-violation on attempt 1
+        .mockReturnValueOnce("zzz999"); // attempt 2 succeeds with a fresh code
+
+      const second = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+      });
+      expect(second.code).toBe("zzz999");
+      expect(second.code).not.toBe(existing.code);
     });
 
     it("AC-112: createOrder rejects a non-positive / fractional qty (no total manipulation), no write", async () => {
@@ -309,7 +706,28 @@ describe("lib/db/cafe", () => {
       expect(after).toBe(before);
     });
 
-    it("AC-112: createOrder rejects an unavailable or archived item (orderability enforced), no write", async () => {
+    it("[MONEY/DoS]: an order exceeding the 50-distinct-line cap is rejected before any write", async () => {
+      const [{ count: before }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      const floodLines = Array.from({ length: 51 }, () => ({
+        menuItemId: latteAId,
+        qty: 1,
+      }));
+      await expect(
+        createOrder({
+          orgId: orgAId,
+          customerUserId: aUserId,
+          guestName: null,
+          lines: floodLines,
+          discountEligible: false,
+        }),
+      ).rejects.toThrow(/TOO_MANY_LINES/);
+      const [{ count: after }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      expect(after).toBe(before);
+    });
+
+    it("AC-112 / AC-727: createOrder rejects an unavailable or archived item (orderability enforced), no write", async () => {
       // Capture the seeded non-orderable item ids.
       const seeded = await testDb
         .select()
@@ -352,7 +770,7 @@ describe("lib/db/cafe", () => {
   // C3 — createOrder (guest path + zero-line rejection)
   // -------------------------------------------------------------------------
   describe("createOrder — guest + empty lines", () => {
-    it("AC-113: guest order captures name, no discount, customerUserId null", async () => {
+    it("AC-113 / AC-723: guest order captures name, no discount, customerUserId null", async () => {
       const o = await createOrder({
         orgId: orgAId,
         customerUserId: null,
@@ -389,7 +807,7 @@ describe("lib/db/cafe", () => {
   // C4 — advanceOrderStatus
   // -------------------------------------------------------------------------
   describe("advanceOrderStatus", () => {
-    it("AC-122: advanceOrderStatus walks NEW→PREPARING→READY→COMPLETED then rejects a 4th call", async () => {
+    it("AC-122 / AC-724: advanceOrderStatus walks NEW→PREPARING→READY→COMPLETED then rejects a 4th call", async () => {
       const o = await createOrder({
         orgId: orgAId,
         customerUserId: aUserId,
@@ -511,6 +929,34 @@ describe("lib/db/cafe", () => {
       expect(updated.status).toBe("CANCELLED");
       // Cross-org must throw
       await expect(setOrderStatus(orgBId, o.id, "COMPLETED")).rejects.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // DB CHECK constraint — cafe_menu_items.price_rupiah >= 0 [MONEY]
+  // -------------------------------------------------------------------------
+  describe("cafe_menu_items price_rupiah CHECK constraint [MONEY]", () => {
+    it("rejects a direct write of a negative base price at the DB level (defence-in-depth)", async () => {
+      await expect(
+        testSql`
+          insert into cafe_menu_items
+            (id, org_id, name, emoji, category, price_rupiah, description, has_variants, available)
+          values
+            (gen_random_uuid()::text, ${orgAId}, 'Negative Item', '❌', 'SNACK', -1, 'x', false, true)
+        `,
+      ).rejects.toThrow();
+    });
+
+    it("accepts a zero base price (free item) — only negative is rejected", async () => {
+      const [row] = await testSql`
+        insert into cafe_menu_items
+          (id, org_id, name, emoji, category, price_rupiah, description, has_variants, available)
+        values
+          (gen_random_uuid()::text, ${orgAId}, 'Free Item', '🆓', 'SNACK', 0, 'x', false, true)
+        returning id
+      `;
+      expect(row.id).toBeDefined();
+      await testSql`delete from cafe_menu_items where id = ${row.id}`;
     });
   });
 });

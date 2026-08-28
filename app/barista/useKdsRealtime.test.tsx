@@ -57,7 +57,7 @@ vi.mock("@/lib/supabase/client", () => ({
 
 describe("useKdsRealtime", () => {
   it(
-    "subscribes to an org-scoped channel and refreshes on a cafe_orders change (no cross-org filter leak)",
+    "AC-726: subscribes to an org-scoped channel and refreshes on a cafe_orders change (no cross-org filter leak)",
     () => {
       const orgId = "org-abc-123";
       renderHook(() => useKdsRealtime(orgId));

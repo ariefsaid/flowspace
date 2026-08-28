@@ -1,6 +1,8 @@
 /**
  * AC-101: CafeClient renders DB-provided menu items (unit/RTL).
  * AC-102: CafeClient surfaces server-action errors inline (money-path defect fix).
+ * AC-701/703/704: variant picker + cart-line combination behavior (I-044).
+ * AC-730: cart discount preview renders the server-resolved % (never hardcoded).
  * Static gate: app/(member)/cafe/ must not import lib/mock/cafe.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -30,6 +32,18 @@ const sampleMenu: MenuItemView[] = [
     priceRupiah: 32000,
     description: "Espresso lembut dengan susu steamed.",
     hasVariants: true,
+    variantConfig: {
+      variants: [
+        {
+          name: "Temperature",
+          required: true,
+          options: [
+            { name: "Hot", priceAdjustment: 0 },
+            { name: "Cold", priceAdjustment: 3000 },
+          ],
+        },
+      ],
+    },
   },
   {
     id: "item-croissant",
@@ -49,11 +63,7 @@ beforeEach(() => {
 describe("CafeClient (AC-101)", () => {
   it("AC-101: renders menu items passed as props (DB-sourced)", () => {
     render(
-      <CafeClient
-        menu={sampleMenu}
-        recentOrder={null}
-        discountEligible={false}
-      />,
+      <CafeClient menu={sampleMenu} recentOrder={null} discountPct={0} />,
     );
     expect(screen.getByText("Latte")).toBeInTheDocument();
     expect(screen.getByText("Croissant")).toBeInTheDocument();
@@ -61,32 +71,25 @@ describe("CafeClient (AC-101)", () => {
     expect(screen.getByText("Rp 25.000")).toBeInTheDocument();
   });
 
-  it("AC-101: does NOT show discount banner when discountEligible is false (ADR-0011 dormant)", () => {
+  it("AC-730: a REGULAR (0%) member sees no discount banner", () => {
     render(
-      <CafeClient
-        menu={sampleMenu}
-        recentOrder={null}
-        discountEligible={false}
-      />,
+      <CafeClient menu={sampleMenu} recentOrder={null} discountPct={0} />,
     );
-    expect(screen.queryByText(/diskon 5%/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/diskon/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/sesi aktif/i)).not.toBeInTheDocument();
   });
 
-  it("shows discount banner only when discountEligible is true (future use)", () => {
+  it("AC-730: a GOLD (10%) member sees the server-resolved 10% banner, never a hardcoded 5%", () => {
     render(
-      <CafeClient
-        menu={sampleMenu}
-        recentOrder={null}
-        discountEligible={true}
-      />,
+      <CafeClient menu={sampleMenu} recentOrder={null} discountPct={10} />,
     );
-    expect(screen.getByText(/diskon 5%/i)).toBeInTheDocument();
+    expect(screen.getByText(/diskon 10%/i)).toBeInTheDocument();
+    expect(screen.queryByText(/diskon 5%/i)).not.toBeInTheDocument();
   });
 
   it("shows empty state when menu is empty", () => {
     render(
-      <CafeClient menu={[]} recentOrder={null} discountEligible={false} />,
+      <CafeClient menu={[]} recentOrder={null} discountPct={0} />,
     );
     // No menu items rendered — grid is empty but page still mounts
     expect(screen.queryByText("Latte")).not.toBeInTheDocument();
@@ -103,7 +106,7 @@ describe("CafeClient (AC-101)", () => {
       <CafeClient
         menu={sampleMenu}
         recentOrder={recentOrder}
-        discountEligible={false}
+        discountPct={0}
       />,
     );
     expect(screen.getByText("#abc123")).toBeInTheDocument();
@@ -113,7 +116,7 @@ describe("CafeClient (AC-101)", () => {
     vi.mocked(placeOrder).mockRejectedValue(new Error("INVALID_MENU_ITEMS"));
 
     render(
-      <CafeClient menu={sampleMenu} recentOrder={null} discountEligible={false} />,
+      <CafeClient menu={sampleMenu} recentOrder={null} discountPct={0} />,
     );
 
     // Add croissant to cart (no variant, direct add)
@@ -142,7 +145,7 @@ describe("CafeClient (AC-101)", () => {
     vi.mocked(placeOrder).mockRejectedValue(new Error("NETWORK_TIMEOUT"));
 
     render(
-      <CafeClient menu={sampleMenu} recentOrder={null} discountEligible={false} />,
+      <CafeClient menu={sampleMenu} recentOrder={null} discountPct={0} />,
     );
 
     const addButtons = screen.getAllByRole("button", { name: /tambah/i });
@@ -162,7 +165,7 @@ describe("CafeClient (AC-101)", () => {
       .mockResolvedValueOnce({} as never);
 
     render(
-      <CafeClient menu={sampleMenu} recentOrder={null} discountEligible={false} />,
+      <CafeClient menu={sampleMenu} recentOrder={null} discountPct={0} />,
     );
 
     const addButtons = screen.getAllByRole("button", { name: /tambah/i });
@@ -181,6 +184,51 @@ describe("CafeClient (AC-101)", () => {
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+  });
+
+  it("AC-701/AC-703: opening the picker on Latte shows the configured group and adjusted price on Cold", async () => {
+    render(
+      <CafeClient menu={sampleMenu} recentOrder={null} discountPct={0} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /pilih variant/i }));
+    expect(await screen.findByText("Temperature")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cold" }));
+    expect(screen.getByText(/tambah ke keranjang.*rp 35\.000/i)).toBeInTheDocument();
+  });
+
+  it("AC-704: adding Hot then Cold keeps them as two separate cart lines and submits generic options + trimmed notes", async () => {
+    render(
+      <CafeClient menu={sampleMenu} recentOrder={null} discountPct={0} />,
+    );
+
+    // Add Hot (default selection)
+    fireEvent.click(screen.getByRole("button", { name: /pilih variant/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /tambah ke keranjang/i }));
+
+    // Add Cold
+    fireEvent.click(screen.getByRole("button", { name: /pilih variant/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cold" }));
+    fireEvent.click(screen.getByRole("button", { name: /tambah ke keranjang/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /buka keranjang/i }));
+    // One "Latte" in the menu grid card + two separate cart lines (Hot, Cold)
+    expect(screen.getAllByText("Latte")).toHaveLength(3);
+
+    // Notes + checkout
+    fireEvent.change(screen.getByLabelText(/catatan/i), {
+      target: { value: "  extra hot  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /pesan sekarang/i }));
+
+    await waitFor(() => expect(placeOrder).toHaveBeenCalled());
+    // Mocks aren't reset between tests in this file — read the LAST call.
+    const calls = vi.mocked(placeOrder).mock.calls;
+    const call = calls[calls.length - 1][0];
+    expect(call.notes).toBe("extra hot");
+    expect(call.lines).toHaveLength(2);
+    expect(call.lines.every((l) => "options" in l)).toBe(true);
+    // No client price/subtotal/discount field ever sent
+    expect(call.lines.every((l) => !("price" in l) && !("unitPriceRupiah" in l))).toBe(true);
   });
 
   it("no-mock-import gate: cafe page files do not import lib/mock/cafe", async () => {

@@ -29,6 +29,8 @@ export interface BaristaOrderView {
   status: "new" | "preparing" | "ready";
   /** ISO timestamp. */
   placedAt: string;
+  /** Trimmed order notes, or null (I-044, FR-724/FR-728). */
+  notes: string | null;
   lines: BaristaOrderLineView[];
 }
 
@@ -117,6 +119,16 @@ function OrderCard({ order, onAdvance, onComplete }: OrderCardProps) {
           </li>
         ))}
       </ul>
+
+      {/* Notes — highlighted warning treatment (I-044, FR-728, OBS-710) */}
+      {order.notes && (
+        <div
+          aria-label="Catatan pesanan"
+          className="rounded-xl border border-amber-200 bg-amber-100 px-3 py-2 text-sm text-amber-700"
+        >
+          <span className="font-semibold">Catatan:</span> {order.notes}
+        </div>
+      )}
 
       {/* Action buttons */}
       <div className="mt-auto flex gap-2">

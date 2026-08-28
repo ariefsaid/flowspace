@@ -7,13 +7,12 @@ import { formatRupiah, formatDateOnlyID } from "@/lib/format";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
-import { VariantModal } from "@/components/member/cafe/VariantModal";
+import { VariantPickerModal } from "@/components/cafe/VariantPickerModal";
 import { CartPanel } from "@/components/member/cafe/CartPanel";
 import { cartKey } from "@/components/member/cafe/types";
 import type { CartItem } from "@/components/member/cafe/types";
-import type { VariantSelection } from "@/components/member/cafe/VariantModal";
 import { placeOrder } from "@/app/cafe/actions";
-import type { OrderLineInput } from "@/lib/cafe/types";
+import type { OrderLineInput, VariantConfig, VariantSelectionInput } from "@/lib/cafe/types";
 
 // ---------------------------------------------------------------------------
 // View shape — maps DB CafeMenuItem to what this component consumes.
@@ -28,6 +27,7 @@ export interface MenuItemView {
   priceRupiah: number;
   description: string;
   hasVariants: boolean;
+  variantConfig?: VariantConfig | null;
 }
 
 export interface RecentOrderView {
@@ -132,38 +132,24 @@ function MenuItemCard({
 }
 
 // ---------------------------------------------------------------------------
-// VariantModal / CartPanel / cartKey expect the shared cafe-component MenuItem
-// shape; we adapt our DB-sourced MenuItemView to it inline.
-// ---------------------------------------------------------------------------
-
-/** Adapt our DB-sourced MenuItemView to the shared cafe-component MenuItem shape. */
-function toComponentMenuItem(item: MenuItemView) {
-  return {
-    id: item.id,
-    name: item.name,
-    emoji: item.emoji,
-    category: (CATEGORY_LABEL[item.category] ?? item.category) as import("@/lib/types/views").MenuCategory,
-    price: item.priceRupiah,
-    description: item.description,
-    hasVariants: item.hasVariants,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 export interface CafeClientProps {
   menu: MenuItemView[];
   recentOrder: RecentOrderView | null;
-  discountEligible: boolean;
+  /**
+   * Server-resolved cafe discount percentage for this member (0 when
+   * ineligible). Rendered verbatim — never a hardcoded rate (FR-730/AC-730).
+   */
+  discountPct: number;
 }
 
 // ---------------------------------------------------------------------------
 // Main client component
 // ---------------------------------------------------------------------------
 
-export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientProps) {
+export function CafeClient({ menu, recentOrder, discountPct }: CafeClientProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
@@ -184,14 +170,19 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
   // ---- cart ----
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
+  const [notes, setNotes] = useState("");
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutPending, setCheckoutPending] = useState(false);
 
   const totalCartQty = cartItems.reduce((s, i) => s + i.qty, 0);
 
-  function addToCart(item: MenuItemView, variant?: VariantSelection) {
-    const componentItem = toComponentMenuItem(item);
-    const key = cartKey(componentItem, variant);
+  function addToCart(item: MenuItemView, options: VariantSelectionInput[] = []) {
+    const priceAdjustment = options.reduce((sum, sel) => {
+      const group = item.variantConfig?.variants.find((g) => g.name === sel.variantName);
+      const option = group?.options.find((o) => o.name === sel.optionName);
+      return sum + (option?.priceAdjustment ?? 0);
+    }, 0);
+    const key = cartKey(item.id, options);
     setCartItems((prev) => {
       const existing = prev.find((i) => i.key === key);
       if (existing) {
@@ -206,9 +197,9 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
           id: item.id,
           name: item.name,
           emoji: item.emoji,
-          price: item.priceRupiah,
+          price: item.priceRupiah + priceAdjustment,
           qty: 1,
-          variant,
+          options,
         },
       ];
     });
@@ -235,6 +226,9 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
     const map: Record<string, string> = {
       INVALID_MENU_ITEMS: "Sebagian item tidak tersedia. Perbarui keranjang Anda.",
       INVALID_QUANTITY: "Jumlah pesanan tidak valid.",
+      INVALID_VARIANTS: "Pilihan variant tidak valid. Perbarui keranjang Anda.",
+      MISSING_REQUIRED_VARIANT: "Lengkapi pilihan variant yang wajib diisi.",
+      INVALID_NOTES: "Catatan terlalu panjang (maksimal 500 karakter).",
       EMPTY_ORDER: "Keranjang masih kosong.",
       GUEST_NAME_REQUIRED: "Nama wajib diisi.",
       ORG_NOT_FOUND: "Pesanan gagal diproses. Coba lagi.",
@@ -250,12 +244,11 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
     const lines: OrderLineInput[] = cartItems.map((ci) => ({
       menuItemId: ci.id,
       qty: ci.qty,
-      temperature: ci.variant?.temp === "Hot" ? "HOT" : ci.variant?.temp === "Cold" ? "COLD" : null,
-      sugar: ci.variant?.sugar === "Normal" ? "NORMAL" : ci.variant?.sugar === "Less Sugar" ? "LESS" : ci.variant?.sugar === "No Sugar" ? "NONE" : null,
+      options: ci.options,
     }));
 
     try {
-      await placeOrder({ lines });
+      await placeOrder({ lines, notes: notes.trim() || undefined });
     } catch (err) {
       setCheckoutError(toCheckoutErrorMessage(err));
       setCheckoutPending(false);
@@ -264,6 +257,7 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
 
     setCheckoutPending(false);
     setCartItems([]);
+    setNotes("");
     setCartOpen(false);
     startTransition(() => {
       router.refresh();
@@ -299,8 +293,8 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
         </button>
       </div>
 
-      {/* ── Active-session discount banner (ADR-0011: only shown when eligibility is true) ── */}
-      {discountEligible && (
+      {/* ── Active-session discount banner — server-resolved %, never hardcoded (FR-730/AC-730) ── */}
+      {discountPct > 0 && (
         <div className="rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 px-4 py-3 flex items-center gap-3 shadow-sm">
           <span className="text-lg leading-none">🎉</span>
           <div>
@@ -308,7 +302,7 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
               Anda sedang dalam sesi aktif!
             </p>
             <p className="text-sm text-green-50 mt-0.5">
-              Nikmati diskon 5% untuk semua pesanan cafe
+              Nikmati diskon {discountPct}% untuk semua pesanan cafe
             </p>
           </div>
         </div>
@@ -405,13 +399,19 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
         </aside>
       </div>
 
-      {/* ── Variant modal ── */}
-      {variantItem && (
-        <VariantModal
-          item={toComponentMenuItem(variantItem)}
+      {/* ── Variant picker modal (I-044) ── */}
+      {variantItem && variantItem.variantConfig && (
+        <VariantPickerModal
+          item={{
+            name: variantItem.name,
+            emoji: variantItem.emoji,
+            description: variantItem.description,
+            priceRupiah: variantItem.priceRupiah,
+            variantConfig: variantItem.variantConfig,
+          }}
           onClose={() => setVariantItem(null)}
-          onConfirm={(_, variant) => {
-            addToCart(variantItem, variant);
+          onConfirm={(selections) => {
+            addToCart(variantItem, selections);
             setVariantItem(null);
           }}
         />
@@ -421,11 +421,13 @@ export function CafeClient({ menu, recentOrder, discountEligible }: CafeClientPr
       {cartOpen && (
         <CartPanel
           items={cartItems}
-          hasActiveSession={discountEligible}
+          discountPct={discountPct}
           onClose={() => { setCartOpen(false); setCheckoutError(null); }}
           onIncrement={incrementCart}
           onDecrement={decrementCart}
           onCheckout={handleCheckout}
+          notes={notes}
+          onNotesChange={setNotes}
           checkoutError={checkoutError}
           checkoutPending={checkoutPending}
         />

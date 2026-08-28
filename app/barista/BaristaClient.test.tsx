@@ -26,7 +26,8 @@ const newOrder: BaristaOrderView = {
   customer: "Budi Santoso",
   status: "new",
   placedAt: new Date("2026-06-15T10:00:00Z").toISOString(),
-  lines: [{ name: "Latte", qty: 1, variant: "Hot, Normal Sugar" }],
+  notes: null,
+  lines: [{ name: "Latte", qty: 1, variant: "Temperature: Hot" }],
 };
 
 describe("BaristaClient (AC-101)", () => {
@@ -48,6 +49,30 @@ describe("BaristaClient (AC-101)", () => {
   it("shows empty state when no orders", () => {
     render(<BaristaClient initialOrders={[]} orgId="org-test" />);
     expect(screen.getByText(/belum ada pesanan/i)).toBeInTheDocument();
+  });
+
+  it("AC-714: renders a generic variant-option snapshot and a highlighted note block", () => {
+    const orderWithNote: BaristaOrderView = {
+      id: "order-2",
+      code: "#cd5678",
+      customer: "Guest: Sari",
+      status: "new",
+      placedAt: new Date("2026-06-15T10:00:00Z").toISOString(),
+      notes: "extra hot please",
+      lines: [{ name: "Kopi Susu", qty: 1, variant: "Temperature: Cold" }],
+    };
+    render(<BaristaClient initialOrders={[orderWithNote]} orgId="org-test" />);
+
+    expect(screen.getByText(/temperature: cold/i)).toBeInTheDocument();
+    const noteBlock = screen.getByLabelText(/catatan pesanan/i);
+    expect(noteBlock).toHaveTextContent("extra hot please");
+    expect(noteBlock.className).toMatch(/amber-100/);
+    expect(noteBlock.className).toMatch(/amber-700/);
+  });
+
+  it("does not render a note block when notes is null", () => {
+    render(<BaristaClient initialOrders={[newOrder]} orgId="org-test" />);
+    expect(screen.queryByLabelText(/catatan pesanan/i)).not.toBeInTheDocument();
   });
 
   it("no-mock-import gate: barista files do not import lib/mock/barista", async () => {

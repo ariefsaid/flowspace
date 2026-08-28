@@ -29,15 +29,19 @@ async function resolveGuestOrgId(slug: string): Promise<string> {
  * Place an order for a member (authenticated) or guest (no session).
  *
  * Member path: orgId from session, customerUserId from session, discount via
- * resolveDiscountEligibility (5% for a member with an active session — ADR-0011).
+ * resolveDiscountEligibility (tier-configured cafeDiscountPct for a member
+ * with an active session — ADR-0011, I-041).
  * Guest path: orgId resolved server-side by SEED_ORG_SLUG env, captures
  * guestName (required, non-empty), no discount.
+ * `notes` is passed through unchanged — createOrder/normalizeOrderNotes is
+ * the final trim/blank/500-cap normalization boundary (I-044, FR-724).
  *
- * FR-111, FR-112, FR-113, FR-114 / AC-112, AC-113, AC-114
+ * FR-111, FR-112, FR-113, FR-114, FR-724 / AC-112, AC-113, AC-114, AC-710, AC-711
  */
 export async function placeOrder(input: {
   lines: OrderLineInput[];
   guestName?: string;
+  notes?: string;
 }) {
   const user = await getSessionUser();
 
@@ -50,6 +54,7 @@ export async function placeOrder(input: {
       guestName: null,
       lines: input.lines,
       discountEligible,
+      notes: input.notes,
     });
   }
 
@@ -68,5 +73,6 @@ export async function placeOrder(input: {
     guestName,
     lines: input.lines,
     discountEligible: false,
+    notes: input.notes,
   });
 }

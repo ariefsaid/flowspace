@@ -12,7 +12,7 @@ describe("nextStatus", () => {
 });
 
 describe("generateOrderCode", () => {
-  it("generateOrderCode returns 6 lowercase base36 chars", () => {
+  it("AC-722: generateOrderCode returns 6 lowercase base36 chars", () => {
     const code = generateOrderCode(() => 0.5);
     expect(code).toMatch(/^[0-9a-z]{6}$/);
   });

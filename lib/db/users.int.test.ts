@@ -78,6 +78,7 @@ import {
   findById,
   listByOrg,
   createMember,
+  findMemberByEmail,
 } from "@/lib/db/users";
 
 const SUPABASE_URL =
@@ -100,6 +101,47 @@ describe("lib/db/users", () => {
     it("returns null for unknown email", async () => {
       const user = await findByEmail("nobody@x.test");
       expect(user).toBeNull();
+    });
+
+    it("[SEC] a mixed-case lookup finds a lowercase-stored row (case-insensitive by normalization)", async () => {
+      const user = await findByEmail("A@X.Test");
+      expect(user).not.toBeNull();
+      expect(user?.id).toBe(aUserId);
+    });
+  });
+
+  describe("[SEC] email casing — normalized consistently at write AND at all lookups", () => {
+    it("createMember lowercases a mixed-case email at write, so login (findByEmail) and POS (findMemberByEmail) both resolve it", async () => {
+      const mixedEmail = `Mixed.Case-${Date.now()}@X.Test`;
+      const { data, error } = await admin.auth.admin.createUser({
+        email: mixedEmail.toLowerCase(),
+        password: "secret123",
+        email_confirm: true,
+      });
+      expect(error).toBeNull();
+      const authUserId = data.user!.id;
+
+      const created = await createMember({
+        orgId: orgAId,
+        authUserId,
+        email: mixedEmail,
+        name: "Mixed Case Member",
+      });
+      // Stored lowercase, not the raw mixed-case input.
+      expect(created.email).toBe(mixedEmail.toLowerCase());
+
+      // A login lookup (findByEmail) with the ORIGINAL mixed-case input still
+      // resolves the same row — this is the login path that previously broke
+      // for a mixed-case stored row.
+      const viaLogin = await findByEmail(mixedEmail);
+      expect(viaLogin?.id).toBe(created.id);
+
+      // A POS lookup (findMemberByEmail) with the original mixed-case input
+      // also resolves the same row.
+      const viaPos = await findMemberByEmail(orgAId, mixedEmail);
+      expect(viaPos?.id).toBe(created.id);
+
+      await admin.auth.admin.deleteUser(authUserId);
     });
   });
 

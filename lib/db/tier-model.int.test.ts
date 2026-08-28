@@ -31,6 +31,7 @@ import {
   membershipTierConfig,
   printers,
   orgPrintPricing,
+  bookings,
 } from "@/lib/db/schema";
 import {
   listTierConfig,
@@ -48,7 +49,7 @@ const TEST_URL =
 const testSql = postgres(TEST_URL, { prepare: false, max: 3 });
 const testDb = drizzle(testSql, { schema });
 
-const TRUNCATE = `TRUNCATE TABLE "transactions","print_jobs","cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","org_print_pricing","app_users","organizations" RESTART IDENTITY CASCADE`;
+const TRUNCATE = `TRUNCATE TABLE "bookings","transactions","print_jobs","cafe_order_items","cafe_orders","cafe_menu_items","membership_tier_config","org_print_pricing","app_users","organizations" RESTART IDENTITY CASCADE`;
 
 let orgAId: string;
 let orgBId: string;
@@ -56,6 +57,7 @@ let orgCId: string;
 let regularAId: string;
 let premiumAId: string;
 let goldAId: string;
+let goldNoBookingAId: string;
 let regularBId: string;
 let itemAId: string;
 let itemBId: string;
@@ -97,6 +99,15 @@ beforeAll(async () => {
     .returning();
   regularBId = regularB.id;
 
+  // A GOLD member with NO active booking at all (AC-513's dedicated fixture
+  // — see the booking seeding block below for why this must be a SEPARATE
+  // member from goldAId).
+  const [goldNoBookingA] = await testDb
+    .insert(appUsers)
+    .values({ orgId: orgAId, email: "a-gold-no-booking@x.test", name: "AgNoBooking", role: "MEMBER", membershipTier: "GOLD", printBalance: 100 })
+    .returning();
+  goldNoBookingAId = goldNoBookingA.id;
+
   const [itemA] = await testDb
     .insert(cafeMenuItems)
     .values({ orgId: orgAId, name: "Latte A", emoji: "☕", category: "COFFEE", priceRupiah: 20000, description: "x", hasVariants: false, available: true })
@@ -127,6 +138,31 @@ beforeAll(async () => {
   });
 
   // Org C — no config rows at all (the fail-closed / no-leak fixture below).
+
+  // I-044 [MONEY] TOCTOU fix: createOrder now re-derives cafe-discount
+  // eligibility from a LIVE ACTIVE booking (not just the caller's
+  // `discountEligible` flag) — every member fixture used with
+  // `discountEligible: true` below needs a real ACTIVE booking so these
+  // tests keep proving the TIER-CONFIG money path, not accidentally the
+  // booking-eligibility path (which is covered by lib/db/cafe.int.test.ts).
+  for (const userId of [regularAId, premiumAId, goldAId]) {
+    await testDb.insert(bookings).values({
+      orgId: orgAId,
+      userId,
+      facilityType: "WALKIN_COWORKING",
+      facilityName: "Walk-in Coworking",
+      ratePerHourRupiah: 10000,
+      status: "ACTIVE",
+    });
+  }
+  await testDb.insert(bookings).values({
+    orgId: orgBId,
+    userId: regularBId,
+    facilityType: "WALKIN_COWORKING",
+    facilityName: "Walk-in Coworking",
+    ratePerHourRupiah: 10000,
+    status: "ACTIVE",
+  });
 
   // Print-parity preconditions (I-043) — submitPrintJob requires an active
   // default printer + a resolved BW/A4 matrix cell; org A and org B both
@@ -315,7 +351,17 @@ describe("[MONEY-PATH] Money-path proofs", () => {
     expect(gold.totalRupiah).toBe(18000);
   });
 
-  it("AC-513: a member without an ACTIVE session (discountEligible=false) gets 0% regardless of tier config", async () => {
+  it("AC-513: a member without an ACTIVE booking gets 0% regardless of tier config, even when the caller claims eligibility", async () => {
+    // `goldNoBookingAId` has NO booking row at all — createOrder's live
+    // recheck (not just the `discountEligible` flag) is what must resolve
+    // 0% here; passing `discountEligible: true` proves the recheck is doing
+    // the real work, not just the caller's precondition.
+    const gold = await createOrder({ orgId: orgAId, customerUserId: goldNoBookingAId, guestName: null, lines: [{ menuItemId: itemAId, qty: 1 }], discountEligible: true });
+    expect(gold.discountRupiah).toBe(0);
+    expect(gold.totalRupiah).toBe(20000);
+  });
+
+  it("[fix round 2] a member with an ACTIVE booking but discountEligible=false (the channel/role precondition) also gets 0%", async () => {
     const gold = await createOrder({ orgId: orgAId, customerUserId: goldAId, guestName: null, lines: [{ menuItemId: itemAId, qty: 1 }], discountEligible: false });
     expect(gold.discountRupiah).toBe(0);
     expect(gold.totalRupiah).toBe(20000);

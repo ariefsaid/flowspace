@@ -356,6 +356,38 @@ describe("lib/db/bookings", () => {
       expect(await bookingRowCount(orgAId)).toBe(before);
     });
 
+    it("[SEC] rejects a scheduled booking duration outside the 1-8h server bound (pending-hold DoS)", async () => {
+      // An attacker could otherwise submit an absurd start/end pair (e.g.
+      // 100000h) to pin a facility's inventory indefinitely via a PENDING
+      // cashier hold, or via an online hold before the sweep ever
+      // cancels/activates it.
+      const before = await bookingRowCount(orgAId);
+      await expect(
+        createBooking({
+          orgId: orgAId, userId: aUserId, tier: "REGULAR",
+          facilityType: "COWORKING_SEAT", facilityId: seatAId, facilityName: "Meja A",
+          startAt: new Date("2026-09-10T09:00:00Z"),
+          endAt: new Date(new Date("2026-09-10T09:00:00Z").getTime() + 100_000 * HOUR),
+          paymentMethod: "online",
+        }),
+      ).rejects.toThrow(/INVALID_DURATION/);
+      expect(await bookingRowCount(orgAId)).toBe(before);
+    });
+
+    it("[SEC] rejects a scheduled booking starting more than 90 days out", async () => {
+      const before = await bookingRowCount(orgAId);
+      const farStart = new Date(Date.now() + 91 * 24 * HOUR);
+      await expect(
+        createBooking({
+          orgId: orgAId, userId: aUserId, tier: "REGULAR",
+          facilityType: "COWORKING_SEAT", facilityId: seatAId, facilityName: "Meja A",
+          startAt: farStart, endAt: new Date(farStart.getTime() + HOUR),
+          paymentMethod: "online",
+        }),
+      ).rejects.toThrow(/START_TOO_FAR_OUT/);
+      expect(await bookingRowCount(orgAId)).toBe(before);
+    });
+
     it("[SEC] rejects a booking whose interval crosses a calendar-day boundary", async () => {
       // The org-day advisory lock + full-room day-window logic are keyed by a
       // SINGLE calendar day (calendarDayOf(startAt)) — a booking spanning two
@@ -1127,6 +1159,32 @@ describe("lib/db/bookings", () => {
       expect(fresh.status).toBe("ACTIVE");
     });
 
+    it("[SEC] auto-cancels a stale (>24h) unpaid PENDING/WAITING_CASHIER hold — never approved, would otherwise pin inventory forever", async () => {
+      const now = new Date("2026-08-23T12:00:00Z");
+      const [stale] = await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatBId,
+        facilityName: "Meja B", startAt: new Date(now.getTime() + HOUR), endAt: new Date(now.getTime() + 2 * HOUR),
+        durationHours: 1, ratePerHourRupiah: 20000, amountRupiah: 20000, baseAmountRupiah: 20000, discountRupiah: 0,
+        status: "PENDING", paymentStatus: "WAITING_CASHIER", bookingMode: "SCHEDULED", paymentMethod: "cashier",
+        createdAt: new Date(now.getTime() - 25 * HOUR), // stale — held 25h, never approved
+      }).returning();
+      const [fresh] = await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatAId,
+        facilityName: "Meja A", startAt: new Date(now.getTime() + HOUR), endAt: new Date(now.getTime() + 2 * HOUR),
+        durationHours: 1, ratePerHourRupiah: 20000, amountRupiah: 20000, baseAmountRupiah: 20000, discountRupiah: 0,
+        status: "PENDING", paymentStatus: "WAITING_CASHIER", bookingMode: "SCHEDULED", paymentMethod: "cashier",
+        createdAt: new Date(now.getTime() - 1 * HOUR), // recent — untouched
+      }).returning();
+
+      const result = await runStatusSweep(orgAId, now);
+      expect(result.staleCancelled).toBeGreaterThanOrEqual(1);
+
+      const [staleAfter] = await testDb.select().from(bookings).where(eq(bookings.id, stale.id));
+      expect(staleAfter.status).toBe("CANCELLED");
+      const [freshAfter] = await testDb.select().from(bookings).where(eq(bookings.id, fresh.id));
+      expect(freshAfter.status).toBe("PENDING"); // untouched — not yet stale
+    });
+
     it("is org-scoped: sweeping org A never touches org B's rows", async () => {
       const now = new Date("2026-08-22T12:00:00Z");
       const [orgBRow] = await testDb.insert(bookings).values({
@@ -1154,6 +1212,18 @@ describe("lib/db/bookings", () => {
       const pending = await listPendingBookings(orgAId);
       expect(pending.map((b) => b.id)).toContain(created.id);
       expect(pending.every((b) => b.orgId === orgAId && b.status === "PENDING" && b.paymentStatus === "WAITING_CASHIER")).toBe(true);
+    });
+
+    it("[SEC] is bounded — a flood of PENDING/WAITING_CASHIER rows never returns an unbounded result set", async () => {
+      for (let i = 0; i < 5; i++) {
+        await createBooking({
+          orgId: orgAId, userId: aUserId, tier: "REGULAR",
+          facilityType: "WALKIN_COWORKING", facilityName: "Walk-in Coworking",
+          paymentMethod: "cashier",
+        });
+      }
+      const pending = await listPendingBookings(orgAId, 3);
+      expect(pending.length).toBeLessThanOrEqual(3);
     });
   });
 

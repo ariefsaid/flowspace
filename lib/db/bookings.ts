@@ -99,6 +99,12 @@ export type CheckoutPrice = {
 const HOUR_MS = 3_600_000;
 const EXTENSION_CAP_HOURS = 4;
 const EXTENSION_GAP_MS = 60 * 60_000;
+/** [SEC] Pending-hold DoS bounds (FR-852-adjacent, not a spec'd catalog cap —
+ *  a coarse server-side sanity bound on any scheduled create). */
+const SCHEDULED_MAX_HOURS = 8;
+const MAX_START_HORIZON_MS = 90 * 24 * HOUR_MS;
+/** Stale unpaid holds older than this, never approved, are auto-cancelled by the sweep. */
+const STALE_PENDING_HOLD_MS = 24 * HOUR_MS;
 
 /** UTC calendar-day key (`YYYY-MM-DD`) — the org-day advisory-lock namespace and the full-room day-window boundary. */
 function calendarDayOf(d: Date): string {
@@ -475,6 +481,17 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
   const durationHours = Math.ceil((endAt.getTime() - startAt.getTime()) / HOUR_MS);
   if (!Number.isFinite(durationHours) || durationHours <= 0) {
     throw new Error("INVALID_DURATION");
+  }
+  // [SEC] Pending-hold DoS guard: an unbounded duration or an arbitrarily
+  // far-future start lets a single request pin a facility's inventory (a
+  // PENDING/WAITING_CASHIER hold that never expires until an admin/sweep
+  // touches it) far beyond any real booking. Bound duration to the
+  // documented 1-8h scheduled window and the start horizon to 90 days out.
+  if (durationHours > SCHEDULED_MAX_HOURS) {
+    throw new Error("INVALID_DURATION");
+  }
+  if (startAt.getTime() - Date.now() > MAX_START_HORIZON_MS) {
+    throw new Error("START_TOO_FAR_OUT");
   }
   // [SEC] One-day constraint: the org-day advisory lock and the full-room
   // day-window exclusivity (individualBookingExistsOnDay) are both keyed by
@@ -943,17 +960,25 @@ export async function extendBooking(orgId: string, id: string, extraHours: numbe
 export type StatusSweepResult = {
   activated: number;
   cancelled: number;
+  /** [SEC] Stale unpaid PENDING/WAITING_CASHIER holds (>24h, never approved)
+   *  auto-cancelled this run — closes the pending-hold DoS gap (an unpaid
+   *  hold would otherwise pin a facility's inventory forever). */
+  staleCancelled: number;
   /** Booking ids currently ACTIVE and past their end (flagged, never auto-completed — OBS-831/AC-839). */
   overtime: string[];
 };
 
 /**
  * One org's authenticated status sweep (OBS-829..831, FR-852). Single
- * transaction, three CAS-guarded steps in order (each only sees rows the
+ * transaction, four CAS-guarded steps in order (each only sees rows the
  * PRIOR step in this same run has not already transitioned):
  *  (a) paid CONFIRMED whose start has arrived → ACTIVE.
  *  (b) CONFIRMED (never activated) past its end → CANCELLED.
- *  (c) ACTIVE past its end → reported in `overtime`, status NEVER changed
+ *  (c) [SEC] stale PENDING/WAITING_CASHIER holds (created >24h ago, still
+ *      never approved — that combo of status+paymentStatus IS "never
+ *      approved": approvePayment/approveAndStartWalkIn always move a row
+ *      OUT of it) → CANCELLED, freeing the inventory they were pinning.
+ *  (d) ACTIVE past its end → reported in `overtime`, status NEVER changed
  *      (walk-ins have `end_at IS NULL` and are naturally excluded — they have
  *      no scheduled end to be "overdue" against).
  * The caller resolves `orgId` server-side (never client-supplied) and this
@@ -991,6 +1016,19 @@ export async function runStatusSweep(orgId: string, now: Date): Promise<StatusSw
       )
       .returning({ id: bookings.id });
 
+    const staleCancelledRows = await tx
+      .update(bookings)
+      .set({ status: "CANCELLED", updatedAt: now })
+      .where(
+        and(
+          eq(bookings.orgId, orgId),
+          eq(bookings.status, "PENDING"),
+          eq(bookings.paymentStatus, "WAITING_CASHIER"),
+          lt(bookings.createdAt, new Date(now.getTime() - STALE_PENDING_HOLD_MS)),
+        ),
+      )
+      .returning({ id: bookings.id });
+
     const overtimeRows = await tx
       .select({ id: bookings.id })
       .from(bookings)
@@ -1006,6 +1044,7 @@ export async function runStatusSweep(orgId: string, now: Date): Promise<StatusSw
     return {
       activated: activatedRows.length,
       cancelled: cancelledRows.length,
+      staleCancelled: staleCancelledRows.length,
       overtime: overtimeRows.map((r) => r.id),
     };
   });
@@ -1051,8 +1090,11 @@ export async function cancelBooking(
  * Admin pending-payments surface: PENDING bookings still WAITING_CASHIER —
  * a fresh walk-in awaiting cashier start, or a scheduled cashier booking
  * awaiting settlement. Newest first; org-scoped (cross-org rows never match).
+ * [SEC] Bounded (LIMIT) — a flood of unpaid PENDING holds must never make
+ * this read set unbounded (pending-hold DoS, defense-in-depth alongside the
+ * createBooking duration/horizon bound and the sweep's stale-hold cancel).
  */
-export function listPendingBookings(orgId: string): Promise<Booking[]> {
+export function listPendingBookings(orgId: string, limit = 200): Promise<Booking[]> {
   return db
     .select()
     .from(bookings)
@@ -1063,5 +1105,6 @@ export function listPendingBookings(orgId: string): Promise<Booking[]> {
         eq(bookings.paymentStatus, "WAITING_CASHIER"),
       ),
     )
-    .orderBy(desc(bookings.createdAt));
+    .orderBy(desc(bookings.createdAt))
+    .limit(limit);
 }

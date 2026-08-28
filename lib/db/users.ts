@@ -96,6 +96,40 @@ export async function findProfilesByIds(
 }
 
 /**
+ * Org-scoped minimal member lookup by email (I-044, POS FR-725/726).
+ * Returns only the fields the cashier surface needs — never credential
+ * columns. Scoped to `orgId` + `role=MEMBER` + non-archived, so a same-email
+ * row in another org, or a non-member/archived row, never matches
+ * (NFR-044-02: no cross-org disclosure).
+ */
+export async function findMemberByEmail(
+  orgId: string,
+  email: string,
+): Promise<{ id: string; name: string; email: string; membershipTier: MembershipTier; role: AppUser["role"] } | null> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+  const [u] = await db
+    .select({
+      id: appUsers.id,
+      name: appUsers.name,
+      email: appUsers.email,
+      membershipTier: appUsers.membershipTier,
+      role: appUsers.role,
+    })
+    .from(appUsers)
+    .where(
+      and(
+        eq(appUsers.orgId, orgId),
+        eq(appUsers.email, normalized),
+        eq(appUsers.role, "MEMBER"),
+        isNull(appUsers.archivedAt),
+      ),
+    )
+    .limit(1);
+  return u ?? null;
+}
+
+/**
  * Signup path: creates a MEMBER in the given org, linked to a Supabase auth.users row.
  * Password is managed by Supabase Auth — no password column on app_users (AC-023, ADR-0014 §1).
  */

@@ -422,7 +422,7 @@ Verify: `pnpm test:unit -- lib/print/pricing.test.ts`.
 
 ### 12. [MONEY-PATH] `lib/db/tier-model.int.test.ts` — AC-500..519, AC-528
 Create the new integration file (Vitest vs TEST_DATABASE_URL, same truncate/setup pattern as
-`lib/db/pricing-config.int.test.ts`). Seed org A (0/0/0/0, 10/10/5/5, 10/10/5/5 for the three) and org B with
+`lib/db/pricing-config.int.test.ts`). Seed org A (0/0/0/0, 10/10/5/5, 15/15/10/10 for the three) and org B with
 distinct values, plus menu items and 3 member users (REGULAR/PREMIUM/GOLD) for A and a print-eligible user.
 Own one canonical test per AC (each `it` titled with its `AC-###`):
 

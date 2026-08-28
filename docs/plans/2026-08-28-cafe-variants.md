@@ -27,7 +27,7 @@
 - No cache is added: menu availability/config and prices are live money-path data. Existing `force-dynamic` guest rendering and server-component refresh behavior are retained.
 - UI tasks use the tokens/classes already named in `DESIGN.md`, ship modal/cart/checkout loading, empty, error, keyboard, and mobile states, and do not introduce raw design tokens.
 
-> **Source discrepancy requiring Director confirmation:** the checked-in `scripts/seed-supabase.ts` currently contains 34 menu rows, while FR-729/AC-721 call the current menu 31 items. The plan preserves every existing row and does not delete menu content; the seed test must be finalized against the owner-confirmed 31-versus-34 source list before implementation. This is the only open question.
+> **RESOLVED (Director, 2026-08-28):** the seed's 34 rows are correct (18 Coffee + 11 Non-Coffee + 3 Food + 2 Snack, verified by category count); the spec's "31" was an audit miscount and spec 0010 has been corrected to 34. The seed test asserts 34 rows.
 
 ## TDD implementation tasks
 
@@ -132,7 +132,7 @@ Each behavior task writes the named failing test first, runs the listed command 
 11. **Add a seed regression test before changing seed behavior.**
     - **RED test:** create `scripts/seed-supabase.int.test.ts` with `AC-721` and `AC-729`; run the seed twice, query the configured org's menu, assert every existing seed slug remains, prices are unchanged, exactly the owner-confirmed Sugar set has `has_variants=true` and the three `+0` options, no row has a Temperature group, and the bottled/soda/water/unsweetened-tea exclusions are non-variant.
     - **Files:** `scripts/seed-supabase.int.test.ts`.
-    - **Change:** use the existing integration Postgres connection and invoke the real `pnpm db:seed:supabase` command twice; query by deterministic `<orgId>__<slug>` ids. The expected row count must use the Director-confirmed source list because the checked-in array currently has 34 rows although the signed spec says 31.
+    - **Change:** use the existing integration Postgres connection and invoke the real `pnpm db:seed:supabase` command twice; query by deterministic `<orgId>__<slug>` ids. The expected row count is 34 (Director-confirmed; spec corrected).
     - **Verify:** `pnpm test:int -- scripts/seed-supabase.int.test.ts`.
 
 12. **Make the current seed idempotently add Sugar-only variants.**

@@ -42,7 +42,7 @@
   the page refreshes orders on a ten-second interval.
 - **OBS-718** — When an ORIG admin opens cafe orders, a delete action is available.
 - **OBS-719** — When ORIG's seed runs, it upserts 15 cafe items and enables the shared beverage variants on most
-  made-to-order drinks; its seed menu is not the current FlowSpace 31-item menu.
+  made-to-order drinks; its seed menu is not the current FlowSpace 34-item menu.
 
 ## Divergences from ORIG
 
@@ -81,7 +81,7 @@
 - **FR-728** (state-driven) — While an order is visible in the KDS, the barista view shall show its snapshotted options
   and notes, with notes visually highlighted, while retaining Realtime refresh and only NEW → PREPARING → READY →
   COMPLETED forward transitions.
-- **FR-729** (event-driven) — When the FlowSpace seed runs, it shall preserve all 31 current menu items and prices.
+- **FR-729** (event-driven) — When the FlowSpace seed runs, it shall preserve all 34 current menu items and prices.
   Because the FlowSpace menu encodes temperature (and sweetness for teas) as separate same-price items
   (`es-*`/`*-panas` pairs; `*-manis`/`*-tawar`), the seed shall NOT add a Temperature group; it shall idempotently
   add only the Sugar group (Normal/Less/No Sugar, each `+0`) to made-to-order COFFEE and NON_COFFEE items,
@@ -125,7 +125,7 @@
 - **AC-718** — Given a POS client sends a forged user id, subtotal, or discount, when checkout runs, then the server resolves the email/menu and ignores the forged monetary/customer values. *(integration)*
 - **AC-719** — Given POS renders, when the page loads, then every visible item comes from the org-scoped DB menu and carries its live variant config; no mock/static cafe menu is imported. *(unit)*
 - **AC-720** — Given a POS member with an ACTIVE booking selects Cold, when checkout runs, then option adjustment, tier discount, final total, notes, and line snapshots are persisted atomically. *(integration)*
-- **AC-721** — Given a seeded org, when the seed is rerun, then all 31 menu rows remain present with unchanged prices and idempotent variant configuration. *(integration)*
+- **AC-721** — Given a seeded org, when the seed is rerun, then all 34 menu rows remain present with unchanged prices and idempotent variant configuration. *(integration)*
 - **AC-722** — Given any successfully created order, when its code is inspected, then it is six lowercase base36 characters and unique within its org. *(unit)*
 - **AC-723** — Given a member, guest, and POS order, when each is created, then each starts `NEW` and the existing customer/guest semantics remain intact. *(integration)*
 - **AC-724** — Given a NEW order, when a barista advances it repeatedly, then only NEW→PREPARING→READY→COMPLETED succeeds and a further advance is rejected. *(integration)*
@@ -133,7 +133,7 @@
 - **AC-726** — Given a KDS subscribed to the order's org channel, when an order is inserted or updated, then Realtime causes the rendered KDS data to refresh without cross-org events. *(unit)*
 - **AC-727** — Given an archived/unavailable menu row, when any member, guest, or POS checkout references it, then the server rejects it even if the client still has its id. *(integration)*
 - **AC-728** — Given concurrent order creation with the same generated code, when a collision occurs, then the repository retries within its existing bounded code-generation policy and never writes duplicate org codes. *(integration)*
-- **AC-729** — Given the current 31-item FlowSpace seed, when variant flags are inspected, then exactly the items FR-729 includes carry the Sugar-only config, no seeded item carries a Temperature group, and the excluded bottled, soda, water, and unsweetened-tea items are non-variant. *(integration)*
+- **AC-729** — Given the current 34-item FlowSpace seed, when variant flags are inspected, then exactly the items FR-729 includes carry the Sugar-only config, no seeded item carries a Temperature group, and the excluded bottled, soda, water, and unsweetened-tea items are non-variant. *(integration)*
 
 ## Migration / schema delta
 
@@ -158,7 +158,7 @@ adds notes/options to the KDS journey; AC-120/122–125 and AC-100/101 remain un
 checkout/member-discount OQ-2 and keeps the original 15-item seed out of the menu decision.
 
 Out of scope: menu CRUD UI (I-042), payment gateway changes, order deletion, replacing the 6-character code,
-changing the forward-only lifecycle, replacing Realtime KDS, and changing the 31-item FlowSpace menu or tier model.
+changing the forward-only lifecycle, replacing Realtime KDS, and changing the 34-item FlowSpace menu or tier model.
 
 Open questions: None; the menu, variant exclusions, generic snapshot, note limit, and tier-driven POS discount are
 owner-locked by the issue brief.

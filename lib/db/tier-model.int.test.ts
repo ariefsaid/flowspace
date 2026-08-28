@@ -57,6 +57,7 @@ let orgCId: string;
 let regularAId: string;
 let premiumAId: string;
 let goldAId: string;
+let goldNoBookingAId: string;
 let regularBId: string;
 let itemAId: string;
 let itemBId: string;
@@ -97,6 +98,15 @@ beforeAll(async () => {
     .values({ orgId: orgBId, email: "b-regular@x.test", name: "Br", role: "MEMBER", membershipTier: "REGULAR", printBalance: 100 })
     .returning();
   regularBId = regularB.id;
+
+  // A GOLD member with NO active booking at all (AC-513's dedicated fixture
+  // — see the booking seeding block below for why this must be a SEPARATE
+  // member from goldAId).
+  const [goldNoBookingA] = await testDb
+    .insert(appUsers)
+    .values({ orgId: orgAId, email: "a-gold-no-booking@x.test", name: "AgNoBooking", role: "MEMBER", membershipTier: "GOLD", printBalance: 100 })
+    .returning();
+  goldNoBookingAId = goldNoBookingA.id;
 
   const [itemA] = await testDb
     .insert(cafeMenuItems)
@@ -341,7 +351,17 @@ describe("[MONEY-PATH] Money-path proofs", () => {
     expect(gold.totalRupiah).toBe(18000);
   });
 
-  it("AC-513: a member without an ACTIVE session (discountEligible=false) gets 0% regardless of tier config", async () => {
+  it("AC-513: a member without an ACTIVE booking gets 0% regardless of tier config, even when the caller claims eligibility", async () => {
+    // `goldNoBookingAId` has NO booking row at all — createOrder's live
+    // recheck (not just the `discountEligible` flag) is what must resolve
+    // 0% here; passing `discountEligible: true` proves the recheck is doing
+    // the real work, not just the caller's precondition.
+    const gold = await createOrder({ orgId: orgAId, customerUserId: goldNoBookingAId, guestName: null, lines: [{ menuItemId: itemAId, qty: 1 }], discountEligible: true });
+    expect(gold.discountRupiah).toBe(0);
+    expect(gold.totalRupiah).toBe(20000);
+  });
+
+  it("[fix round 2] a member with an ACTIVE booking but discountEligible=false (the channel/role precondition) also gets 0%", async () => {
     const gold = await createOrder({ orgId: orgAId, customerUserId: goldAId, guestName: null, lines: [{ menuItemId: itemAId, qty: 1 }], discountEligible: false });
     expect(gold.discountRupiah).toBe(0);
     expect(gold.totalRupiah).toBe(20000);

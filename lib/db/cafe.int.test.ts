@@ -229,6 +229,52 @@ import { generateOrderCode } from "@/lib/cafe/status";
 
 const mockedGenerateOrderCode = generateOrderCode as unknown as ReturnType<typeof vi.fn>;
 
+// ---------------------------------------------------------------------------
+// Deterministic ROW-LOCK barrier (fix round 2, item 2): proves createOrder's
+// in-tx active-booking recheck takes a REAL `SELECT ... FOR UPDATE` on the
+// booking row, not a plain unlocked SELECT. A holder transaction grabs the
+// row lock FIRST (via `FOR UPDATE`), starts both racing ops, and polls
+// `pg_locks` (NOT-granted rows) until the expected number of backends are
+// genuinely BLOCKED waiting on a lock before releasing — the exact same
+// technique (a `pg_locks`-based, not `pg_stat_activity`-based, poll — the
+// latter proved unreliably slow to update within a short deadline in this
+// environment) the advisory-lock barrier in lib/db/bookings.int.test.ts
+// uses, generalized from `locktype = 'advisory'` to ANY not-granted lock
+// (a row-level FOR UPDATE wait has no fixed advisory key to target). If
+// createOrder's recheck were still a plain unlocked SELECT, it
+// would never contend for this row's lock at all — the waiter count would
+// never reach `waiters` and this helper would time out, which IS the RED
+// signal for the unfixed code.
+// ---------------------------------------------------------------------------
+async function runWithRowLockBarrier(
+  bookingId: string,
+  waiters: number,
+  // Heterogeneous ops (e.g. createOrder resolving CafeOrder vs. a raw update
+  // resolving something else) — callers narrow each settled result's `.value`
+  // themselves.
+  ops: Array<() => Promise<unknown>>,
+): Promise<PromiseSettledResult<unknown>[]> {
+  let racePromise!: Promise<PromiseSettledResult<unknown>[]>;
+  await testSql.begin(async (holder) => {
+    await holder`select * from bookings where id = ${bookingId} for update`;
+    racePromise = Promise.allSettled(ops.map((op) => op()));
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      const rows = await holder.unsafe<{ n: number }[]>(
+        `select count(*)::int as n from pg_locks where not granted and pid <> pg_backend_pid()`,
+      );
+      if (Number(rows[0]?.n ?? 0) >= waiters) break;
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for ${waiters} row-lock waiter(s) on booking ${bookingId}`);
+      }
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    // Returning here ends the holder's transaction (COMMIT), releasing the
+    // row lock and letting every genuinely-waiting op proceed for real.
+  });
+  return racePromise;
+}
+
 describe("lib/db/cafe", () => {
   // -------------------------------------------------------------------------
   // C1 — listMenu
@@ -384,6 +430,71 @@ describe("lib/db/cafe", () => {
       expect(order.subtotalRupiah).toBe(32000);
       expect(order.discountRupiah).toBe(0);
       expect(order.totalRupiah).toBe(32000);
+    });
+
+    it("[HIGH][MONEY] TOCTOU (row lock): createOrder's active-booking recheck genuinely row-locks the booking — a concurrent cancel cannot land between the recheck and the order write (deterministic lock barrier)", async () => {
+      const [booking] = await testDb
+        .insert(bookings)
+        .values({
+          orgId: orgAId,
+          userId: aUserId,
+          facilityType: "WALKIN_COWORKING",
+          facilityName: "Walk-in Coworking",
+          ratePerHourRupiah: 10000,
+          status: "ACTIVE",
+        })
+        .returning();
+
+      const orderOp = () =>
+        createOrder({
+          orgId: orgAId,
+          customerUserId: aUserId,
+          guestName: null,
+          lines: [{ menuItemId: latteAId, qty: 1 }], // subtotal 32000
+          discountEligible: true,
+        });
+      const cancelOp = () =>
+        testDb.update(bookings).set({ status: "CANCELLED" }).where(eq(bookings.id, booking.id));
+
+      // The barrier itself is the proof: it requires 2 backends to be
+      // GENUINELY blocked, simultaneously, on this exact booking row before
+      // it releases. A plain unlocked SELECT (the pre-fix code) never
+      // contends for the row lock at all — only `cancelOp`'s UPDATE would
+      // ever show up as a waiter, the count would never reach 2, and this
+      // call would throw a timeout (the RED signal for the unfixed code).
+      const [orderResult, cancelResult] = await runWithRowLockBarrier(
+        booking.id,
+        2,
+        [orderOp, cancelOp],
+      );
+
+      expect(orderResult.status).toBe("fulfilled");
+      expect(cancelResult.status).toBe("fulfilled");
+      const order = (orderResult as PromiseFulfilledResult<Awaited<ReturnType<typeof createOrder>>>)
+        .value;
+
+      const [freshBooking] = await testDb.select().from(bookings).where(eq(bookings.id, booking.id));
+      expect(freshBooking.status).toBe("CANCELLED"); // the cancel always eventually applies
+
+      // The row lock makes the two operations strictly serialize on this
+      // booking row — there is NO interleaving where cancel's UPDATE commits
+      // WHILE order's transaction is between its recheck and its insert.
+      // Whichever op actually won the lock queue after the barrier released,
+      // the discount is self-consistent with a fully-serialized ordering:
+      if (order.discountRupiah > 0) {
+        // order's row-locked recheck won the queue first (read ACTIVE,
+        // applied the discount, then committed) — cancel's UPDATE was
+        // BLOCKED (proven by the barrier above) until order's whole
+        // transaction released the lock, so it could only land AFTER.
+        expect(order.discountRupiah).toBe(1600); // 5% of 32000
+        expect(order.totalRupiah).toBe(30400);
+      } else {
+        // cancel's UPDATE won the queue first and committed before order's
+        // row-locked recheck re-read the row — order correctly saw
+        // CANCELLED and applied 0%.
+        expect(order.discountRupiah).toBe(0);
+        expect(order.totalRupiah).toBe(32000);
+      }
     });
 
     it("AC-112 / AC-704: createOrder accepts the same item on two lines (multi-variant drink: hot + cold)", async () => {

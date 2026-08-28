@@ -19,7 +19,7 @@ import {
   type CafeOrderItem,
 } from "@/lib/db/schema";
 import { findProfilesByIds } from "@/lib/db/users";
-import { getActiveBooking } from "@/lib/db/bookings";
+import { getActiveBookingForUpdate } from "@/lib/db/bookings";
 import { getTierDiscounts } from "@/lib/db/tier-config";
 import { computeOrderTotals, priceOrderLines } from "@/lib/cafe/pricing";
 import {
@@ -157,14 +157,16 @@ export async function createOrder(input: {
         // before the write: `discountEligible` from the caller is only a
         // precondition (e.g. "this session's role qualifies") — it is NEVER
         // trusted as the final eligibility decision. The live ACTIVE-booking
-        // check is re-run here (against `tx`, not a value resolved earlier in
-        // the request) so a booking cancelled between the caller's earlier
-        // check and this commit does not still grant the discount ([MONEY]
-        // TOCTOU fix, AC-115). Guests / ineligible / unconfigured → 0%
-        // (fail-safe). [SEC] never trust a client rate.
+        // check is re-run here (against `tx`, ROW-LOCKED via `FOR UPDATE`,
+        // not a value resolved earlier in the request) so a concurrent
+        // cancel cannot land between the recheck and this write — it blocks
+        // on the lock until this transaction commits or rolls back ([MONEY]
+        // TOCTOU fix, AC-115, fix round 2 item 2: a plain re-check alone
+        // still left an unlocked window). Guests / ineligible / unconfigured
+        // → 0% (fail-safe). [SEC] never trust a client rate.
         let discountPct = 0;
         if (discountEligible && customerUserId) {
-          const activeBooking = await getActiveBooking(orgId, customerUserId, tx);
+          const activeBooking = await getActiveBookingForUpdate(orgId, customerUserId, tx);
           if (activeBooking) {
             const [profile] = await findProfilesByIds(orgId, [customerUserId]);
             if (profile) {

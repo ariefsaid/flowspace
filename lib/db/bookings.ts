@@ -423,12 +423,12 @@ export function listBookingsByUser(
  * The member's newest ACTIVE booking (the /keycard source), or null. Cross-org
  * ids never match (org-scoped WHERE). AC-### (I-024).
  *
- * Accepts an optional `dbLike` (the global `db` or a caller's `tx`) so a
- * money-sensitive caller (e.g. `createOrder`'s cafe-discount eligibility,
- * I-044 [MONEY]) can re-run this EXACT query inside its own transaction,
- * immediately before the write, instead of trusting a value resolved earlier
- * outside the transaction (TOCTOU: the booking could be cancelled in
- * between).
+ * Accepts an optional `dbLike` (the global `db` or a caller's `tx`). A plain,
+ * UNLOCKED read — fine for a display-only caller (keycard, dashboard), but
+ * NOT sufficient for a money-path caller gating a discount on ACTIVE status:
+ * a concurrent cancel can still commit between this read and that caller's
+ * later write (TOCTOU). Money-path callers must use
+ * `getActiveBookingForUpdate` instead, inside their own transaction.
  */
 export async function getActiveBooking(
   orgId: string,
@@ -446,6 +446,44 @@ export async function getActiveBooking(
       ),
     )
     .orderBy(desc(bookings.createdAt))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * ROW-LOCKED variant of `getActiveBooking`, for a money-path caller that
+ * gates a write on ACTIVE-booking status (e.g. `createOrder`'s cafe-discount
+ * eligibility, I-044 [MONEY] TOCTOU fix, round 2). MUST be called with the
+ * caller's own `tx` — a `SELECT ... FOR UPDATE` issued outside an explicit
+ * transaction releases the lock immediately after the statement, which
+ * defeats the purpose entirely.
+ *
+ * `FOR UPDATE` locks the returned row for the remainder of the transaction:
+ * a concurrent writer targeting the SAME booking row (e.g. cancelling it)
+ * blocks until this transaction commits or rolls back, and — under READ
+ * COMMITTED — re-reads the row's latest committed version once unblocked.
+ * This makes the eligibility read and the money-path write it gates
+ * genuinely inseparable: no concurrent cancel can land strictly between
+ * them, closing the plain-SELECT TOCTOU window a bare re-check (even one
+ * re-run inside the same transaction) does not close.
+ */
+export async function getActiveBookingForUpdate(
+  orgId: string,
+  userId: string,
+  tx: Pick<typeof db, "select">,
+): Promise<Booking | null> {
+  const [row] = await tx
+    .select()
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.orgId, orgId),
+        eq(bookings.userId, userId),
+        eq(bookings.status, "ACTIVE"),
+      ),
+    )
+    .orderBy(desc(bookings.createdAt))
+    .for("update")
     .limit(1);
   return row ?? null;
 }

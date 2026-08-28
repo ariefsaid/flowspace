@@ -2,7 +2,7 @@ import type { Role } from "@/lib/db/enums";
 
 /** Paths that require no auth at all. `/cafe/guest` is the public guest-order surface. */
 const PUBLIC_EXACT = ["/", "/login", "/signup"];
-const PUBLIC_PREFIXES = ["/cafe/guest"];
+const PUBLIC_PREFIXES = ["/cafe/guest", "/api/print-agent"];
 
 /** Member surfaces: any authenticated user (any role) may access. */
 const MEMBER_PREFIXES = [

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Printer,
   FileText,
@@ -12,6 +13,7 @@ import { StatTile, Badge, Card } from "@/components/ui";
 import { formatRupiah, formatDateID } from "@/lib/format";
 import type { PrintColorMode, PrintJobStatus } from "@/lib/db/enums";
 import type { AdminPrintJobView, PrintReportsSummary } from "./derive";
+import { advancePrintJobAction } from "./actions";
 
 export type { AdminPrintJobView, PrintReportsSummary };
 
@@ -35,10 +37,23 @@ export function statusTone(
   switch (status) {
     case "PENDING":
       return "pending";
+    case "PROCESSING":
     case "READY":
       return "active";
     case "COMPLETED":
       return "completed";
+    case "FAILED":
+      return "pending";
+  }
+}
+
+export function nextStatuses(status: PrintJobStatus): PrintJobStatus[] {
+  switch (status) {
+    case "PENDING": return ["PROCESSING"];
+    case "PROCESSING": return ["READY", "FAILED"];
+    case "READY": return ["COMPLETED"];
+    case "FAILED": return ["PROCESSING", "COMPLETED"];
+    default: return [];
   }
 }
 
@@ -46,10 +61,14 @@ export function statusLabel(status: PrintJobStatus): string {
   switch (status) {
     case "PENDING":
       return "Menunggu";
+    case "PROCESSING":
+      return "Diproses";
     case "READY":
       return "Siap Ambil";
     case "COMPLETED":
       return "Selesai";
+    case "FAILED":
+      return "Gagal";
   }
 }
 
@@ -65,6 +84,20 @@ export function PrintReportsClient({
   summary: PrintReportsSummary;
 }) {
   const isEmpty = jobs.length === 0;
+  const [busyJob, setBusyJob] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function changeStatus(job: AdminPrintJobView, status: PrintJobStatus) {
+    setBusyJob(job.id);
+    setActionError(null);
+    try {
+      await advancePrintJobAction({ jobId: job.id, status, processedBy: "admin" });
+    } catch {
+      setActionError("Status pekerjaan tidak dapat diperbarui. Coba lagi.");
+    } finally {
+      setBusyJob(null);
+    }
+  }
 
   return (
     <div className="container mx-auto px-4 py-6 space-y-6">
@@ -75,6 +108,8 @@ export function PrintReportsClient({
           Riwayat pekerjaan cetak per pengguna beserta rincian biaya
         </p>
       </div>
+
+      {actionError ? <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{actionError}</p> : null}
 
       {/* Summary stat tiles */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -165,7 +200,13 @@ export function PrintReportsClient({
                     Nama File
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
-                    Halaman
+                    Lembar
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
+                    Copy
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
+                    Printer
                   </th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
                     Mode
@@ -184,6 +225,9 @@ export function PrintReportsClient({
                   </th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
                     Status
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
+                    Aksi
                   </th>
                 </tr>
               </thead>
@@ -210,9 +254,15 @@ export function PrintReportsClient({
                         </span>
                       </td>
 
-                      {/* Pages */}
+                      {/* Effective sheets / copies / printer */}
                       <td className="px-4 py-3 text-right text-sm text-gray-700 tabular-nums whitespace-nowrap">
-                        {job.pages} hlm
+                        {job.pages} lembar
+                      </td>
+                      <td className="px-4 py-3 text-right text-sm text-gray-700 tabular-nums whitespace-nowrap">
+                        {job.copies ?? 1}x
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">
+                        {job.printer ?? "—"}
                       </td>
 
                       {/* Color mode */}
@@ -269,8 +319,20 @@ export function PrintReportsClient({
                       {/* Status */}
                       <td className="px-4 py-3 text-center whitespace-nowrap">
                         <Badge tone={statusTone(job.status)}>
+                          <span className="sr-only">{job.status}</span>
                           {statusLabel(job.status)}
                         </Badge>
+                        {job.processedAt ? <span className="sr-only">Diproses {job.processedAt}</span> : null}
+                        {job.completedAt ? <span className="sr-only">Selesai {job.completedAt}</span> : null}
+                      </td>
+                      <td className="px-4 py-3 text-center whitespace-nowrap">
+                        <div className="flex flex-wrap justify-center gap-1">
+                          {nextStatuses(job.status).map((next) => (
+                            <button key={next} type="button" disabled={busyJob === job.id} onClick={() => void changeStatus(job, next)} className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40">
+                              {next === "PROCESSING" ? "Proses" : next === "READY" ? "Siap Ambil" : next === "COMPLETED" ? "Selesai" : "Tandai Gagal"}
+                            </button>
+                          ))}
+                        </div>
                       </td>
                     </tr>
                   );

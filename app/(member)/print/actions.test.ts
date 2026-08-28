@@ -6,6 +6,7 @@
  *          rejected/failed upload cannot leave a charged orphan job. (security review)
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { PDFDocument } from "pdf-lib";
 
 vi.mock("@/lib/auth/session", () => ({
   requireSession: vi.fn().mockResolvedValue({
@@ -38,6 +39,12 @@ function form(fields: Record<string, string>, file?: Blob) {
 
 beforeEach(() => vi.clearAllMocks());
 
+async function validPdf() {
+  const pdf = await PDFDocument.create();
+  pdf.addPage();
+  return new Blob([await pdf.save() as unknown as BlobPart], { type: "application/pdf" });
+}
+
 describe("submitPrintJobAction", () => {
   it("AC-0243: no file → FILE_REQUIRED, never charges", async () => {
     await expect(
@@ -48,8 +55,8 @@ describe("submitPrintJobAction", () => {
   });
 
   it("AC-0244: uploads BEFORE charging, and passes the storagePath to the job", async () => {
-    // Use real PDF magic bytes (%PDF) so validatePrintMagicBytes passes
-    const pdf = new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31])], { type: "application/pdf" });
+    // Use a valid PDF so server-side page extraction can run.
+    const pdf = await validPdf();
     await submitPrintJobAction(
       form({ fileName: "doc.pdf", pages: "1", copies: "1", colorMode: "BW" }, pdf),
     );
@@ -66,8 +73,8 @@ describe("submitPrintJobAction", () => {
 
   it("AC-0244: a failed upload prevents the charge (no orphan job)", async () => {
     vi.mocked(uploadPrintDocument).mockRejectedValueOnce(new Error("STORAGE_DOWN"));
-    // Use real PDF magic bytes so magic validation passes; the upload mock throws STORAGE_DOWN
-    const pdf = new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31])], { type: "application/pdf" });
+    // Use a valid PDF so the upload mock, rather than page extraction, fails.
+    const pdf = await validPdf();
     await expect(
       submitPrintJobAction(form({ fileName: "doc.pdf", pages: "1", copies: "1", colorMode: "BW" }, pdf)),
     ).rejects.toThrow(/STORAGE_DOWN/);

@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { requiredRolesFor, roleHome } from "@/lib/auth/route-policy";
 
 describe("route policy", () => {
+  it(": print-agent jobs is key-only and not a member/session page", () => {
+    expect(requiredRolesFor("/api/print-agent/jobs")).toBe("public");
+  });
   // ---------------------------------------------------------------------------
   // AC-015 — Public paths require no auth
   // ---------------------------------------------------------------------------

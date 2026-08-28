@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createId } from "@paralleldrive/cuid2";
 import type { InferSelectModel } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 
 export const roleEnum = pgEnum("Role", ["MEMBER", "ADMIN", "BARISTA"]);
 export const membershipTierEnum = pgEnum("MembershipTier", [
@@ -208,7 +209,14 @@ export const bookingPaymentStatusEnum = pgEnum("BookingPaymentStatus", [
 ]);
 export const facilityTypeEnum = pgEnum("FacilityType", ["COWORKING_SEAT", "MEETING_ROOM"]);
 export const printColorModeEnum = pgEnum("PrintColorMode", ["BW", "COLOR"]);
-export const printJobStatusEnum = pgEnum("PrintJobStatus", ["PENDING", "READY", "COMPLETED"]);
+export const printJobStatusEnum = pgEnum("PrintJobStatus", [
+  "PENDING",
+  "PROCESSING",
+  "READY",
+  "COMPLETED",
+  "FAILED",
+]);
+export const printerTypeEnum = pgEnum("PrinterType", ["LASER", "INKJET"]);
 export const transactionTypeEnum = pgEnum("TransactionType", [
   "PACKAGE_PURCHASE",
   "CAFE_ORDER",
@@ -295,6 +303,14 @@ export const printJobs = pgTable(
     discountRupiah: integer("discount_rupiah").notNull().default(0),
     totalRupiah: integer("total_rupiah").notNull(),
     storagePath: text("storage_path"),
+    // I-043 print parity (spec 0009).
+    pageRange: text("page_range").default("all"),
+    totalPages: integer("total_pages"),
+    printerId: text("printer_id").references(() => printers.id, { onDelete: "restrict" }),
+    errorMessage: text("error_message"),
+    processedBy: text("processed_by"),
+    processedAt: timestamp("processed_at", { precision: 3, mode: "date" }),
+    completedAt: timestamp("completed_at", { precision: 3, mode: "date" }),
     status: printJobStatusEnum("status").notNull().default("PENDING"),
     createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
@@ -303,6 +319,8 @@ export const printJobs = pgTable(
     index("print_jobs_org_id_idx").on(t.orgId),
     index("print_jobs_org_id_status_idx").on(t.orgId, t.status),
     index("print_jobs_org_id_user_id_idx").on(t.orgId, t.userId),
+    index("print_jobs_org_id_status_created_at_idx").on(t.orgId, t.status, t.createdAt),
+    index("print_jobs_printer_id_idx").on(t.printerId),
   ],
 );
 
@@ -321,6 +339,7 @@ export const transactions = pgTable(
     bookingId: text("booking_id").references(() => bookings.id, { onDelete: "set null" }),
     printJobId: text("print_job_id").references(() => printJobs.id, { onDelete: "set null" }),
     packageId: text("package_id").references(() => timeCreditPackages.id, { onDelete: "set null" }),
+    printTopupPackageId: text("print_topup_package_id").references(() => printTopupPackages.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
   },
   (t) => [
@@ -328,6 +347,7 @@ export const transactions = pgTable(
     index("transactions_org_id_created_at_idx").on(t.orgId, t.createdAt),
     index("transactions_org_id_user_id_idx").on(t.orgId, t.userId),
     index("transactions_org_id_status_idx").on(t.orgId, t.status),
+    index("transactions_org_id_print_topup_package_idx").on(t.orgId, t.printTopupPackageId),
   ],
 );
 
@@ -356,12 +376,104 @@ export const orgPrintPricing = pgTable(
   {
     id: text("id").primaryKey().$defaultFn(() => createId()),
     orgId: text("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-    bwRatePerPageRupiah: integer("bw_rate_per_page_rupiah").notNull(),
-    colorRatePerPageRupiah: integer("color_rate_per_page_rupiah").notNull(),
+    // One row per (org, color_mode, paper_size) matrix cell (I-043, spec 0009).
+    colorMode: printColorModeEnum("color_mode").notNull(),
+    paperSize: text("paper_size").notNull(),
+    pricePerPageRupiah: integer("price_per_page_rupiah").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("org_print_pricing_org_id_idx").on(t.orgId)],
+  (t) => [
+    uniqueIndex("org_print_pricing_matrix_org_mode_paper_idx").on(
+      t.orgId,
+      t.colorMode,
+      t.paperSize,
+    ),
+    index("org_print_pricing_org_lookup_idx").on(t.orgId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Print parity (I-043, spec 0009): printers + agent key config + packages.
+// DDL authority = supabase/migrations/0013_print_parity_core.sql (0014 for
+// print_topup_packages). TS mirror kept in lockstep.
+// ---------------------------------------------------------------------------
+export const printers = pgTable(
+  "printers",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(), // CUPS name — org-scoped unique
+    displayName: text("display_name").notNull(),
+    location: text("location"),
+    printerType: printerTypeEnum("printer_type").notNull().default("LASER"),
+    colorSupport: boolean("color_support").notNull().default(false),
+    paperSizes: text("paper_sizes").array().notNull().default(["A4"]),
+    isActive: boolean("is_active").notNull().default(true),
+    isDefault: boolean("is_default").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    archivedAt: timestamp("archived_at", { precision: 3, mode: "date" }),
+    createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("printers_org_id_name_key").on(t.orgId, t.name),
+    index("printers_org_id_idx").on(t.orgId),
+    uniqueIndex("printers_org_single_default_idx")
+      .on(t.orgId)
+      .where(sql`${t.isDefault} AND ${t.archivedAt} IS NULL`),
+  ],
+);
+
+export const printAgentConfigs = pgTable(
+  "print_agent_configs",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id")
+      .notNull()
+      .unique()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    keySelector: text("key_selector").notNull().unique(), // public, non-secret
+    keyHash: text("key_hash").notNull(), // SHA-256; raw key never persisted
+    isActive: boolean("is_active").notNull().default(true),
+    serverName: text("server_name"),
+    lastSeenAt: timestamp("last_seen_at", { precision: 3, mode: "date" }),
+    createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+  },
+);
+
+export const printAgentRateLimitEvents = pgTable(
+  "print_agent_rate_limit_events",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    configId: text("config_id")
+      .notNull()
+      .references(() => printAgentConfigs.id, { onDelete: "cascade" }),
+    requestedAt: timestamp("requested_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("print_agent_rate_limit_events_config_time_idx").on(t.configId, t.requestedAt),
+    index("print_agent_rate_limit_events_org_id_idx").on(t.orgId),
+  ],
+);
+
+export const printTopupPackages = pgTable(
+  "print_topup_packages",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    pages: integer("pages").notNull(),
+    priceRupiah: integer("price_rupiah").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    archivedAt: timestamp("archived_at", { precision: 3, mode: "date" }),
+    createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [index("print_topup_packages_org_id_idx").on(t.orgId)],
 );
 
 export type TimeCreditPackage = InferSelectModel<typeof timeCreditPackages>;
@@ -371,3 +483,7 @@ export type PrintJob = InferSelectModel<typeof printJobs>;
 export type Transaction = InferSelectModel<typeof transactions>;
 export type MembershipTierConfig = InferSelectModel<typeof membershipTierConfig>;
 export type OrgPrintPricing = InferSelectModel<typeof orgPrintPricing>;
+export type Printer = InferSelectModel<typeof printers>;
+export type PrintAgentConfig = InferSelectModel<typeof printAgentConfigs>;
+export type PrintAgentRateLimitEvent = InferSelectModel<typeof printAgentRateLimitEvents>;
+export type PrintTopupPackage = InferSelectModel<typeof printTopupPackages>;

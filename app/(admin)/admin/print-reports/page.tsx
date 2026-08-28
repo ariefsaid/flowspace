@@ -8,6 +8,7 @@
  */
 import { requireSession } from "@/lib/auth/session";
 import { listPrintJobsForAdmin, getPrintReportSummary } from "@/lib/db/print";
+import { listPrintersForAdmin } from "@/lib/db/printers";
 import { findProfilesByIds } from "@/lib/db/users";
 import { PrintReportsClient } from "./PrintReportsClient";
 import { toView } from "./derive";
@@ -17,9 +18,10 @@ export default async function AdminPrintReportsPage() {
 
   // Summary aggregates come from SQL over ALL jobs (uncapped); the table lists
   // the newest rows up to listPrintJobsForAdmin's cap.
-  const [rows, summary] = await Promise.all([
+  const [rows, summary, printerRows] = await Promise.all([
     listPrintJobsForAdmin(orgId),
     getPrintReportSummary(orgId),
+    listPrintersForAdmin(orgId),
   ]);
 
   // Attach member names in one org-scoped read (cross-org ids never match).
@@ -27,7 +29,8 @@ export default async function AdminPrintReportsPage() {
   const profiles = await findProfilesByIds(orgId, memberIds);
   const nameById = new Map(profiles.map((p) => [p.id, p.name]));
 
-  const jobs = rows.map((r) => toView(r, nameById.get(r.userId) ?? "—"));
+  const printerById = new Map(printerRows.map((printer) => [printer.id, printer]));
+  const jobs = rows.map((r) => toView(r, nameById.get(r.userId) ?? "—", r.printerId ? printerById.get(r.printerId) ?? null : null));
 
   return <PrintReportsClient jobs={jobs} summary={summary} />;
 }

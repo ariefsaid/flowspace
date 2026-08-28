@@ -46,8 +46,14 @@ export type FacilityType = (typeof FACILITY_TYPES)[number];
 export const PRINT_COLOR_MODES = ["BW", "COLOR"] as const;
 export type PrintColorMode = (typeof PRINT_COLOR_MODES)[number];
 
-export const PRINT_JOB_STATUSES = ["PENDING", "READY", "COMPLETED"] as const;
+export const PRINT_PAPER_SIZES = ["A4", "A3", "F4"] as const;
+export type PrintPaperSize = (typeof PRINT_PAPER_SIZES)[number];
+
+export const PRINT_JOB_STATUSES = ["PENDING", "PROCESSING", "READY", "COMPLETED", "FAILED"] as const;
 export type PrintJobStatus = (typeof PRINT_JOB_STATUSES)[number];
+
+export const PRINTER_TYPES = ["LASER", "INKJET"] as const;
+export type PrinterType = (typeof PRINTER_TYPES)[number];
 
 // -- Transactions ledger (I-020/021/022/023 — unified reporting) ------------
 export const TRANSACTION_TYPES = [

@@ -56,12 +56,14 @@ const settingCards: SettingCard[] = [
     title: "Daftar Printer",
     description: "Kelola printer yang tersedia",
     iconColor: "text-blue-600",
+    href: "/admin/settings/printers",
   },
   {
     icon: <Server className="h-8 w-8" />,
     title: "Print Server (Mini PC)",
     description: "Konfigurasi koneksi print server lokal",
     iconColor: "text-slate-600",
+    href: "/admin/settings/print-server",
   },
   {
     icon: <Globe className="h-8 w-8" />,

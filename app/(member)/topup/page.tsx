@@ -7,14 +7,16 @@
  */
 import { requireSession } from "@/lib/auth/session";
 import { listPackages } from "@/lib/db/packages";
+import { listPrintTopupPackages } from "@/lib/db/print-packages";
 import { findById } from "@/lib/db/users";
 import { TopupClient } from "./TopupClient";
-import type { PackageView } from "./TopupClient";
+import type { PackageView, PrintPackageView } from "./TopupClient";
 
 export default async function TopUpPage() {
   const user = await requireSession();
-  const [packages, profile] = await Promise.all([
+  const [packages, printPackages, profile] = await Promise.all([
     listPackages(user.orgId),
+    listPrintTopupPackages(user.orgId),
     findById(user.orgId, user.id),
   ]);
 
@@ -27,9 +29,17 @@ export default async function TopUpPage() {
     popular: p.popular,
   }));
 
+  const printPackageViews: PrintPackageView[] = printPackages.map((pkg) => ({
+    id: pkg.id,
+    pages: pkg.pages,
+    priceRupiah: pkg.priceRupiah,
+    sortOrder: pkg.sortOrder,
+  }));
+
   return (
     <TopupClient
       packages={packageViews}
+      printPackages={printPackageViews}
       timeCredits={profile?.timeCredits ?? 0}
       printBalance={profile?.printBalance ?? 0}
     />

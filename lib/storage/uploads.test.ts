@@ -35,6 +35,11 @@ describe("getSignedDownloadUrl org-scope guard", () => {
 });
 
 describe("buildPrintStoragePath", () => {
+  it("AC-612: preserves the private org/document contract while sanitizing traversal names", () => {
+    const path = buildPrintStoragePath("org-safe", "doc-1", "../nested/evil.pdf");
+    expect(path).toMatch(/^org-safe\/print\/doc-1\//);
+    expect(path).not.toContain("..");
+  });
   it("AC-0241: path starts with orgId (org-scoped)", () => {
     const path = buildPrintStoragePath("org-abc", "job-123", "report.pdf");
     expect(path).toMatch(/^org-abc\//);

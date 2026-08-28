@@ -11,4 +11,10 @@ describe("AdminSettingsPage", () => {
     const link = screen.getByRole("link", { name: /Kategori Membership/i });
     expect(link).toHaveAttribute("href", "/admin/settings/tiers");
   });
+
+  it("'Daftar Printer' card links to /admin/settings/printers", () => {
+    render(<AdminSettingsPage />);
+    const link = screen.getByRole("link", { name: /Daftar Printer/i });
+    expect(link).toHaveAttribute("href", "/admin/settings/printers");
+  });
 });

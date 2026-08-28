@@ -26,6 +26,8 @@ import {
   timeCreditPackages,
   facilities,
   orgPrintPricing,
+  printTopupPackages,
+  printers,
 } from "@/lib/db/schema";
 import {
   MEMBERSHIP_TIERS,
@@ -34,7 +36,7 @@ import {
   type CafeCategory,
   type FacilityType,
 } from "@/lib/db/enums";
-import { PRINT_RATE_BW, PRINT_RATE_COLOR } from "@/lib/print/pricing";
+import { PRINT_PRICE_MATRIX, PRINT_MATRIX_CELLS } from "@/lib/print/pricing";
 import { LOCKED_TIER_DISCOUNTS } from "@/lib/tier-discounts";
 import { updateTierDiscounts } from "@/lib/db/tier-config";
 import { createId } from "@paralleldrive/cuid2";
@@ -197,7 +199,7 @@ async function main() {
 
   const sql = postgres(DATABASE_URL, { prepare: false });
   const db = drizzle(sql, {
-    schema: { organizations, appUsers, cafeMenuItems, timeCreditPackages, facilities },
+    schema: { organizations, appUsers, cafeMenuItems, timeCreditPackages, facilities, printTopupPackages, printers },
   });
 
   // -- Org upsert (by slug) --------------------------------------------------
@@ -369,20 +371,59 @@ async function main() {
   for (const tier of MEMBERSHIP_TIERS) {
     await updateTierDiscounts(org.id, tier, LOCKED_TIER_DISCOUNTS[tier], db);
   }
-  const [existingPrintPricing] = await db
-    .select()
-    .from(orgPrintPricing)
-    .where(eq(orgPrintPricing.orgId, org.id))
-    .limit(1);
-  if (!existingPrintPricing) {
-    await db.insert(orgPrintPricing).values({
-      id: `${org.id}__printpricing`,
+  // -- Print pricing matrix (I-043) — six deterministic cells, idempotent -------
+  for (const cell of PRINT_MATRIX_CELLS) {
+    const id = `${org.id}__print-${cell.colorMode.toLowerCase()}-${cell.paperSize}`;
+    await db
+      .insert(orgPrintPricing)
+      .values({
+        id,
+        orgId: org.id,
+        colorMode: cell.colorMode,
+        paperSize: cell.paperSize,
+        pricePerPageRupiah: PRINT_PRICE_MATRIX[cell.colorMode][cell.paperSize],
+        isActive: true,
+      })
+      .onConflictDoUpdate({
+        target: [orgPrintPricing.orgId, orgPrintPricing.colorMode, orgPrintPricing.paperSize],
+        set: {
+          pricePerPageRupiah: PRINT_PRICE_MATRIX[cell.colorMode][cell.paperSize],
+          isActive: true,
+          updatedAt: new Date(),
+        },
+      });
+  }
+  console.log(`Seeded print pricing matrix (${PRINT_MATRIX_CELLS.length} cells).`);
+
+  // Print balance packages (I-043) — deterministic ids and stored prices.
+  for (const pkg of [
+    { pages: 10, priceRupiah: 10000, sortOrder: 1 },
+    { pages: 50, priceRupiah: 45000, sortOrder: 2 },
+    { pages: 100, priceRupiah: 80000, sortOrder: 3 },
+  ]) {
+    await db.insert(printTopupPackages).values({
+      id: `${org.id}__print-topup-${pkg.pages}`,
       orgId: org.id,
-      bwRatePerPageRupiah: PRINT_RATE_BW,
-      colorRatePerPageRupiah: PRINT_RATE_COLOR,
+      pages: pkg.pages,
+      priceRupiah: pkg.priceRupiah,
+      sortOrder: pkg.sortOrder,
+      isActive: true,
+    }).onConflictDoUpdate({
+      target: printTopupPackages.id,
+      set: { priceRupiah: pkg.priceRupiah, sortOrder: pkg.sortOrder, isActive: true, archivedAt: null, updatedAt: new Date() },
     });
   }
-  console.log(`Seeded pricing config (${MEMBERSHIP_TIERS.length} tiers + print rates).`);
+  console.log("Seeded print topup packages (3 rows).");
+
+  await db.insert(printers).values({
+    id: `${org.id}__print-default`, orgId: org.id, name: "flowspace-default-printer",
+    displayName: "Printer Utama", location: "Ruang Utama", printerType: "LASER",
+    colorSupport: true, paperSizes: ["A4", "A3", "F4"], isActive: true, isDefault: true,
+  }).onConflictDoUpdate({
+    target: printers.id,
+    set: { isActive: true, isDefault: true, archivedAt: null, updatedAt: new Date() },
+  });
+  console.log("Seeded default print printer.");
 
   await sql.end();
 }

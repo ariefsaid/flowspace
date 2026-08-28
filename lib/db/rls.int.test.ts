@@ -10,8 +10,18 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { eq } from "drizzle-orm";
 import * as schema from "@/lib/db/schema";
-import { appUsers, organizations } from "@/lib/db/schema";
+import {
+  appUsers,
+  organizations,
+  printers,
+  orgPrintPricing,
+  printJobs,
+  printAgentConfigs,
+  printAgentRateLimitEvents,
+  printTopupPackages,
+} from "@/lib/db/schema";
 
 const TEST_URL =
   process.env.TEST_DATABASE_URL ??
@@ -45,12 +55,21 @@ beforeAll(async () => {
     name: "Alice",
     role: "MEMBER",
   });
-  await rootDb.insert(appUsers).values({
+  const [userB] = await rootDb.insert(appUsers).values({
     orgId: orgBId,
     email: "b@x.test",
     name: "Bob",
     role: "MEMBER",
-  });
+  }).returning();
+  const [userA] = await rootDb.select().from(appUsers).where(eq(appUsers.email, "a@x.test"));
+  const [printer] = await rootDb.insert(printers).values({ orgId: orgAId, name: "rls-printer", displayName: "RLS Printer", colorSupport: false, paperSizes: ["A4"] }).returning();
+  await rootDb.insert(orgPrintPricing).values({ orgId: orgAId, colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500 });
+  const [config] = await rootDb.insert(printAgentConfigs).values({ orgId: orgAId, keySelector: "rls-selector", keyHash: "rls-hash" }).returning();
+  await rootDb.insert(printAgentRateLimitEvents).values({ orgId: orgAId, configId: config.id });
+  await rootDb.insert(printTopupPackages).values({ id: "rls-package", orgId: orgAId, pages: 10, priceRupiah: 10000 });
+  await rootDb.insert(printJobs).values({ orgId: orgAId, userId: userA.id, fileName: "rls.pdf", pages: 1, copies: 1, totalPages: 1, colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, totalRupiah: 500, printerId: printer.id });
+  // Keep the second user's variable referenced so the fixture remains explicit.
+  expect(userB.orgId).toBe(orgBId);
 }, 30_000);
 
 afterAll(async () => {
@@ -109,6 +128,30 @@ describe("RLS backstop — org isolation on app_users", () => {
     expect(emails).toContain("b@x.test");
   });
 });
+
+describe("RLS backstop — I-043 print tables", () => {
+  it("AC-632: scoped org claims isolate printers, pricing, jobs, agent config, packages, and rate events", async () => {
+    const tables = ["printers", "org_print_pricing", "print_jobs", "print_agent_configs", "print_topup_packages", "print_agent_rate_limit_events"];
+    for (const table of tables) {
+      const rows = await selectScopedOrgIds(table);
+      expect(rows.every((row) => row.org_id === orgAId)).toBe(true);
+      expect(rows.length).toBeGreaterThan(0);
+    }
+    const symmetric = await selectScopedOrgIds("printers", orgBId);
+    expect(symmetric).toHaveLength(0);
+  });
+});
+
+async function selectScopedOrgIds(table: string, orgId = orgAId): Promise<{ org_id: string }[]> {
+  const allowed = new Set(["printers", "org_print_pricing", "print_jobs", "print_agent_configs", "print_topup_packages", "print_agent_rate_limit_events"]);
+  if (!allowed.has(table)) throw new Error("invalid test table");
+  const claims = JSON.stringify({ org_id: orgId }).replace(/'/g, "''");
+  return rootSql.begin(async (tx) => {
+    await tx.unsafe(`SET LOCAL ROLE authenticated`);
+    await tx.unsafe(`SET LOCAL "request.jwt.claims" = '${claims}'`);
+    return tx.unsafe(`SELECT org_id FROM "${table}"`) as Promise<{ org_id: string }[]>;
+  });
+}
 
 describe("RLS backstop — org isolation on organizations (M-2)", () => {
   it("M-2: a scoped authenticated role sees ONLY its own organization row", async () => {

@@ -21,13 +21,14 @@ vi.mock("@/lib/storage/uploads", async (orig) => ({
   // keep the real validate+path builders; spy only the network upload
   ...(await orig<typeof import("@/lib/storage/uploads")>()),
   uploadPrintDocument: vi.fn().mockResolvedValue(undefined),
+  deletePrintDocument: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/db/print", () => ({
   submitPrintJob: vi.fn().mockResolvedValue({ id: "job-1" }),
 }));
 
 import { submitPrintJobAction } from "./actions";
-import { uploadPrintDocument } from "@/lib/storage/uploads";
+import { uploadPrintDocument, deletePrintDocument } from "@/lib/storage/uploads";
 import { submitPrintJob } from "@/lib/db/print";
 
 function form(fields: Record<string, string>, file?: Blob) {
@@ -79,5 +80,26 @@ describe("submitPrintJobAction", () => {
       submitPrintJobAction(form({ fileName: "doc.pdf", pages: "1", copies: "1", colorMode: "BW" }, pdf)),
     ).rejects.toThrow(/STORAGE_DOWN/);
     expect(submitPrintJob).not.toHaveBeenCalled();
+    expect(deletePrintDocument).not.toHaveBeenCalled();
+  });
+
+  it("AC-0244: a failed submit deletes the just-uploaded blob and re-throws the original error", async () => {
+    vi.mocked(submitPrintJob).mockRejectedValueOnce(new Error("SUBMIT_FAILED"));
+    const pdf = await validPdf();
+    await expect(
+      submitPrintJobAction(form({ fileName: "doc.pdf", pages: "1", copies: "1", colorMode: "BW" }, pdf)),
+    ).rejects.toThrow(/SUBMIT_FAILED/);
+    expect(deletePrintDocument).toHaveBeenCalledTimes(1);
+    const uploadedPath = vi.mocked(uploadPrintDocument).mock.calls[0][1];
+    expect(deletePrintDocument).toHaveBeenCalledWith(uploadedPath);
+  });
+
+  it("AC-0244: a failed submit re-throws the original error even if the cleanup delete also fails", async () => {
+    vi.mocked(submitPrintJob).mockRejectedValueOnce(new Error("SUBMIT_FAILED"));
+    vi.mocked(deletePrintDocument).mockRejectedValueOnce(new Error("DELETE_ALSO_FAILED"));
+    const pdf = await validPdf();
+    await expect(
+      submitPrintJobAction(form({ fileName: "doc.pdf", pages: "1", copies: "1", colorMode: "BW" }, pdf)),
+    ).rejects.toThrow(/SUBMIT_FAILED/);
   });
 });

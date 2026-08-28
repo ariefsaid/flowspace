@@ -14,6 +14,7 @@ import {
 } from "@/lib/print/validation";
 import {
   uploadPrintDocument,
+  deletePrintDocument,
   buildPrintStoragePath,
   validatePrintFile,
   validatePrintMagicBytes,
@@ -55,17 +56,28 @@ export async function submitPrintJobAction(input: FormData) {
   await uploadPrintDocument(user.orgId, storagePath, bytes, mimeType);
 
   const printerIdValue = input.get("printerId");
-  return submitPrintJob({
-    orgId: user.orgId,
-    userId: user.id,
-    fileName,
-    pageRange,
-    documentPages,
-    printerId: typeof printerIdValue === "string" && printerIdValue ? printerIdValue : undefined,
-    copies,
-    colorMode,
-    paperSize,
-    duplex,
-    storagePath,
-  });
+  try {
+    return await submitPrintJob({
+      orgId: user.orgId,
+      userId: user.id,
+      fileName,
+      pageRange,
+      documentPages,
+      printerId: typeof printerIdValue === "string" && printerIdValue ? printerIdValue : undefined,
+      copies,
+      colorMode,
+      paperSize,
+      duplex,
+      storagePath,
+    });
+  } catch (error) {
+    // Best-effort cleanup of the just-uploaded blob so a failed submit never
+    // leaves an orphaned Storage object. Never mask the original error.
+    try {
+      await deletePrintDocument(storagePath);
+    } catch {
+      // ignore cleanup failure — the original submit error is what matters
+    }
+    throw error;
+  }
 }

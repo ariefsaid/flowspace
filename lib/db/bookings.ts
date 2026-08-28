@@ -75,7 +75,12 @@ const CHECKOUT_PAYMENT_METHODS: readonly CheckoutPaymentMethod[] = ["cash", "qri
 export type CreateBookingInput = {
   orgId: string;
   userId: string;
-  /** The member's CURRENT tier — resolved server-side by the caller (never client-trusted). */
+  /**
+   * @deprecated [SEC] IGNORED — kept for caller source-compat only. The
+   * discount-eligible tier is resolved INSIDE the transaction from the
+   * user's own `app_users` row (org-scoped), never trusted from the caller,
+   * so a mismatched/crafted value here can never over- or under-charge.
+   */
   tier: MembershipTier;
   facilityType: BookingFacilityType;
   /** If omitted for a scheduled booking, the facility is resolved by
@@ -266,6 +271,11 @@ export async function facilitiesAvailableInWindow(
  * `[start, end)` — either directly, or via a FULL_ROOM booking overlapping
  * the same window (OBS-811, "a full-room booking makes individual seats
  * unavailable for its reserved interval"). AC-804/AC-806.
+ *
+ * [SEC] Resolves the facility row itself FIRST (org-scoped, bookable) — an
+ * unknown or cross-org `facilityId` has no matching booking rows either, so
+ * an overlap-only check would fail OPEN (report it "available"). Resolving
+ * the row first makes an unknown/cross-org id resolve `false` instead.
  */
 export async function getFacilityAvailability(
   orgId: string,
@@ -273,6 +283,12 @@ export async function getFacilityAvailability(
   start: Date,
   end: Date,
 ): Promise<boolean> {
+  const [facility] = await db
+    .select({ id: facilities.id })
+    .from(facilities)
+    .where(and(eq(facilities.id, facilityId), eq(facilities.orgId, orgId), isNull(facilities.archivedAt)))
+    .limit(1);
+  if (!facility) return false;
   return !(await facilityHasActiveOverlap(db, orgId, facilityId, start, end));
 }
 
@@ -424,7 +440,7 @@ export function listBookings(
 // ---------------------------------------------------------------------------
 
 export async function createBooking(input: CreateBookingInput): Promise<Booking> {
-  const { orgId, userId, tier, facilityType, paymentMethod } = input;
+  const { orgId, userId, facilityType, paymentMethod } = input;
   const isFullRoom = facilityType === "FULL_ROOM";
   const walkin = isWalkin(facilityType);
   const scheduled = isFullRoom || isScheduled(facilityType);
@@ -527,10 +543,6 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
   // with the rate actually charged.
   if (facility.type !== facilityType) throw new Error("FACILITY_TYPE_MISMATCH");
 
-  const discounts = await getTierDiscounts(orgId, tier);
-  const discountPct = resolveDiscountPct(facilityType, discounts);
-  const price = computeBookingPrice({ hours: durationHours, ratePerHourRupiah: facility.ratePerHourRupiah, discountPct });
-
   let status: BookingStatus;
   let paymentStatus: BookingPaymentStatus;
   if (paymentMethod === "online" || paymentMethod === "time_credits") {
@@ -554,6 +566,17 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
     await acquireOrgDayLock(tx, orgId, calendarDay);
     await acquireFacilityLock(tx, orgId, facility.id);
 
+    // [SEC] Identity/tier seam: resolve the user row + its CURRENT tier
+    // INSIDE the tx from the DB — never the caller-supplied `tier` — and
+    // require the user actually belongs to `orgId`. A cross-org userId
+    // (or one that doesn't exist) is rejected before any write.
+    const [user] = await tx
+      .select({ membershipTier: appUsers.membershipTier })
+      .from(appUsers)
+      .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))
+      .limit(1);
+    if (!user) throw new Error("USER_NOT_FOUND");
+
     if (isFullRoom) {
       const { dayStart, dayEnd } = dayBounds(calendarDay);
       const dayBlocked = await individualBookingExistsOnDay(tx, orgId, dayStart, dayEnd);
@@ -561,6 +584,10 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
     }
     const occupied = await facilityHasActiveOverlap(tx, orgId, facility.id, startAt, endAt);
     if (occupied) throw new Error("FACILITY_UNAVAILABLE");
+
+    const discounts = await getTierDiscounts(orgId, user.membershipTier);
+    const discountPct = resolveDiscountPct(facilityType, discounts);
+    const price = computeBookingPrice({ hours: durationHours, ratePerHourRupiah: facility.ratePerHourRupiah, discountPct });
 
     const [booking] = await tx
       .insert(bookings)

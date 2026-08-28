@@ -297,6 +297,44 @@ describe("lib/db/bookings", () => {
       expect(booking.amountRupiah).toBe(102000);
     });
 
+    it("[SEC] a caller-supplied tier is IGNORED — the discount always reflects the user's CURRENT DB tier, not the input", async () => {
+      // premiumUserId's real DB tier is PREMIUM (10% coworking discount).
+      // Passing tier:"REGULAR" must NOT downgrade the discount actually
+      // applied — the repository resolves tier from the DB, never trusts
+      // the caller's claim.
+      const underclaimed = await createBooking({
+        orgId: orgAId, userId: premiumUserId, tier: "REGULAR", // caller lies downward
+        facilityType: "COWORKING_SEAT", facilityId: seatAId, facilityName: "Meja A",
+        startAt: new Date("2026-07-04T09:00:00Z"), endAt: new Date("2026-07-04T11:00:00Z"), // 2h × 20000
+        paymentMethod: "online",
+      });
+      expect(underclaimed.discountRupiah).toBe(4000); // still the real PREMIUM 10%, not 0
+
+      // aUserId's real DB tier is REGULAR (no discount config row -> 0%).
+      // Passing tier:"PREMIUM" must NOT grant a discount the user doesn't
+      // actually have.
+      const overclaimed = await createBooking({
+        orgId: orgAId, userId: aUserId, tier: "PREMIUM", // caller lies upward
+        facilityType: "COWORKING_SEAT", facilityId: seatBId, facilityName: "Meja B",
+        startAt: new Date("2026-07-04T09:00:00Z"), endAt: new Date("2026-07-04T11:00:00Z"),
+        paymentMethod: "online",
+      });
+      expect(overclaimed.discountRupiah).toBe(0); // still the real REGULAR 0%, not 10%
+    });
+
+    it("[SEC] rejects a userId that does not belong to orgId, before any write", async () => {
+      const before = await bookingRowCount(orgAId);
+      await expect(
+        createBooking({
+          orgId: orgAId, userId: bUserId, tier: "REGULAR", // bUserId belongs to org B
+          facilityType: "COWORKING_SEAT", facilityId: seatAId, facilityName: "Meja A",
+          startAt: new Date("2026-07-05T09:00:00Z"), endAt: new Date("2026-07-05T10:00:00Z"),
+          paymentMethod: "online",
+        }),
+      ).rejects.toThrow(/USER_NOT_FOUND/);
+      expect(await bookingRowCount(orgAId)).toBe(before);
+    });
+
     it("AC-806: FULL_ROOM is bookable online at its catalog rate on a day with no individual bookings", async () => {
       const startAt = new Date("2026-07-10T14:00:00Z");
       const endAt = new Date("2026-07-10T16:00:00Z");
@@ -1316,6 +1354,21 @@ describe("lib/db/bookings", () => {
 
     it("a different seat with no bookings is available for the same window", async () => {
       expect(await getFacilityAvailability(availOrgId, availSeat2Id, new Date(DAY.getTime() + 8 * HOUR), new Date(DAY.getTime() + 9 * HOUR))).toBe(true);
+    });
+
+    it("[SEC] an unknown or cross-org facilityId resolves NOT-available — never a fail-open true", async () => {
+      // The overlap query has no rows for an id that doesn't exist (or
+      // belongs to another org) — a naive "no conflicting booking" check
+      // would report it as available. The facility row itself must be
+      // resolved (org-scoped) first.
+      expect(
+        await getFacilityAvailability(availOrgId, "00000000-0000-0000-0000-000000000000", new Date(DAY.getTime() + 8 * HOUR), new Date(DAY.getTime() + 9 * HOUR)),
+      ).toBe(false);
+      // orgBFacilityId belongs to org B (seeded at module scope) — asking
+      // under availOrgId (a different org entirely) must also resolve false.
+      expect(
+        await getFacilityAvailability(availOrgId, orgBFacilityId, new Date(DAY.getTime() + 8 * HOUR), new Date(DAY.getTime() + 9 * HOUR)),
+      ).toBe(false);
     });
 
     it("AC-805: an individual booking on a calendar day makes the full-room facility unavailable for that whole day", async () => {

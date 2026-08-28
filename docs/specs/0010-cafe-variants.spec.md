@@ -81,10 +81,14 @@
 - **FR-728** (state-driven) — While an order is visible in the KDS, the barista view shall show its snapshotted options
   and notes, with notes visually highlighted, while retaining Realtime refresh and only NEW → PREPARING → READY →
   COMPLETED forward transitions.
-- **FR-729** (event-driven) — When the FlowSpace seed runs, it shall preserve all 31 current menu items and prices,
-  idempotently write the shared config from OBS-702, and set variants on every seeded COFFEE item except the three
-  bottled coffee slugs (`kopi-hitam-botol`, `cappuccino-botol`, `kopi-susu-aren-botol`) and every seeded NON_COFFEE
-  item except `soda-gembira` and `aqua-330ml`; all other categories remain non-variant.
+- **FR-729** (event-driven) — When the FlowSpace seed runs, it shall preserve all 31 current menu items and prices.
+  Because the FlowSpace menu encodes temperature (and sweetness for teas) as separate same-price items
+  (`es-*`/`*-panas` pairs; `*-manis`/`*-tawar`), the seed shall NOT add a Temperature group; it shall idempotently
+  add only the Sugar group (Normal/Less/No Sugar, each `+0`) to made-to-order COFFEE and NON_COFFEE items,
+  excluding the three bottled coffee slugs (`kopi-hitam-botol`, `cappuccino-botol`, `kopi-susu-aren-botol`),
+  `soda-gembira`, `aqua-330ml`, and the unsweetened teas (`es-teh-tawar`, `teh-tawar-hangat`); all other categories
+  remain non-variant. Priced adjustments (OBS-702's Cold `+Rp3.000` pattern) are exercised by test fixtures, not
+  the seed.
 
 ## Non-functional requirements
 
@@ -106,7 +110,7 @@
 - **AC-703** — Given Cold with `priceAdjustment=3000`, when the picker calculates a unit price, then base price plus Rp3.000 is displayed and submitted only as a selection, not as an authoritative price. *(unit)*
 - **AC-704** — Given the same item with Hot and Cold selections, when both are added, then they remain separate cart lines and quantities merge only for identical selections. *(unit)*
 - **AC-705** — Given a required group omitted or an unknown option supplied, when the server validates a line, then it rejects the line with no order write. *(unit)*
-- **AC-706** — Given 1×Es Kopi Susu at Rp22.000 Cold and 2×Paket A at Rp25.000, when server pricing runs, then subtotal is Rp75.000 (22.000+3.000+50.000), and no client price can change it. *(unit)*
+- **AC-706** — Given a fixture item at Rp22.000 with a Cold `+Rp3.000` option selected and 2× a Rp25.000 no-variant item, when server pricing runs, then subtotal is Rp75.000 (22.000+3.000+50.000), and no client price can change it. *(unit)*
 - **AC-707** — Given a valid variant order, when it is persisted, then each line has a generic option snapshot containing group, option, and adjustment values. *(integration)*
 - **AC-708** — Given a menu item later renamed or repriced, when its prior order is read, then line name and computed unit price remain the original snapshots. *(integration)*
 - **AC-709** — Given a `hasVariants=false` item, when an order line is submitted without options, then it prices at its live base price; supplied options are rejected. *(unit)*
@@ -129,7 +133,7 @@
 - **AC-726** — Given a KDS subscribed to the order's org channel, when an order is inserted or updated, then Realtime causes the rendered KDS data to refresh without cross-org events. *(unit)*
 - **AC-727** — Given an archived/unavailable menu row, when any member, guest, or POS checkout references it, then the server rejects it even if the client still has its id. *(integration)*
 - **AC-728** — Given concurrent order creation with the same generated code, when a collision occurs, then the repository retries within its existing bounded code-generation policy and never writes duplicate org codes. *(integration)*
-- **AC-729** — Given the current 31-item FlowSpace seed, when variant flags are inspected, then all made-to-order coffee/non-coffee items specified by FR-729 have the shared Temperature/Sugar config and excluded bottled, soda, and water items do not. *(integration)*
+- **AC-729** — Given the current 31-item FlowSpace seed, when variant flags are inspected, then exactly the items FR-729 includes carry the Sugar-only config, no seeded item carries a Temperature group, and the excluded bottled, soda, water, and unsweetened-tea items are non-variant. *(integration)*
 
 ## Migration / schema delta
 

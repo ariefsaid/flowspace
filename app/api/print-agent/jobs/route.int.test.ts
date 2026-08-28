@@ -73,4 +73,10 @@ describe("print agent jobs route", () => {
     expect(response.status).toBe(400);
     expect(mocks.advance).not.toHaveBeenCalled();
   });
+
+  it("AC-620: POST status=PENDING is rejected as 400 (PENDING is server-assigned at job creation, never agent-settable)", async () => {
+    const response = await POST(new Request("http://localhost/api/print-agent/jobs", { method: "POST", headers: { "x-api-key": "key", "content-type": "application/json" }, body: JSON.stringify({ jobId: "job-1", status: "PENDING" }) }));
+    expect(response.status).toBe(400);
+    expect(mocks.advance).not.toHaveBeenCalled();
+  });
 });

@@ -5,7 +5,11 @@ import { advancePrintJob } from "@/lib/db/print";
 import { getSignedDownloadUrl } from "@/lib/storage/uploads";
 import type { PrintJobStatus } from "@/lib/db/enums";
 
-const STATUSES: readonly PrintJobStatus[] = ["PENDING", "PROCESSING", "READY", "COMPLETED", "FAILED"];
+// PENDING is assigned server-side at job creation only; the agent may never
+// set a job back to PENDING. Restricting the POST body to this set turns an
+// invalid transition into a clean 400 here instead of falling through to
+// advancePrintJob and 500ing on INVALID_PRINT_TRANSITION.
+const AGENT_SETTABLE_STATUSES: readonly PrintJobStatus[] = ["PROCESSING", "READY", "COMPLETED", "FAILED"];
 const json = (body: object, status = 200, headers?: HeadersInit) => Response.json(body, { status, headers });
 
 function parseLimit(request: Request): number {
@@ -61,7 +65,7 @@ export async function POST(request: Request) {
     const body: unknown = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("BAD_BODY");
     const input = body as Record<string, unknown>;
-    if (typeof input.jobId !== "string" || !input.jobId.trim() || typeof input.status !== "string" || !STATUSES.includes(input.status as PrintJobStatus)) throw new Error("BAD_BODY");
+    if (typeof input.jobId !== "string" || !input.jobId.trim() || typeof input.status !== "string" || !AGENT_SETTABLE_STATUSES.includes(input.status as PrintJobStatus)) throw new Error("BAD_BODY");
     if (input.processedBy !== undefined && typeof input.processedBy !== "string") throw new Error("BAD_BODY");
     if (input.errorMessage !== undefined && typeof input.errorMessage !== "string") throw new Error("BAD_BODY");
     await advancePrintJob(config.orgId, input.jobId, input.status as PrintJobStatus, {

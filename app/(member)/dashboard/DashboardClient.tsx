@@ -12,6 +12,7 @@ import {
   MapPin,
   Utensils,
 } from "lucide-react";
+import type { BookingStatus } from "@/lib/db/enums";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { ActiveSessionCard } from "@/components/member/ActiveSessionCard";
@@ -43,7 +44,11 @@ export type BookingPreviewView = {
   facility: string;
   /** ISO start timestamp. */
   start: string;
-  status: "ACTIVE" | "COMPLETED" | "CANCELLED";
+  // I-040: widened to the full BookingStatus domain (PENDING/CONFIRMED join
+  // the scheduled lifecycle, OBS-813). Rendering for the two new states is
+  // wired in the booking-parity UI phase; statusBadgeTone/statusLabel below
+  // fall back to a safe default until then.
+  status: BookingStatus;
 };
 
 export type WifiView = {

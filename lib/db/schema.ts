@@ -200,14 +200,34 @@ export const bookingFacilityTypeEnum = pgEnum("BookingFacilityType", [
   "MEETING_ROOM",
   "FULL_ROOM",
 ]);
-export const bookingStatusEnum = pgEnum("BookingStatus", ["ACTIVE", "COMPLETED", "CANCELLED"]);
+// I-040: PENDING/CONFIRMED appended in migration 0014's ADD VALUE order
+// (the 5-state scheduled lifecycle, OBS-813).
+export const bookingStatusEnum = pgEnum("BookingStatus", [
+  "ACTIVE",
+  "COMPLETED",
+  "CANCELLED",
+  "PENDING",
+  "CONFIRMED",
+]);
 export const bookingPaymentStatusEnum = pgEnum("BookingPaymentStatus", [
   "WAITING_CASHIER",
   "PAID_CASHIER",
   "PAID_ONLINE",
   "PENDING",
 ]);
-export const facilityTypeEnum = pgEnum("FacilityType", ["COWORKING_SEAT", "MEETING_ROOM"]);
+// I-040: FULL_ROOM (capacity-20 event room, OBS-803) joins the catalog type.
+export const facilityTypeEnum = pgEnum("FacilityType", [
+  "COWORKING_SEAT",
+  "MEETING_ROOM",
+  "FULL_ROOM",
+]);
+// I-040 (migration 0015): scheduling mode + booking-create payment method.
+export const bookingModeEnum = pgEnum("BookingMode", ["SCHEDULED", "WALKIN"]);
+export const bookingPaymentMethodEnum = pgEnum("BookingPaymentMethod", [
+  "time_credits",
+  "online",
+  "cashier",
+]);
 export const printColorModeEnum = pgEnum("PrintColorMode", ["BW", "COLOR"]);
 export const printJobStatusEnum = pgEnum("PrintJobStatus", [
   "PENDING",
@@ -253,6 +273,11 @@ export const facilities = pgTable(
     type: facilityTypeEnum("type").notNull(),
     ratePerHourRupiah: integer("rate_per_hour_rupiah").notNull(),
     available: boolean("available").notNull().default(true),
+    // I-040 (migration 0015): catalog display/parity columns (OBS-800..804).
+    capacity: integer("capacity"),
+    seatLabel: text("seat_label"),
+    zone: text("zone"),
+    maxHoursCap: integer("max_hours_cap"),
     archivedAt: timestamp("archived_at", { precision: 3, mode: "date" }),
     createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
@@ -276,6 +301,12 @@ export const bookings = pgTable(
     amountRupiah: integer("amount_rupiah").notNull().default(0),
     status: bookingStatusEnum("status").notNull().default("ACTIVE"),
     paymentStatus: bookingPaymentStatusEnum("payment_status").notNull().default("WAITING_CASHIER"),
+    // I-040 (migration 0015): scheduling mode + server-computed price snapshot
+    // + payment method (OBS-813..816).
+    bookingMode: bookingModeEnum("booking_mode").notNull().default("WALKIN"),
+    baseAmountRupiah: integer("base_amount_rupiah").notNull().default(0),
+    discountRupiah: integer("discount_rupiah").notNull().default(0),
+    paymentMethod: bookingPaymentMethodEnum("payment_method"),
     createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
   },
@@ -284,6 +315,14 @@ export const bookings = pgTable(
     index("bookings_org_id_status_idx").on(t.orgId, t.status),
     index("bookings_org_id_user_id_idx").on(t.orgId, t.userId),
     index("bookings_org_id_created_at_idx").on(t.orgId, t.createdAt),
+    // I-040: availability read model — (org, facility, status, window) lookups.
+    index("bookings_org_facility_status_time_idx").on(
+      t.orgId,
+      t.facilityId,
+      t.status,
+      t.startAt,
+      t.endAt,
+    ),
   ],
 );
 
@@ -340,6 +379,10 @@ export const transactions = pgTable(
     printJobId: text("print_job_id").references(() => printJobs.id, { onDelete: "set null" }),
     packageId: text("package_id").references(() => timeCreditPackages.id, { onDelete: "set null" }),
     printTopupPackageId: text("print_topup_package_id").references(() => printTopupPackages.id, { onDelete: "set null" }),
+    // I-040 (migration 0015): settlement detail for booking-create/checkout
+    // (cash|qris|time_credits|online); free text + CHECK, not an enum, per
+    // the migration's transactions_payment_method_known constraint.
+    paymentMethod: text("payment_method"),
     createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
   },
   (t) => [
@@ -476,6 +519,36 @@ export const printTopupPackages = pgTable(
   (t) => [index("print_topup_packages_org_id_idx").on(t.orgId)],
 );
 
+// ---------------------------------------------------------------------------
+// Time-credit lots (I-040, spec 0007): expiring FIFO credit balance. DDL
+// authority = supabase/migrations/0015_booking_parity_core.sql. TS mirror.
+// `app_users.timeCredits` becomes a derived cache of the non-expired
+// `remainingHours` sum — never the spend authority (OBS-824/825, FR-853).
+// ---------------------------------------------------------------------------
+export const timeCreditLots = pgTable(
+  "time_credit_lots",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => appUsers.id, { onDelete: "cascade" }),
+    packageId: text("package_id").references(() => timeCreditPackages.id, { onDelete: "set null" }),
+    purchaseTransactionId: text("purchase_transaction_id").references(() => transactions.id, {
+      onDelete: "set null",
+    }),
+    totalHours: integer("total_hours").notNull(),
+    remainingHours: integer("remaining_hours").notNull(),
+    purchasedAt: timestamp("purchased_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { precision: 3, mode: "date" }).notNull(),
+    createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("time_credit_lots_org_id_idx").on(t.orgId),
+    index("time_credit_lots_org_user_expires_idx").on(t.orgId, t.userId, t.expiresAt),
+    index("time_credit_lots_user_expires_idx").on(t.userId, t.expiresAt),
+  ],
+);
+
 export type TimeCreditPackage = InferSelectModel<typeof timeCreditPackages>;
 export type Facility = InferSelectModel<typeof facilities>;
 export type Booking = InferSelectModel<typeof bookings>;
@@ -487,3 +560,4 @@ export type Printer = InferSelectModel<typeof printers>;
 export type PrintAgentConfig = InferSelectModel<typeof printAgentConfigs>;
 export type PrintAgentRateLimitEvent = InferSelectModel<typeof printAgentRateLimitEvents>;
 export type PrintTopupPackage = InferSelectModel<typeof printTopupPackages>;
+export type TimeCreditLot = InferSelectModel<typeof timeCreditLots>;

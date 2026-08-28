@@ -12,6 +12,7 @@ import {
 import { Badge } from "@/components/ui";
 import { formatRupiah, formatDateRangeID, formatDateID } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import type { BookingStatus } from "@/lib/db/enums";
 
 // ---------------------------------------------------------------------------
 // View shapes — mapped server-side from DB rows, passed as props.
@@ -27,7 +28,10 @@ export type BookingHistoryView = {
   end: string | null;
   /** Billable hours, or null for an in-progress walk-in. */
   durationHours: number | null;
-  status: "ACTIVE" | "COMPLETED" | "CANCELLED";
+  // I-040: widened to the full BookingStatus domain (PENDING/CONFIRMED join
+  // the scheduled lifecycle, OBS-813). BookingStatusBadge's `default:` case
+  // already renders any unrecognized value with a neutral badge.
+  status: BookingStatus;
   payment:
     | "WAITING_CASHIER"
     | "PAID_CASHIER"

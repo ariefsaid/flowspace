@@ -94,6 +94,12 @@ function statusBadgeTone(status: BookingStatus) {
       return "completed" as const;
     case "CANCELLED":
       return "cancelled" as const;
+    // I-040: PENDING/CONFIRMED are the new scheduled-lifecycle states
+    // (OBS-813); full admin surfacing lands with the booking-parity UI phase.
+    case "PENDING":
+      return "pending" as const;
+    case "CONFIRMED":
+      return "info" as const;
   }
 }
 
@@ -105,6 +111,10 @@ function statusLabel(status: BookingStatus): string {
       return "Selesai";
     case "CANCELLED":
       return "Dibatalkan";
+    case "PENDING":
+      return "Menunggu";
+    case "CONFIRMED":
+      return "Dikonfirmasi";
   }
 }
 

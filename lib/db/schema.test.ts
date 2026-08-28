@@ -11,6 +11,14 @@ import {
   printers,
   printAgentConfigs,
   printTopupPackages,
+  bookings,
+  bookingStatusEnum,
+  bookingModeEnum,
+  bookingPaymentMethodEnum,
+  facilities,
+  facilityTypeEnum,
+  transactions,
+  timeCreditLots,
 } from "@/lib/db/schema";
 
 describe("schema", () => {
@@ -98,5 +106,63 @@ describe("schema", () => {
     const pkgCols = Object.keys(getTableColumns(printTopupPackages));
     for (const c of ["orgId", "pages", "priceRupiah", "sortOrder"])
       expect(pkgCols).toContain(c);
+  });
+
+  // -- I-040 booking parity (spec 0007) --------------------------------------
+  it(": bookings carries the I-040 mode/payment/discount columns; BookingStatus gains PENDING/CONFIRMED", () => {
+    const cols = Object.keys(getTableColumns(bookings));
+    for (const c of ["bookingMode", "baseAmountRupiah", "discountRupiah", "paymentMethod"])
+      expect(cols).toContain(c);
+    expect(bookingStatusEnum.enumValues).toEqual([
+      "ACTIVE",
+      "COMPLETED",
+      "CANCELLED",
+      "PENDING",
+      "CONFIRMED",
+    ]);
+    expect(bookingModeEnum.enumValues).toEqual(["SCHEDULED", "WALKIN"]);
+    expect(bookingPaymentMethodEnum.enumValues).toEqual([
+      "time_credits",
+      "online",
+      "cashier",
+    ]);
+  });
+
+  it("[SEC] bookings.status TS default mirrors the migration's DB default (PENDING, not ACTIVE)", () => {
+    // Migration 0015 sets `ALTER TABLE bookings ALTER COLUMN status SET
+    // DEFAULT 'PENDING'` — the Drizzle query-layer mirror must match, or a
+    // raw insert relying on the column default (bypassing the repository's
+    // explicit `status` value) would silently land as ACTIVE.
+    const cols = getTableColumns(bookings);
+    expect(cols.status.default).toBe("PENDING");
+  });
+
+  it(": facilities carries capacity/seatLabel/zone/maxHoursCap; FacilityType gains FULL_ROOM", () => {
+    const cols = Object.keys(getTableColumns(facilities));
+    for (const c of ["capacity", "seatLabel", "zone", "maxHoursCap"]) expect(cols).toContain(c);
+    expect(facilityTypeEnum.enumValues).toEqual(["COWORKING_SEAT", "MEETING_ROOM", "FULL_ROOM"]);
+  });
+
+  it(": transactions carries paymentMethod", () => {
+    const cols = Object.keys(getTableColumns(transactions));
+    expect(cols).toContain("paymentMethod");
+  });
+
+  it(": time_credit_lots mirrors the DDL shape", () => {
+    const cols = Object.keys(getTableColumns(timeCreditLots));
+    for (const c of [
+      "id",
+      "orgId",
+      "userId",
+      "packageId",
+      "purchaseTransactionId",
+      "totalHours",
+      "remainingHours",
+      "purchasedAt",
+      "expiresAt",
+      "createdAt",
+      "updatedAt",
+    ])
+      expect(cols).toContain(c);
   });
 });

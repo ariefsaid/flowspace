@@ -2,13 +2,17 @@
  * Integration tests for lib/db/packages.ts
  * Runs against the Supabase local Postgres via TEST_DATABASE_URL.
  *
- * I-020 — Time-credit packages + top-up:
+ * I-020/I-040 — Time-credit packages + top-up:
  *   listPackages: org-scoped, excludes archived + cross-org, sorted by sortOrder
- *   purchasePackage: increments timeCredits by pkg.hours, writes a COMPLETED
- *     PACKAGE_PURCHASE txn (amount = pkg.priceRupiah, packageId set); cross-org
- *     packageId throws UNKNOWN_PACKAGE with no balance change and no txn.
- *   topUpPrint: increments printBalance by pages, writes a COMPLETED
- *     PRINT_TOPUP txn (amount = pages × 500); invalid pages throws, no write.
+ *   purchasePackage (AC-826): creates a time_credit_lots row expiring exactly
+ *     90 days from purchase, writes a COMPLETED PACKAGE_PURCHASE txn (amount =
+ *     pkg.priceRupiah, packageId set), and recomputes the derived
+ *     app_users.timeCredits cache (= SUM of non-expired remainingHours);
+ *     cross-org packageId throws UNKNOWN_PACKAGE with no lot/balance change
+ *     and no txn.
+ *   topUpPrint: increments printBalance by pages (still an aggregate — no
+ *     lot concept for print), writes a COMPLETED PRINT_TOPUP txn (amount =
+ *     pages × 500); invalid pages throws, no write.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -18,6 +22,7 @@ import * as schema from "@/lib/db/schema";
 import {
   appUsers,
   organizations,
+  timeCreditLots,
   timeCreditPackages,
   transactions,
 } from "@/lib/db/schema";
@@ -46,7 +51,7 @@ let pkgArchivedAId: string;
 let pkgOrgBId: string;
 
 beforeAll(async () => {
-  await testSql`TRUNCATE TABLE "transactions","time_credit_packages","app_users","organizations" RESTART IDENTITY CASCADE`;
+  await testSql`TRUNCATE TABLE "time_credit_lots","transactions","time_credit_packages","app_users","organizations" RESTART IDENTITY CASCADE`;
 
   const [orgA] = await testDb
     .insert(organizations)
@@ -59,6 +64,9 @@ beforeAll(async () => {
   orgAId = orgA.id;
   orgBId = orgB.id;
 
+  // I-040: timeCredits is now a derived cache of non-expired lot
+  // remainingHours (no lots exist yet), so it starts at 0 — not a stale
+  // aggregate the purchase would "increment".
   const [userA] = await testDb
     .insert(appUsers)
     .values({
@@ -66,7 +74,7 @@ beforeAll(async () => {
       email: "pkg-a@x.test",
       name: "Alice",
       role: "MEMBER",
-      timeCredits: 10,
+      timeCredits: 0,
       printBalance: 5,
     })
     .returning();
@@ -133,7 +141,7 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  await testSql`TRUNCATE TABLE "transactions","time_credit_packages","app_users","organizations" RESTART IDENTITY CASCADE`;
+  await testSql`TRUNCATE TABLE "time_credit_lots","transactions","time_credit_packages","app_users","organizations" RESTART IDENTITY CASCADE`;
   await testSql.end();
 }, 30_000);
 
@@ -167,28 +175,41 @@ describe("lib/db/packages", () => {
   // P2 — purchasePackage
   // -------------------------------------------------------------------------
   describe("purchasePackage — money path [SEC]", () => {
-    it("increments timeCredits by pkg.hours, writes a COMPLETED PACKAGE_PURCHASE txn with DB price + packageId, returns new balance", async () => {
+    it("AC-826: creates a lot expiring exactly 90 days from purchase, recomputes the derived balance by pkg.hours, writes a COMPLETED PACKAGE_PURCHASE txn", async () => {
       const before = await testDb
         .select({ timeCredits: appUsers.timeCredits })
         .from(appUsers)
         .where(eq(appUsers.id, aUserId))
         .limit(1);
-      expect(before[0]?.timeCredits).toBe(10);
+      expect(before[0]?.timeCredits).toBe(0);
 
+      const beforePurchase = Date.now();
       const result = await purchasePackage({
         orgId: orgAId,
         userId: aUserId,
         packageId: pkg5hAId,
       });
-      // 10 + 5 = 15
-      expect(result.timeCredits).toBe(15);
+      expect(result.timeCredits).toBe(5);
 
       const after = await testDb
         .select({ timeCredits: appUsers.timeCredits })
         .from(appUsers)
         .where(eq(appUsers.id, aUserId))
         .limit(1);
-      expect(after[0]?.timeCredits).toBe(15);
+      expect(after[0]?.timeCredits).toBe(5);
+
+      const [lot] = await testDb
+        .select()
+        .from(timeCreditLots)
+        .where(and(eq(timeCreditLots.orgId, orgAId), eq(timeCreditLots.userId, aUserId)))
+        .limit(1);
+      expect(lot).toBeDefined();
+      expect(lot.totalHours).toBe(5);
+      expect(lot.remainingHours).toBe(5);
+      expect(lot.packageId).toBe(pkg5hAId);
+      const expectedExpiry = lot.purchasedAt.getTime() + 90 * 24 * 60 * 60 * 1000;
+      expect(lot.expiresAt.getTime()).toBe(expectedExpiry);
+      expect(lot.purchasedAt.getTime()).toBeGreaterThanOrEqual(beforePurchase);
 
       const [txn] = await testDb
         .select()
@@ -207,11 +228,14 @@ describe("lib/db/packages", () => {
       expect(txn.amountRupiah).toBe(75000);
       expect(txn.packageId).toBe(pkg5hAId);
       expect(txn.description).toBe("Purchased 5 Hours package");
+      expect(lot.purchaseTransactionId).toBe(txn.id);
     });
 
-    it("a cross-org packageId throws UNKNOWN_PACKAGE — no balance change, no txn written", async () => {
+    it("a cross-org packageId throws UNKNOWN_PACKAGE — no balance/lot change, no txn written", async () => {
       const [{ count: txnBefore }] = await testSql`
         select count(*)::int as count from transactions where org_id = ${orgAId} and user_id = ${aUserId}`;
+      const [{ count: lotsBefore }] = await testSql`
+        select count(*)::int as count from time_credit_lots where org_id = ${orgAId} and user_id = ${aUserId}`;
       const before = await testDb
         .select({ timeCredits: appUsers.timeCredits })
         .from(appUsers)
@@ -236,6 +260,10 @@ describe("lib/db/packages", () => {
       const [{ count: txnAfter }] = await testSql`
         select count(*)::int as count from transactions where org_id = ${orgAId} and user_id = ${aUserId}`;
       expect(txnAfter).toBe(txnBefore);
+
+      const [{ count: lotsAfter }] = await testSql`
+        select count(*)::int as count from time_credit_lots where org_id = ${orgAId} and user_id = ${aUserId}`;
+      expect(lotsAfter).toBe(lotsBefore);
     });
 
     it("an archived package id throws UNKNOWN_PACKAGE — no write", async () => {

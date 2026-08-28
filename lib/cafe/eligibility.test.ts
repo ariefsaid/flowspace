@@ -34,7 +34,7 @@ describe("resolveDiscountEligibility (ADR-0011 / OBS-070: active-session member 
     ).toBe(false);
   });
 
-  it("AC-115: returns true for a member with an active booking (org-scoped)", async () => {
+  it("AC-115/AC-832: returns true for a member with an active booking (org-scoped)", async () => {
     getActiveBooking.mockResolvedValue(activeBooking);
     expect(
       await resolveDiscountEligibility({ id: "u1", role: "MEMBER", orgId: "o1" }),

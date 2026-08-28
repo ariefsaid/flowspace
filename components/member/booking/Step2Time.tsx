@@ -10,7 +10,8 @@ export interface TimeSelection {
   durationHours: number;
 }
 
-const DURATION_OPTIONS = [1, 2, 3, 4, 6, 8];
+// OBS-807: scheduled duration is selectable from 1 through 8 hours.
+const DURATION_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
 
 const WALKIN_DURATION_OPTIONS = [1, 2, 3, 4];
 
@@ -49,11 +50,12 @@ export function Step2Time({ bookingType, value, onChange }: Step2TimeProps) {
 
       {/* Date picker */}
       <div className="space-y-2">
-        <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
+        <label htmlFor="booking-date" className="text-sm font-medium text-gray-700 flex items-center gap-2">
           <Calendar className="h-4 w-4 text-teal-600" />
           {walkin ? "Tanggal" : "Tanggal Reservasi"}
         </label>
         <input
+          id="booking-date"
           type="date"
           min={todayStr()}
           value={value.date}
@@ -65,11 +67,12 @@ export function Step2Time({ bookingType, value, onChange }: Step2TimeProps) {
       {/* Start time — only for scheduled bookings */}
       {!walkin && (
         <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
+          <label htmlFor="booking-start-time" className="text-sm font-medium text-gray-700 flex items-center gap-2">
             <Clock className="h-4 w-4 text-teal-600" />
             Jam Mulai
           </label>
           <input
+            id="booking-start-time"
             type="time"
             value={value.startTime}
             onChange={(e) => set({ startTime: e.target.value })}

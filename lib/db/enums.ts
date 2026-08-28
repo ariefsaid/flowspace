@@ -28,7 +28,17 @@ export const BOOKING_FACILITY_TYPES = [
 ] as const;
 export type BookingFacilityType = (typeof BOOKING_FACILITY_TYPES)[number];
 
-export const BOOKING_STATUSES = ["ACTIVE", "COMPLETED", "CANCELLED"] as const;
+// I-040: BookingStatus gains PENDING/CONFIRMED (the 5-state scheduled
+// lifecycle, OBS-813); appended in the same order they were added to the
+// Postgres enum (migration 0014) so this mirror matches pg_enum's on-disk
+// ordering.
+export const BOOKING_STATUSES = [
+  "ACTIVE",
+  "COMPLETED",
+  "CANCELLED",
+  "PENDING",
+  "CONFIRMED",
+] as const;
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 
 export const BOOKING_PAYMENT_STATUSES = [
@@ -39,7 +49,19 @@ export const BOOKING_PAYMENT_STATUSES = [
 ] as const;
 export type BookingPaymentStatus = (typeof BOOKING_PAYMENT_STATUSES)[number];
 
-export const FACILITY_TYPES = ["COWORKING_SEAT", "MEETING_ROOM"] as const;
+// I-040: SCHEDULED (seat/room, server-rated) vs WALKIN (pay-at-cashier,
+// open-ended until checkout) — the booking's scheduling mode, orthogonal to
+// facilityType/status.
+export const BOOKING_MODES = ["SCHEDULED", "WALKIN"] as const;
+export type BookingMode = (typeof BOOKING_MODES)[number];
+
+// I-040: how a booking (create) or checkout is paid. Lowercase to match the
+// original recon values and the transactions.payment_method free-text column.
+export const BOOKING_PAYMENT_METHODS = ["time_credits", "online", "cashier"] as const;
+export type BookingPaymentMethod = (typeof BOOKING_PAYMENT_METHODS)[number];
+
+// I-040: FULL_ROOM (capacity-20 event room, OBS-803) joins the catalog type.
+export const FACILITY_TYPES = ["COWORKING_SEAT", "MEETING_ROOM", "FULL_ROOM"] as const;
 export type FacilityType = (typeof FACILITY_TYPES)[number];
 
 // -- Print domain (I-023) ---------------------------------------------------

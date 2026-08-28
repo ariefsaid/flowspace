@@ -1,7 +1,16 @@
 import type { Role } from "@/lib/db/enums";
 
-/** Paths that require no auth at all. `/cafe/guest` is the public guest-order surface. */
-const PUBLIC_EXACT = ["/", "/login", "/signup"];
+/**
+ * Paths that require no auth at all. `/cafe/guest` is the public guest-order
+ * surface. The booking-status-sweep route (I-040, FR-852) does its own
+ * robust Bearer-secret job auth inside the route handler — releasing it
+ * from the edge session gate lets a headless scheduler invoke it with no
+ * browser session. [SEC] Named EXACTLY (not a `/api/cron/*` wildcard
+ * prefix) — a future `/api/cron/<something-else>` route must not silently
+ * inherit "no session gate" just by living under the same path prefix; it
+ * would need its own deliberate addition here.
+ */
+const PUBLIC_EXACT = ["/", "/login", "/signup", "/api/cron/booking-status-sweep"];
 const PUBLIC_PREFIXES = ["/cafe/guest", "/api/print-agent"];
 
 /** Member surfaces: any authenticated user (any role) may access. */

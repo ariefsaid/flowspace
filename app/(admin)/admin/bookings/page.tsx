@@ -2,9 +2,10 @@
  * Admin booking-management page — server component.
  * Reads all org-scoped bookings (newest first) and attaches each booking's
  * member profile (name/email/tier) in a single org-scoped read. The client
- * leaf's "Selesaikan Sesi & Bayar" CTA on an active walk-in calls
- * completeBookingAction (ADMIN-only SoD) which computes the charge and flips
- * the booking to COMPLETED.
+ * leaf's "Selesaikan Sesi & Bayar" CTA opens a cash/QRIS/credits chooser that
+ * calls checkoutBookingAction (ADMIN-only SoD) with the admin's chosen
+ * payment method, which recomputes billing and flips the booking to
+ * COMPLETED (OBS-820).
  *
  * ponytail: an active walk-in has endAt null — we fall back to startAt so the
  * table's time formatter renders without crashing (active rows render as cards,
@@ -32,6 +33,7 @@ export default async function AdminBookingsPage() {
       id: b.id,
       facility: b.facilityName,
       facilityType: b.facilityType,
+      bookingMode: b.bookingMode,
       start: b.startAt.toISOString(),
       end: (b.endAt ?? b.startAt).toISOString(),
       durationHours: b.durationHours ?? 0,

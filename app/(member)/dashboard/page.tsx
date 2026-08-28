@@ -36,16 +36,19 @@ export default async function DashboardPage() {
     listBookingsByUser(user.orgId, user.id, 5),
   ]);
 
-  // The "Walk-in Aktif" banner only applies to an open walk-in session
-  // (scheduled ACTIVE bookings have fixed end/amount). For walk-in, endAt is
-  // null while ACTIVE; the running cost is derived client-side from startAt.
+  // I-040: the session panel covers BOTH lifecycles — an open walk-in
+  // (endAt null, running cost derived client-side from startAt) AND a
+  // scheduled ACTIVE booking (fixed end — countdown/extension/overtime).
   let activeSession: ActiveSessionView | null = null;
-  if (activeBooking && isWalkin(activeBooking.facilityType)) {
+  if (activeBooking) {
     activeSession = {
-      table: activeBooking.facilityName,
-      tarifPerHour: activeBooking.ratePerHourRupiah,
-      maxHours: WALKIN_MAX_HOURS,
-      startedAt: activeBooking.startAt.toISOString(),
+      bookingId: activeBooking.id,
+      facilityName: activeBooking.facilityName,
+      bookingMode: activeBooking.bookingMode,
+      startAt: activeBooking.startAt.toISOString(),
+      endAt: activeBooking.endAt ? activeBooking.endAt.toISOString() : null,
+      ratePerHourRupiah: activeBooking.ratePerHourRupiah,
+      maxHours: isWalkin(activeBooking.facilityType) ? WALKIN_MAX_HOURS : 0,
     };
   }
 

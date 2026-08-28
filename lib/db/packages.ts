@@ -18,10 +18,14 @@ import { and, eq, isNull, asc, sql } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import {
   timeCreditPackages,
+  timeCreditLots,
   appUsers,
   type TimeCreditPackage,
 } from "@/lib/db/schema";
 import { recordTransaction } from "@/lib/db/transactions";
+import { recomputeCreditCache } from "@/lib/db/time-credit-lots";
+
+const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 
 // ponytail: flat print top-up rate. The live BW A4 calculator showed Rp500/page
 // (verticals-rules.md); tiered print *top-up* pricing was never recon-captured,
@@ -59,10 +63,15 @@ export function listPackages(orgId: string): Promise<TimeCreditPackage[]> {
  *
  * `packageId` is client-supplied: it is loaded within the caller's orgId, and
  * a cross-org / unknown / archived id throws UNKNOWN_PACKAGE before any write.
- * `amountRupiah` is the package's DB priceRupiah (never a client value). The
- * credit increment + ledger write are atomic in one db.transaction.
+ * `amountRupiah` is the package's DB priceRupiah (never a client value).
  *
- * Returns the updated timeCredits balance.
+ * I-040: the purchase creates a `time_credit_lots` row expiring exactly 90
+ * days from now (OBS-824) instead of incrementing an aggregate; the ledger
+ * write, the lot insert, and the derived-cache recompute
+ * (`app_users.timeCredits` = SUM of non-expired `remainingHours`, FR-853)
+ * are all atomic in one db.transaction.
+ *
+ * Returns the recomputed derived timeCredits balance.
  */
 export async function purchasePackage(input: {
   orgId: string;
@@ -87,19 +96,15 @@ export async function purchasePackage(input: {
 
     if (!pkg) throw new Error("UNKNOWN_PACKAGE");
 
-    // Atomic increment scoped to (id, orgId). 0 rows → user not in this org.
-    const [updated] = await tx
-      .update(appUsers)
-      .set({
-        timeCredits: sql`${appUsers.timeCredits} + ${pkg.hours}`,
-        updatedAt: new Date(),
-      })
+    // Cross-org guard [SEC]: the user must resolve within this org before any write.
+    const [user] = await tx
+      .select({ id: appUsers.id })
+      .from(appUsers)
       .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))
-      .returning({ timeCredits: appUsers.timeCredits });
+      .limit(1);
+    if (!user) throw new Error("USER_NOT_FOUND");
 
-    if (!updated) throw new Error("USER_NOT_FOUND");
-
-    await recordTransaction(
+    const txn = await recordTransaction(
       {
         orgId,
         userId,
@@ -111,7 +116,20 @@ export async function purchasePackage(input: {
       tx,
     );
 
-    return { timeCredits: updated.timeCredits };
+    const purchasedAt = new Date();
+    await tx.insert(timeCreditLots).values({
+      orgId,
+      userId,
+      packageId: pkg.id,
+      purchaseTransactionId: txn.id,
+      totalHours: pkg.hours,
+      remainingHours: pkg.hours,
+      purchasedAt,
+      expiresAt: new Date(purchasedAt.getTime() + NINETY_DAYS_MS),
+    });
+
+    const timeCredits = await recomputeCreditCache({ orgId, userId, tx });
+    return { timeCredits };
   });
 }
 

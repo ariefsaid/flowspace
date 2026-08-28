@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Clock,
   Printer,
@@ -11,31 +13,27 @@ import {
   TrendingUp,
   MapPin,
   Utensils,
+  AlertCircle,
 } from "lucide-react";
+import type { BookingStatus } from "@/lib/db/enums";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { ActiveSessionCard } from "@/components/member/ActiveSessionCard";
+import { SessionPanel, type SessionView } from "@/components/member/SessionPanel";
 import { QrAccessCard } from "@/components/member/QrAccessCard";
 import { WifiCard } from "@/components/member/WifiCard";
 import { formatDateID } from "@/lib/format";
 import { brand } from "@/brand.config";
+import { extendBookingAction } from "./actions";
 import type { MembershipTier } from "@/lib/db/enums";
 
 // ---------------------------------------------------------------------------
 // View shapes — structurally compatible with the shared leaf components'
-// prop types (ActiveSessionCard, WifiCard); declared locally, no shared mock module.
+// prop types (SessionPanel, WifiCard); declared locally, no shared mock module.
 // ---------------------------------------------------------------------------
 
-export type ActiveSessionView = {
-  /** Facility label, e.g. "Meja F". */
-  table: string;
-  /** Hourly rate in Rupiah (server-stored on the booking row). */
-  tarifPerHour: number;
-  /** Max billable hours (walk-in cap = 4). */
-  maxHours: number;
-  /** ISO timestamp when the walk-in session started. */
-  startedAt: string;
-};
+/** The member's active-session view — covers BOTH walk-in and scheduled
+ *  ACTIVE bookings (I-040, widened from the walk-in-only ActiveSessionView). */
+export type ActiveSessionView = SessionView;
 
 export type BookingPreviewView = {
   id: string;
@@ -43,7 +41,11 @@ export type BookingPreviewView = {
   facility: string;
   /** ISO start timestamp. */
   start: string;
-  status: "ACTIVE" | "COMPLETED" | "CANCELLED";
+  // I-040: widened to the full BookingStatus domain (PENDING/CONFIRMED join
+  // the scheduled lifecycle, OBS-813). Rendering for the two new states is
+  // wired in the booking-parity UI phase; statusBadgeTone/statusLabel below
+  // fall back to a safe default until then.
+  status: BookingStatus;
 };
 
 export type WifiView = {
@@ -72,10 +74,12 @@ export interface DashboardClientProps {
 
 function statusBadgeTone(
   status: BookingPreviewView["status"],
-): "completed" | "neutral" | "cancelled" {
+): "completed" | "neutral" | "cancelled" | "pending" | "active" {
   if (status === "ACTIVE") return "completed";
   if (status === "COMPLETED") return "neutral";
-  return "cancelled";
+  if (status === "PENDING") return "pending";
+  if (status === "CONFIRMED") return "active";
+  return "cancelled"; // CANCELLED
 }
 
 // Riwayat preview shows the raw (English) status label, matching the original.
@@ -146,6 +150,20 @@ export function DashboardClient({
   wifi,
 }: DashboardClientProps) {
   const MENU_ITEMS = buildMenuItems({ printBalance });
+  const router = useRouter();
+  const [extendError, setExtendError] = useState<string | null>(null);
+
+  async function handleExtend(bookingId: string, extraHours: number) {
+    setExtendError(null);
+    try {
+      await extendBookingAction(bookingId, extraHours);
+      router.refresh();
+    } catch (err) {
+      setExtendError(
+        err instanceof Error ? err.message : "Gagal memperpanjang sesi.",
+      );
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -161,10 +179,24 @@ export function DashboardClient({
         </p>
       </div>
 
+      {/* Extension failure (money-path defect surface) */}
+      {extendError && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+          <span>{extendError}</span>
+        </div>
+      )}
+
       {/* ── Active Session hero + QR / Akses Cepat / WiFi ────── */}
       <div className="overflow-hidden rounded-xl border-2 border-teal-500 bg-white shadow-md">
         {hasSession && activeSession && (
-          <ActiveSessionCard session={activeSession} />
+          <SessionPanel
+            session={activeSession}
+            onExtend={(extraHours) => handleExtend(activeSession.bookingId, extraHours)}
+          />
         )}
 
         <div className="grid grid-cols-1 gap-6 p-6 lg:grid-cols-2">
@@ -284,7 +316,9 @@ export function DashboardClient({
         <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="min-w-0">
             <p className="text-sm text-gray-500">Status Sesi</p>
-            <p className="mt-1 text-sm font-bold text-green-600">
+            <p
+              className={`mt-1 text-sm font-bold ${hasSession ? "text-green-600" : "text-gray-500"}`}
+            >
               {hasSession ? "AKTIF" : "Tidak Ada"}
             </p>
             <p className="text-xs text-gray-500">
@@ -313,6 +347,11 @@ export function DashboardClient({
         </div>
 
         <div className="space-y-3">
+          {recentBookings.length === 0 && (
+            <p className="py-4 text-center text-sm text-gray-500">
+              Belum ada riwayat booking.
+            </p>
+          )}
           {recentBookings.map((booking) => (
             <div
               key={booking.id}

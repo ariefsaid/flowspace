@@ -1,0 +1,101 @@
+/**
+ * Authenticated booking-status-sweep entry point (I-040 Phase 10, FR-852).
+ *
+ * ORIG's sweep endpoint accepted unauthenticated requests (OBS-840 — a
+ * defect, not behavior to copy). This route requires a job/scheduler Bearer
+ * credential (`BOOKING_SWEEP_SECRET`) BEFORE any read/write and returns 401
+ * for a public/wrong-credential request (AC-837). It has no browser session
+ * of its own (a scheduled job has no cookies) — the Bearer secret IS the
+ * "authenticated scheduled-job credential" FR-852 requires; it is deliberately
+ * NOT layered with a Supabase session check (that would make a headless
+ * cron invocation impossible).
+ *
+ * Deviation from the plan's task-32 sketch (noted, not a locked decision):
+ * the plan's pseudocode additionally required `getSessionUser()` to be
+ * non-null. A cron/job invocation carries no browser session cookies, so
+ * requiring one would make the route uninvokable by a real scheduler. This
+ * route instead resolves its single org scope server-side by slug — the
+ * same `resolveGuestOrgId` pattern `app/cafe/actions.ts` already uses for
+ * its other no-session, server-only path — never from a client-trusted id
+ * (FR-852 "resolve one org scope"). `middleware.ts`/`route-policy.ts`
+ * release `/api/cron/*` from the edge session gate (this route is its own
+ * authority), matching the existing `/api/print-agent` pattern.
+ *
+ * [SEC] The org slug is read ONLY from env (`BOOKING_SWEEP_ORG_SLUG`,
+ * falling back to `SEED_ORG_SLUG`/the default seed org) — never from the
+ * request. A `?org=` query param used to be honored here, which meant any
+ * holder of the bearer secret (a real, org-agnostic job credential) could
+ * sweep an ARBITRARY org's rows just by changing the query string —
+ * cross-tenant reach the Bearer-secret auth was never meant to grant.
+ */
+import { timingSafeEqual } from "node:crypto";
+import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db/drizzle";
+import { organizations } from "@/lib/db/schema";
+import { runStatusSweep } from "@/lib/db/bookings";
+
+/** [SEC] A secret this short, or a known committed placeholder, is treated
+ *  as "not really configured" — fail closed rather than accept it verbatim
+ *  (guards a deploy that copied `.env.example` without generating a real
+ *  value). 20 chars comfortably exceeds any of the documented placeholders. */
+const MIN_SECRET_LENGTH = 20;
+const KNOWN_PLACEHOLDER_SECRETS = new Set([
+  "replace_with_a_random_secret",
+  "changeme",
+  "secret",
+  "password",
+]);
+
+function isWeakSweepSecret(secret: string): boolean {
+  return secret.length < MIN_SECRET_LENGTH || KNOWN_PLACEHOLDER_SECRETS.has(secret.toLowerCase());
+}
+
+/** [SEC] Constant-time comparison — a naive `!==` string compare leaks the
+ *  secret's length AND, on some engines, an early-exit timing signal on the
+ *  first mismatched byte. `timingSafeEqual` requires equal-length buffers
+ *  (throws otherwise) — the length check below keeps that fail-closed
+ *  rather than throwing. */
+function secretsMatch(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
+async function resolveOrgIdBySlug(slug: string): Promise<string | null> {
+  const [org] = await db
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.slug, slug))
+    .limit(1);
+  return org?.id ?? null;
+}
+
+async function handle(request: Request): Promise<Response> {
+  const secret = process.env.BOOKING_SWEEP_SECRET;
+  const auth = request.headers.get("authorization");
+  const presented = auth?.startsWith("Bearer ") ? auth.slice("Bearer ".length) : null;
+  if (!secret || isWeakSweepSecret(secret) || !presented || !secretsMatch(presented, secret)) {
+    return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 }); // AC-837 — before any read/write
+  }
+
+  // [SEC] The swept org is ALWAYS resolved server-side from env — never
+  // from the request. A `?org=` query param was previously honored, which
+  // meant any holder of the bearer secret could target an arbitrary org's
+  // rows by simply changing the query string (cross-tenant sweep/DoS).
+  const slug = process.env.BOOKING_SWEEP_ORG_SLUG ?? process.env.SEED_ORG_SLUG ?? "flowspace";
+  const orgId = await resolveOrgIdBySlug(slug);
+  if (!orgId) return NextResponse.json({ error: "ORG_NOT_FOUND" }, { status: 404 });
+
+  const result = await runStatusSweep(orgId, new Date());
+  return NextResponse.json(result);
+}
+
+export async function GET(request: Request) {
+  return handle(request);
+}
+
+export async function POST(request: Request) {
+  return handle(request);
+}

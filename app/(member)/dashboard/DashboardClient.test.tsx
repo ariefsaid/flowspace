@@ -22,13 +22,20 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
 
+vi.mock("./actions", () => ({
+  extendBookingAction: vi.fn().mockResolvedValue({}),
+}));
+
 const wifi: WifiView = { ssid: "FlowSpace-Guest", voucher: "6070-2020-85" };
 
 const activeSession: ActiveSessionView = {
-  table: "Meja F",
-  tarifPerHour: 15000,
+  bookingId: "bk_active",
+  facilityName: "Meja F",
+  bookingMode: "WALKIN",
+  startAt: new Date(Date.now() - 65 * 60_000).toISOString(),
+  endAt: null,
+  ratePerHourRupiah: 15000,
   maxHours: 4,
-  startedAt: "2026-06-21T16:43:00+07:00",
 };
 
 const recentBookings: BookingPreviewView[] = [
@@ -105,6 +112,72 @@ describe("DashboardClient", () => {
     expect(screen.getAllByText("AKTIF").length).toBeGreaterThan(0);
     // No-session copy must not leak in.
     expect(screen.queryByText("Tidak Ada")).toBeNull();
+  });
+
+  it("design-review: PENDING/CONFIRMED bookings get their own badge tone, not the CANCELLED red catch-all", () => {
+    render(
+      <DashboardClient
+        firstName="Budi"
+        hasSession={false}
+        timeCredits={139}
+        printBalance={68}
+        tier="PREMIUM"
+        qrToken="server-signed-token"
+        activeSession={null}
+        recentBookings={[
+          { id: "bk_p", facility: "Meja P", start: "2026-06-21T16:43:00+07:00", status: "PENDING" },
+          { id: "bk_c", facility: "Meja C", start: "2026-06-20T16:43:00+07:00", status: "CONFIRMED" },
+          { id: "bk_x", facility: "Meja X", start: "2026-06-19T16:43:00+07:00", status: "CANCELLED" },
+        ]}
+        wifi={wifi}
+      />,
+    );
+
+    const pendingBadge = screen.getByText("PENDING");
+    expect(pendingBadge).toHaveClass("bg-amber-100", "text-amber-700");
+    expect(pendingBadge).not.toHaveClass("bg-red-100", "text-red-700");
+
+    const confirmedBadge = screen.getByText("CONFIRMED");
+    expect(confirmedBadge).toHaveClass("bg-teal-100", "text-teal-700");
+    expect(confirmedBadge).not.toHaveClass("bg-red-100", "text-red-700");
+
+    const cancelledBadge = screen.getByText("CANCELLED");
+    expect(cancelledBadge).toHaveClass("bg-red-100", "text-red-700");
+  });
+
+  it("design-review: 'Status Sesi' no-session copy uses a neutral tone, not green (positive)", () => {
+    render(
+      <DashboardClient
+        firstName="Budi"
+        hasSession={false}
+        timeCredits={139}
+        printBalance={68}
+        tier="PREMIUM"
+        qrToken="server-signed-token"
+        activeSession={null}
+        recentBookings={[]}
+        wifi={wifi}
+      />,
+    );
+    const noSession = screen.getByText("Tidak Ada");
+    expect(noSession).not.toHaveClass("text-green-600");
+  });
+
+  it("design-review: recent bookings empty state renders a message instead of nothing", () => {
+    render(
+      <DashboardClient
+        firstName="Budi"
+        hasSession={false}
+        timeCredits={139}
+        printBalance={68}
+        tier="PREMIUM"
+        qrToken="server-signed-token"
+        activeSession={null}
+        recentBookings={[]}
+        wifi={wifi}
+      />,
+    );
+    expect(screen.getByText(/Belum ada riwayat/i)).toBeInTheDocument();
   });
 
   it("no-mock-import gate: dashboard surface files do not import lib/mock", async () => {

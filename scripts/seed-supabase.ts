@@ -18,7 +18,7 @@
 import { createClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import {
   organizations,
   appUsers,
@@ -28,17 +28,18 @@ import {
   orgPrintPricing,
   printTopupPackages,
   printers,
+  timeCreditLots,
 } from "@/lib/db/schema";
 import {
   MEMBERSHIP_TIERS,
   type Role,
   type MembershipTier,
   type CafeCategory,
-  type FacilityType,
 } from "@/lib/db/enums";
 import { PRINT_PRICE_MATRIX, PRINT_MATRIX_CELLS } from "@/lib/print/pricing";
 import { LOCKED_TIER_DISCOUNTS } from "@/lib/tier-discounts";
 import { updateTierDiscounts } from "@/lib/db/tier-config";
+import { FACILITY_CATALOG, PACKAGE_CATALOG } from "@/lib/booking/catalog";
 import { createId } from "@paralleldrive/cuid2";
 
 // ---------------------------------------------------------------------------
@@ -170,24 +171,13 @@ const CAFE_MENU: Array<{
 ];
 
 // ---------------------------------------------------------------------------
-// Time-credit packages (I-020) + facilities (I-021) — from recon, masked values.
+// Time-credit packages (I-020, OBS-826) + facilities (I-021/I-040, OBS-800..803)
+// — the canonical 23-facility / 4-package catalog, lib/booking/catalog.ts is
+// the single source of truth (also consumed by the booking-seed migration
+// and lib/db/facilities-seed.int.test.ts).
 // ---------------------------------------------------------------------------
-const PACKAGES = [
-  { slug: "5h", name: "5 Hours", hours: 5, price: 75000, perHour: 15000, popular: false, sort: 1 },
-  { slug: "10h", name: "10 Hours", hours: 10, price: 140000, perHour: 14000, popular: true, sort: 2 },
-  { slug: "20h", name: "20 Hours", hours: 20, price: 260000, perHour: 13000, popular: false, sort: 3 },
-  { slug: "50h", name: "50 Hours", hours: 50, price: 600000, perHour: 12000, popular: false, sort: 4 },
-];
-
-const FACILITIES: Array<{ slug: string; name: string; type: FacilityType; rate: number }> = [
-  ...["A", "B", "C", "D", "E", "F", "G", "H", "I"].map((l) => ({
-    slug: `meja-${l.toLowerCase()}`,
-    name: `Meja ${l}`,
-    type: "COWORKING_SEAT" as FacilityType,
-    rate: 20000,
-  })),
-  { slug: "meeting-room-a", name: "Meeting Room A", type: "MEETING_ROOM", rate: 120000 },
-];
+const PACKAGES = PACKAGE_CATALOG;
+const FACILITIES = FACILITY_CATALOG;
 
 // ---------------------------------------------------------------------------
 // Main
@@ -319,7 +309,7 @@ async function main() {
   }
   console.log(`Seeded ${CAFE_MENU.length} cafe menu items into "${org.slug}".`);
 
-  // -- Time-credit packages (I-020) — idempotent ----------------------------
+  // -- Time-credit packages (I-020, OBS-826) — idempotent -------------------
   for (const p of PACKAGES) {
     const id = `${org.id}__pkg-${p.slug}`;
     const [existingPkg] = await db
@@ -333,16 +323,16 @@ async function main() {
         orgId: org.id,
         name: p.name,
         hours: p.hours,
-        priceRupiah: p.price,
-        pricePerHourRupiah: p.perHour,
+        priceRupiah: p.priceRupiah,
+        pricePerHourRupiah: p.pricePerHourRupiah,
         popular: p.popular,
-        sortOrder: p.sort,
+        sortOrder: p.sortOrder,
       });
     }
   }
   console.log(`Seeded ${PACKAGES.length} time-credit packages.`);
 
-  // -- Facilities (I-021) — idempotent --------------------------------------
+  // -- Facilities (I-021/I-040, OBS-800..803) — idempotent -------------------
   for (const f of FACILITIES) {
     const id = `${org.id}__fac-${f.slug}`;
     const [existingFac] = await db
@@ -356,11 +346,52 @@ async function main() {
         orgId: org.id,
         name: f.name,
         type: f.type,
-        ratePerHourRupiah: f.rate,
+        ratePerHourRupiah: f.ratePerHourRupiah,
+        capacity: f.capacity,
+        seatLabel: f.seatLabel,
+        zone: f.zone,
+        maxHoursCap: f.maxHoursCap,
       });
     }
   }
   console.log(`Seeded ${FACILITIES.length} facilities.`);
+
+  // -- Transitional time-credit lots (I-040, spec 0007 migration-delta 4) ---
+  // A member seeded with a legacy `app_users.time_credits` aggregate but no
+  // `time_credit_lots` rows gets exactly one transitional lot so the FIFO
+  // spend path (Phase 3) has something real to debit against. Idempotent:
+  // skipped if the user already has any lot. Deterministic id.
+  for (const u of SEED_USERS) {
+    if (u.credits <= 0) continue;
+    const [appUser] = await db
+      .select({ id: appUsers.id })
+      .from(appUsers)
+      .where(eq(appUsers.email, u.email))
+      .limit(1);
+    if (!appUser) continue;
+
+    const [existingLot] = await db
+      .select({ id: timeCreditLots.id })
+      .from(timeCreditLots)
+      .where(and(eq(timeCreditLots.userId, appUser.id), isNull(timeCreditLots.packageId)))
+      .limit(1);
+    if (existingLot) continue;
+
+    const id = `${appUser.id}__transitional-lot`;
+    const now = new Date();
+    await db.insert(timeCreditLots).values({
+      id,
+      orgId: org.id,
+      userId: appUser.id,
+      packageId: null,
+      purchaseTransactionId: null,
+      totalHours: u.credits,
+      remainingHours: u.credits,
+      purchasedAt: now,
+      expiresAt: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000),
+    });
+    console.log(`  Seeded transitional lot for ${u.email} (${u.credits}h, expires +90d)`);
+  }
 
   // -- Pricing config (I-041, spec 0008) — 4-dim locked map, idempotent upsert ----
   // Surprising but intentional: re-running the seed RESETS every org's tier

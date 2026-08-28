@@ -23,6 +23,9 @@ export type RecordTxnInput = {
   printJobId?: string | null;
   packageId?: string | null;
   printTopupPackageId?: string | null;
+  /** Settlement detail for a booking-create/checkout ledger row
+   *  (`cash|qris|time_credits|online`); null while unsettled (I-040). */
+  paymentMethod?: string | null;
 };
 
 /**
@@ -48,6 +51,7 @@ export async function recordTransaction(
       printJobId: input.printJobId ?? null,
       packageId: input.packageId ?? null,
       printTopupPackageId: input.printTopupPackageId ?? null,
+      paymentMethod: input.paymentMethod ?? null,
     })
     .returning();
   return row;
@@ -111,7 +115,7 @@ export async function sumRevenueSince(orgId: string, since: Date): Promise<numbe
 export async function updateBookingTransaction(
   orgId: string,
   bookingId: string,
-  patch: { status?: TransactionStatus; amountRupiah?: number },
+  patch: { status?: TransactionStatus; amountRupiah?: number; paymentMethod?: string | null },
   txdb: Pick<typeof db, "update"> = db,
 ): Promise<void> {
   await txdb
@@ -124,4 +128,87 @@ export async function updateBookingTransaction(
         eq(transactions.type, "BOOKING"),
       ),
     );
+}
+
+/**
+ * The exact hours still owed for a booking's PENDING BOOKING ledger row(s)
+ * (i.e. extension charges not yet settled) [SEC][MONEY]. `amountRupiah +
+ * discountRupiah` reconstructs each row's PRE-discount rupiah exactly
+ * (`computeBookingPrice`'s `baseAmountRupiah = hours * ratePerHourRupiah`,
+ * an exact integer product — the discount is applied AFTER, so adding it
+ * back recovers baseAmountRupiah losslessly regardless of the discount
+ * pct used at extend time). Dividing by the booking's fixed
+ * `ratePerHourRupiah` then recovers the exact integer hours — no rounding
+ * heuristic, no new schema column needed. Returns 0 when nothing is pending
+ * (a scheduled booking's base charge is ALWAYS already settled by the time
+ * it reaches ACTIVE — see checkoutBooking's prepaid-double-debit fix).
+ */
+export async function pendingBookingHours(
+  orgId: string,
+  bookingId: string,
+  ratePerHourRupiah: number,
+  txdb: Pick<typeof db, "select"> = db,
+): Promise<number> {
+  if (ratePerHourRupiah <= 0) return 0;
+  const rows = await txdb
+    .select({ amountRupiah: transactions.amountRupiah, discountRupiah: transactions.discountRupiah })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.orgId, orgId),
+        eq(transactions.bookingId, bookingId),
+        eq(transactions.type, "BOOKING"),
+        eq(transactions.status, "PENDING"),
+      ),
+    );
+  if (rows.length === 0) return 0;
+  const totalBaseRupiah = rows.reduce((sum, r) => sum + r.amountRupiah + r.discountRupiah, 0);
+  return Math.round(totalBaseRupiah / ratePerHourRupiah);
+}
+
+/**
+ * Checkout settlement [SEC][MONEY]: flips every still-PENDING BOOKING ledger
+ * row for a booking to COMPLETED, BY TRANSACTION ID — one row at a time,
+ * preserving EACH row's own `amountRupiah` (the base row and any pending
+ * extension row settle INDEPENDENTLY). Fixes a revenue double-count: the
+ * prior single bulk UPDATE (`updateBookingTransaction`, still used by
+ * approvePayment where at most one row can ever exist) overwrote EVERY
+ * BOOKING-type row for the booking with the SAME recomputed total
+ * (`amountRupiah`), so a base row (already paid) plus a pending extension
+ * row both ended up holding the checkout's total — the ledger summed to
+ * ~2x the real amount.
+ *
+ * `walkinAmountRupiah` is the one legitimate exception: a walk-in's single
+ * BOOKING row is recorded at amount 0 at create time (its price is only
+ * known at checkout, from elapsed time) — that row's amount IS meant to be
+ * set here, to the freshly-computed total.
+ */
+export async function settleCheckoutTransactions(
+  orgId: string,
+  bookingId: string,
+  opts: { paymentMethod: string; walkinAmountRupiah?: number },
+  txdb: Pick<typeof db, "select" | "update"> = db,
+): Promise<void> {
+  const pending = await txdb
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.orgId, orgId),
+        eq(transactions.bookingId, bookingId),
+        eq(transactions.type, "BOOKING"),
+        eq(transactions.status, "PENDING"),
+      ),
+    );
+
+  for (const row of pending) {
+    await txdb
+      .update(transactions)
+      .set({
+        status: "COMPLETED",
+        paymentMethod: opts.paymentMethod,
+        ...(opts.walkinAmountRupiah != null ? { amountRupiah: opts.walkinAmountRupiah } : {}),
+      })
+      .where(and(eq(transactions.id, row.id), eq(transactions.orgId, orgId)));
+  }
 }

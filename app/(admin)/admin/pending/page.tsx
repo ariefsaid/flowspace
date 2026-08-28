@@ -31,6 +31,7 @@ export default async function AdminPendingPage() {
     return {
       id: b.id,
       facility: b.facilityName,
+      bookingMode: b.bookingMode,
       start: b.startAt.toISOString(),
       end: (b.endAt ?? b.startAt).toISOString(),
       durationHours: b.durationHours ?? 0,

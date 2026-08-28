@@ -12,17 +12,22 @@ import {
   CheckCircle2,
   Play,
   Sofa,
+  Banknote,
+  QrCode,
+  CreditCard,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { completeBookingAction } from "@/app/(admin)/admin/bookings/actions";
+import { checkoutBookingAction } from "@/app/(admin)/admin/bookings/actions";
 import type {
   BookingStatus,
   BookingPaymentStatus,
   BookingFacilityType,
+  BookingMode,
   MembershipTier,
 } from "@/lib/db/enums";
+import type { CheckoutPaymentMethod } from "@/lib/db/bookings";
 
 // ---------------------------------------------------------------------------
 // View shape — DB Booking mapped for this component
@@ -38,6 +43,7 @@ export interface AdminBookingView {
   id: string;
   facility: string;
   facilityType: BookingFacilityType;
+  bookingMode: BookingMode;
   start: string; // ISO
   end: string; // ISO (active walk-ins fall back to start)
   durationHours: number;
@@ -94,6 +100,10 @@ function statusBadgeTone(status: BookingStatus) {
       return "completed" as const;
     case "CANCELLED":
       return "cancelled" as const;
+    case "PENDING":
+      return "pending" as const;
+    case "CONFIRMED":
+      return "info" as const;
   }
 }
 
@@ -105,6 +115,10 @@ function statusLabel(status: BookingStatus): string {
       return "Selesai";
     case "CANCELLED":
       return "Dibatalkan";
+    case "PENDING":
+      return "Menunggu";
+    case "CONFIRMED":
+      return "Dikonfirmasi";
   }
 }
 
@@ -148,17 +162,84 @@ const FILTER_OPTIONS: { value: FilterOption; label: string }[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Active booking card (walk-in style, green border)
+// Checkout payment chooser (cash/QRIS/credits — OBS-820, replaces the
+// transitional cash-only completeBookingAction shim)
+// ---------------------------------------------------------------------------
+
+const CHECKOUT_OPTIONS: { value: CheckoutPaymentMethod; label: string; icon: React.ReactNode }[] = [
+  { value: "cash", label: "Cash", icon: <Banknote className="h-3.5 w-3.5" /> },
+  { value: "qris", label: "QRIS", icon: <QrCode className="h-3.5 w-3.5" /> },
+  { value: "time_credits", label: "Time Credits", icon: <CreditCard className="h-3.5 w-3.5" /> },
+];
+
+interface CheckoutChooserProps {
+  bookingId: string;
+  /** [SEC] An already-prepaid (PAID_ONLINE) booking's base charge is already
+   *  settled — Time Credits must not be offered as a checkout method for it
+   *  (the server independently refuses to re-debit, but the UI shouldn't
+   *  even suggest an action that settles nothing). */
+  alreadyPrepaid: boolean;
+  onCheckout: (id: string, method: CheckoutPaymentMethod) => void;
+  onCancel: () => void;
+  busy: boolean;
+}
+
+function CheckoutChooser({ bookingId, alreadyPrepaid, onCheckout, onCancel, busy }: CheckoutChooserProps) {
+  const options = alreadyPrepaid
+    ? CHECKOUT_OPTIONS.filter((opt) => opt.value !== "time_credits")
+    : CHECKOUT_OPTIONS;
+  return (
+    <div className="space-y-2 rounded-xl border border-teal-200 bg-teal-50/60 p-3">
+      <p className="text-xs font-medium text-gray-700">Pilih metode pembayaran</p>
+      <div className="grid grid-cols-3 gap-2">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            disabled={busy}
+            onClick={() => onCheckout(bookingId, opt.value)}
+            className="flex flex-col items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-medium text-gray-700 transition-colors hover:border-teal-400 hover:bg-teal-50 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40"
+          >
+            {opt.icon}
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={busy}
+        className="text-xs text-gray-500 underline hover:text-gray-700"
+      >
+        Batal
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Active booking card (walk-in OR scheduled ACTIVE)
 // ---------------------------------------------------------------------------
 
 interface ActiveBookingCardProps {
   booking: AdminBookingView;
-  onComplete: (id: string) => void;
+  checkoutOpen: boolean;
+  onOpenCheckout: () => void;
+  onCancelCheckout: () => void;
+  onCheckout: (id: string, method: CheckoutPaymentMethod) => void;
   pendingId: string | null;
 }
 
-function ActiveBookingCard({ booking, onComplete, pendingId }: ActiveBookingCardProps) {
+function ActiveBookingCard({
+  booking,
+  checkoutOpen,
+  onOpenCheckout,
+  onCancelCheckout,
+  onCheckout,
+  pendingId,
+}: ActiveBookingCardProps) {
   const member = booking.member;
+  const isWalkin = booking.bookingMode === "WALKIN";
   const elapsed = elapsedSince(booking.start);
   const isBusy = pendingId === booking.id;
 
@@ -168,11 +249,12 @@ function ActiveBookingCard({ booking, onComplete, pendingId }: ActiveBookingCard
       <div className="flex items-center justify-between bg-green-500 px-4 py-3">
         <div className="flex items-center gap-2 text-white font-semibold text-sm">
           <Play size={14} className="fill-white text-white" />
-          <span>🚶</span>
-          <span>Walk-in Aktif</span>
+          <span>{isWalkin ? "Walk-in Aktif" : "Sesi Terjadwal Aktif"}</span>
         </div>
         <span className="rounded-full bg-green-700/60 px-3 py-0.5 text-xs font-medium text-white">
-          Berjalan {elapsed.hours}j {elapsed.minutes}m
+          {isWalkin
+            ? `Berjalan ${elapsed.hours}j ${elapsed.minutes}m`
+            : `${formatTime(booking.start)} – ${formatTime(booking.end)}`}
         </span>
       </div>
 
@@ -186,13 +268,12 @@ function ActiveBookingCard({ booking, onComplete, pendingId }: ActiveBookingCard
           <div>
             <p className="font-semibold text-gray-900 text-sm">{booking.facility}</p>
             <p className="text-xs text-gray-500">
-              Coworking Seat{" "}
-              <span className="text-orange-500 font-medium">(Walk-in)</span>
+              {booking.facilityType.replace(/_/g, " ")}{" "}
+              {isWalkin && <span className="text-orange-500 font-medium">(Walk-in)</span>}
             </p>
           </div>
         </div>
 
-        {/* Divider */}
         <div className="border-t border-green-200" />
 
         {/* Member */}
@@ -200,12 +281,8 @@ function ActiveBookingCard({ booking, onComplete, pendingId }: ActiveBookingCard
           <div className="flex items-center gap-2">
             <User size={14} className="text-gray-400" />
             <div>
-              <p className="text-sm font-medium text-gray-900">
-                {member?.name ?? "—"}
-              </p>
-              <p className="text-xs text-gray-500">
-                {member?.email ?? ""}
-              </p>
+              <p className="text-sm font-medium text-gray-900">{member?.name ?? "—"}</p>
+              <p className="text-xs text-gray-500">{member?.email ?? ""}</p>
             </div>
           </div>
           {member && (
@@ -215,7 +292,6 @@ function ActiveBookingCard({ booking, onComplete, pendingId }: ActiveBookingCard
           )}
         </div>
 
-        {/* Divider */}
         <div className="border-t border-green-200" />
 
         {/* Time */}
@@ -224,34 +300,50 @@ function ActiveBookingCard({ booking, onComplete, pendingId }: ActiveBookingCard
             <Clock size={12} />
             <span>{formatDateShort(booking.start)}</span>
           </div>
-          <p className="text-base font-bold text-gray-900">
-            {formatTime(booking.start)} – sekarang
-          </p>
-          <p className="text-xs font-medium text-orange-500">
-            Durasi terbuka (bayar saat selesai)
-          </p>
+          {isWalkin ? (
+            <>
+              <p className="text-base font-bold text-gray-900">
+                {formatTime(booking.start)} – sekarang
+              </p>
+              <p className="text-xs font-medium text-orange-500">
+                Durasi terbuka (bayar saat selesai)
+              </p>
+            </>
+          ) : (
+            <p className="text-base font-bold text-gray-900">
+              {booking.durationHours} jam terjadwal
+            </p>
+          )}
         </div>
 
-        {/* Divider */}
         <div className="border-t border-green-200" />
 
         {/* Payment */}
         <div className="flex items-center gap-2 text-sm">
           <Wallet size={14} className="text-gray-400" />
-          <span className="text-orange-500 font-medium">💰 Bayar di Kasir</span>
+          <span className="text-orange-500 font-medium">Bayar di Kasir</span>
         </div>
 
-        {/* CTA — wired to completeBookingAction (ADMIN-only SoD). For a walk-in
-            this computes the charge (ceil hours, cap 4h) and flips to COMPLETED. */}
-        <button
-          type="button"
-          onClick={() => onComplete(booking.id)}
-          disabled={isBusy}
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-medium text-sm py-3 transition-colors"
-        >
-          <CheckCircle2 size={16} />
-          Selesaikan Sesi &amp; Bayar
-        </button>
+        {/* Checkout — cash/QRIS/credits chooser (OBS-820) */}
+        {checkoutOpen ? (
+          <CheckoutChooser
+            bookingId={booking.id}
+            alreadyPrepaid={booking.payment === "PAID_ONLINE"}
+            onCheckout={onCheckout}
+            onCancel={onCancelCheckout}
+            busy={isBusy}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={onOpenCheckout}
+            disabled={isBusy}
+            className="w-full flex items-center justify-center gap-2 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-medium text-sm py-3 transition-colors"
+          >
+            <CheckCircle2 size={16} />
+            Selesaikan Sesi &amp; Bayar
+          </button>
+        )}
       </div>
     </div>
   );
@@ -328,11 +420,6 @@ function BookingRow({ booking }: BookingRowProps) {
           <Button variant="ghost" size="sm" className="h-8 px-2 text-xs">
             Detail
           </Button>
-          {booking.status === "ACTIVE" && (
-            <Button variant="primary" size="sm" className="h-8 px-2 text-xs">
-              Selesaikan
-            </Button>
-          )}
         </div>
       </td>
     </tr>
@@ -350,25 +437,25 @@ export function BookingsClient({ bookings }: BookingsClientProps) {
   const [dateFilter, setDateFilter] = useState("");
   // ponytail: dateFilter is captured but not applied — matches the original
   // mock surface (the input was decorative). Wiring it is a separate concern.
-  const [pendingCompleteId, setPendingCompleteId] = useState<string | null>(null);
+  const [checkoutOpenId, setCheckoutOpenId] = useState<string | null>(null);
+  const [pendingCheckoutId, setPendingCheckoutId] = useState<string | null>(null);
 
   const activeBookings = bookings.filter((b) => b.status === "ACTIVE");
-  const pendingCount = bookings.filter((b) => b.payment === "WAITING_CASHIER").length;
-  // ponytail: no CONFIRMED state in the booking domain (ACTIVE/COMPLETED/CANCELLED);
-  // the "Confirmed" pill stays 0 to match the original surface.
-  const confirmedCount = 0;
+  const pendingCount = bookings.filter((b) => b.status === "PENDING").length;
+  const confirmedCount = bookings.filter((b) => b.status === "CONFIRMED").length;
   const activeCount = activeBookings.length;
 
   const historyBookings = bookings.filter((b) => b.status !== "ACTIVE");
 
-  async function handleComplete(id: string) {
-    setPendingCompleteId(id);
+  async function handleCheckout(id: string, method: CheckoutPaymentMethod) {
+    setPendingCheckoutId(id);
     try {
-      await completeBookingAction(id);
+      await checkoutBookingAction(id, method);
     } catch {
       // router.refresh() re-renders the true server state on failure.
     } finally {
-      setPendingCompleteId(null);
+      setPendingCheckoutId(null);
+      setCheckoutOpenId(null);
     }
     startTransition(() => {
       router.refresh();
@@ -458,7 +545,7 @@ export function BookingsClient({ bookings }: BookingsClientProps) {
         </div>
       </div>
 
-      {/* Active booking cards (walk-in style) */}
+      {/* Active booking cards (walk-in + scheduled) */}
       {(filter === "all" || filter === "active") && activeBookings.length > 0 && (
         <div>
           <h2 className="mb-3 text-sm font-semibold text-gray-700">Booking Aktif</h2>
@@ -467,8 +554,11 @@ export function BookingsClient({ bookings }: BookingsClientProps) {
               <ActiveBookingCard
                 key={b.id}
                 booking={b}
-                onComplete={handleComplete}
-                pendingId={pendingCompleteId}
+                checkoutOpen={checkoutOpenId === b.id}
+                onOpenCheckout={() => setCheckoutOpenId(b.id)}
+                onCancelCheckout={() => setCheckoutOpenId(null)}
+                onCheckout={handleCheckout}
+                pendingId={pendingCheckoutId}
               />
             ))}
           </div>

@@ -131,6 +131,42 @@ export async function updateBookingTransaction(
 }
 
 /**
+ * The exact hours still owed for a booking's PENDING BOOKING ledger row(s)
+ * (i.e. extension charges not yet settled) [SEC][MONEY]. `amountRupiah +
+ * discountRupiah` reconstructs each row's PRE-discount rupiah exactly
+ * (`computeBookingPrice`'s `baseAmountRupiah = hours * ratePerHourRupiah`,
+ * an exact integer product — the discount is applied AFTER, so adding it
+ * back recovers baseAmountRupiah losslessly regardless of the discount
+ * pct used at extend time). Dividing by the booking's fixed
+ * `ratePerHourRupiah` then recovers the exact integer hours — no rounding
+ * heuristic, no new schema column needed. Returns 0 when nothing is pending
+ * (a scheduled booking's base charge is ALWAYS already settled by the time
+ * it reaches ACTIVE — see checkoutBooking's prepaid-double-debit fix).
+ */
+export async function pendingBookingHours(
+  orgId: string,
+  bookingId: string,
+  ratePerHourRupiah: number,
+  txdb: Pick<typeof db, "select"> = db,
+): Promise<number> {
+  if (ratePerHourRupiah <= 0) return 0;
+  const rows = await txdb
+    .select({ amountRupiah: transactions.amountRupiah, discountRupiah: transactions.discountRupiah })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.orgId, orgId),
+        eq(transactions.bookingId, bookingId),
+        eq(transactions.type, "BOOKING"),
+        eq(transactions.status, "PENDING"),
+      ),
+    );
+  if (rows.length === 0) return 0;
+  const totalBaseRupiah = rows.reduce((sum, r) => sum + r.amountRupiah + r.discountRupiah, 0);
+  return Math.round(totalBaseRupiah / ratePerHourRupiah);
+}
+
+/**
  * Checkout settlement [SEC][MONEY]: flips every still-PENDING BOOKING ledger
  * row for a booking to COMPLETED, BY TRANSACTION ID — one row at a time,
  * preserving EACH row's own `amountRupiah` (the base row and any pending

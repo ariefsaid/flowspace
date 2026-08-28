@@ -113,6 +113,28 @@ describe("BookingsClient (AC-841)", () => {
     await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
   });
 
+  it("[SEC] does not offer Time Credits at checkout for an already-prepaid (PAID_ONLINE) ACTIVE booking", async () => {
+    const prepaidActive: AdminBookingView = {
+      id: "bk_active_prepaid",
+      facility: "Meja B",
+      facilityType: "COWORKING_SEAT",
+      bookingMode: "SCHEDULED",
+      start: new Date(Date.now() - 1 * 3_600_000).toISOString(),
+      end: new Date(Date.now() + 1 * 3_600_000).toISOString(),
+      durationHours: 2,
+      status: "ACTIVE",
+      payment: "PAID_ONLINE",
+      amount: 40000,
+      member: { name: "Budi Santoso", email: "budi@x.test", tier: "PREMIUM" },
+    };
+    render(<BookingsClient bookings={[prepaidActive]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Selesaikan Sesi & Bayar/i }));
+
+    await screen.findByRole("button", { name: /^Cash$/i });
+    expect(screen.getByRole("button", { name: /QRIS/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Time Credits/i })).toBeNull();
+  });
+
   it("history table renders COMPLETED and CONFIRMED rows under the 'all' filter", () => {
     render(<BookingsClient bookings={bookings} />);
     const select = screen.getByDisplayValue("Booking Aktif") as HTMLSelectElement;

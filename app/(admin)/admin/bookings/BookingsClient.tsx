@@ -174,17 +174,25 @@ const CHECKOUT_OPTIONS: { value: CheckoutPaymentMethod; label: string; icon: Rea
 
 interface CheckoutChooserProps {
   bookingId: string;
+  /** [SEC] An already-prepaid (PAID_ONLINE) booking's base charge is already
+   *  settled — Time Credits must not be offered as a checkout method for it
+   *  (the server independently refuses to re-debit, but the UI shouldn't
+   *  even suggest an action that settles nothing). */
+  alreadyPrepaid: boolean;
   onCheckout: (id: string, method: CheckoutPaymentMethod) => void;
   onCancel: () => void;
   busy: boolean;
 }
 
-function CheckoutChooser({ bookingId, onCheckout, onCancel, busy }: CheckoutChooserProps) {
+function CheckoutChooser({ bookingId, alreadyPrepaid, onCheckout, onCancel, busy }: CheckoutChooserProps) {
+  const options = alreadyPrepaid
+    ? CHECKOUT_OPTIONS.filter((opt) => opt.value !== "time_credits")
+    : CHECKOUT_OPTIONS;
   return (
     <div className="space-y-2 rounded-xl border border-teal-200 bg-teal-50/60 p-3">
       <p className="text-xs font-medium text-gray-700">Pilih metode pembayaran</p>
       <div className="grid grid-cols-3 gap-2">
-        {CHECKOUT_OPTIONS.map((opt) => (
+        {options.map((opt) => (
           <button
             key={opt.value}
             type="button"
@@ -320,6 +328,7 @@ function ActiveBookingCard({
         {checkoutOpen ? (
           <CheckoutChooser
             bookingId={booking.id}
+            alreadyPrepaid={booking.payment === "PAID_ONLINE"}
             onCheckout={onCheckout}
             onCancel={onCancelCheckout}
             busy={isBusy}

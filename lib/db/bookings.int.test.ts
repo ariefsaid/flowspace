@@ -50,6 +50,7 @@ import {
   extendBooking,
   runStatusSweep,
   listPendingBookings,
+  type CheckoutPaymentMethod,
 } from "@/lib/db/bookings";
 
 // --- test data ---
@@ -673,8 +674,13 @@ describe("lib/db/bookings", () => {
       expect(txn.paymentMethod).toBe("qris");
     });
 
-    it("AC-822/AC-828: checkout with time_credits FIFO-debits lots and settles COMPLETED/PAID_ONLINE atomically; amount counts toward revenue", async () => {
-      // Give the member a sufficient credit lot (10h, far expiry).
+    it("[SEC][MONEY] checkout of an already-PAID_ONLINE (prepaid) scheduled booking does NOT re-debit credits — no pending charge, nothing to settle", async () => {
+      // A scheduled time_credits/online booking is already PAID_ONLINE —
+      // credits (or money) were already spent/settled AT CREATE. By the time
+      // a scheduled booking reaches ACTIVE (via runStatusSweep, or a
+      // cashier-approved booking via approvePayment), its base charge is
+      // ALWAYS already settled — checkout must never re-debit/re-settle it,
+      // only a genuinely-pending EXTENSION charge (if any) is owed.
       await testDb.insert(schema.timeCreditLots).values({
         orgId: orgAId, userId: aUserId, totalHours: 10, remainingHours: 10,
         expiresAt: new Date(Date.now() + 90 * 24 * HOUR),
@@ -686,6 +692,7 @@ describe("lib/db/bookings", () => {
         durationHours: 3, ratePerHourRupiah: 20000, amountRupiah: 60000, baseAmountRupiah: 60000, discountRupiah: 0,
         status: "ACTIVE", paymentStatus: "PAID_ONLINE", bookingMode: "SCHEDULED", paymentMethod: "online",
       }).returning();
+      // Base row already COMPLETED at create — nothing PENDING to settle.
       await testDb.insert(transactions).values({
         orgId: orgAId, userId: aUserId, type: "BOOKING", description: "Booking Meja A",
         amountRupiah: 60000, status: "COMPLETED", bookingId: active.id,
@@ -693,21 +700,103 @@ describe("lib/db/bookings", () => {
 
       const completed = await checkoutBooking(orgAId, active.id, "time_credits");
       expect(completed.status).toBe("COMPLETED");
-      expect(completed.paymentStatus).toBe("PAID_ONLINE");
+      expect(completed.paymentStatus).toBe("PAID_ONLINE"); // unchanged — already was
 
       const [lot] = await testDb.select().from(schema.timeCreditLots).where(eq(schema.timeCreditLots.userId, aUserId));
-      expect(lot.remainingHours).toBe(7); // 10 - 3
+      expect(lot.remainingHours).toBe(10); // UNCHANGED — no second debit
 
-      // The ledger row was already COMPLETED before checkout (the create-time
-      // settlement) — settleCheckoutTransactions only touches still-PENDING
-      // rows (finding #5: independent-settlement fix), so this pre-completed
-      // row's paymentMethod is left exactly as it was, not overwritten.
       const [txn] = await testDb.select().from(transactions).where(eq(transactions.bookingId, active.id));
-      expect(txn.paymentMethod).toBeNull();
+      expect(txn.paymentMethod).toBeNull(); // pre-completed row is left untouched, not overwritten
       expect(txn.status).toBe("COMPLETED");
     });
 
-    it("AC-823: insufficient credits — checkout rolls back atomically (no lot/booking/ledger change)", async () => {
+    it("AC-822/AC-828: checkout with time_credits FIFO-debits lots for a walk-in's full elapsed-based charge (checkout IS where a walk-in's charge is first known/owed)", async () => {
+      await testDb.insert(schema.timeCreditLots).values({
+        orgId: orgAId, userId: aUserId, totalHours: 10, remainingHours: 10,
+        expiresAt: new Date(Date.now() + 90 * 24 * HOUR),
+      });
+
+      const [active] = await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "WALKIN_COWORKING", facilityId: null,
+        facilityName: "Walk-in Coworking", startAt: new Date(Date.now() - 90 * 60_000), endAt: null,
+        durationHours: null, ratePerHourRupiah: 15000, amountRupiah: 0, baseAmountRupiah: 0, discountRupiah: 0,
+        status: "ACTIVE", paymentStatus: "WAITING_CASHIER", bookingMode: "WALKIN", paymentMethod: "cashier",
+      }).returning();
+      await testDb.insert(transactions).values({
+        orgId: orgAId, userId: aUserId, type: "BOOKING", description: "Booking Walk-in Coworking",
+        amountRupiah: 0, status: "PENDING", bookingId: active.id,
+      });
+
+      const completed = await checkoutBooking(orgAId, active.id, "time_credits");
+      expect(completed.status).toBe("COMPLETED");
+      expect(completed.paymentStatus).toBe("PAID_ONLINE");
+      expect(completed.durationHours).toBe(2); // ceil(90/60)
+
+      const [lot] = await testDb.select().from(schema.timeCreditLots).where(eq(schema.timeCreditLots.userId, aUserId));
+      expect(lot.remainingHours).toBe(8); // 10 - 2 — genuinely owed, genuinely debited
+
+      const [txn] = await testDb.select().from(transactions).where(eq(transactions.bookingId, active.id));
+      expect(txn.paymentMethod).toBe("time_credits");
+      expect(txn.status).toBe("COMPLETED");
+      expect(txn.amountRupiah).toBe(30000); // 2h × 15000
+    });
+
+    it("[SEC][MONEY] checkout with time_credits on an already-prepaid scheduled booking WITH an extension debits ONLY the extension's hours", async () => {
+      await testDb.insert(schema.timeCreditLots).values({
+        orgId: orgAId, userId: aUserId, totalHours: 10, remainingHours: 8, // 2h already spent at create
+        expiresAt: new Date(Date.now() + 90 * 24 * HOUR),
+      });
+
+      const [active] = await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatAId,
+        facilityName: "Meja A", startAt: new Date(Date.now() - 3 * HOUR), endAt: new Date(),
+        durationHours: 3, ratePerHourRupiah: 20000, amountRupiah: 60000, baseAmountRupiah: 60000, discountRupiah: 0,
+        status: "ACTIVE", paymentStatus: "PAID_ONLINE", bookingMode: "SCHEDULED", paymentMethod: "time_credits",
+      }).returning();
+      // Base row (2h, already prepaid via credits at create) — COMPLETED.
+      await testDb.insert(transactions).values({
+        orgId: orgAId, userId: aUserId, type: "BOOKING", description: "Booking Meja A",
+        amountRupiah: 40000, status: "COMPLETED", bookingId: active.id, paymentMethod: "time_credits",
+      });
+      // Pending extension (1h) — the ONLY genuinely-owed charge at checkout.
+      await testDb.insert(transactions).values({
+        orgId: orgAId, userId: aUserId, type: "BOOKING", description: "Extension Meja A",
+        amountRupiah: 20000, discountRupiah: 0, status: "PENDING", bookingId: active.id,
+      });
+
+      const completed = await checkoutBooking(orgAId, active.id, "time_credits");
+      expect(completed.status).toBe("COMPLETED");
+
+      const [lot] = await testDb.select().from(schema.timeCreditLots).where(eq(schema.timeCreditLots.userId, aUserId));
+      expect(lot.remainingHours).toBe(7); // 8 - 1 — ONLY the extension's 1h, not the full 3h again
+
+      const txns = await testDb.select().from(transactions).where(eq(transactions.bookingId, active.id));
+      expect(txns.every((t) => t.status === "COMPLETED")).toBe(true);
+      const total = txns.reduce((s, t) => s + t.amountRupiah, 0);
+      expect(total).toBe(60000); // 40000 base (unchanged) + 20000 extension
+    });
+
+    it("[SEC] checkout rejects a checkout method outside cash|qris|time_credits (e.g. \"online\") before any write", async () => {
+      // The TS CheckoutPaymentMethod union does not guard a server action at
+      // runtime — a crafted request could send "online" (a valid
+      // BookingPaymentMethod value, but never a legitimate CHECKOUT method).
+      const [active] = await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "WALKIN_COWORKING", facilityId: null,
+        facilityName: "Walk-in Coworking", startAt: new Date(Date.now() - HOUR), endAt: null,
+        durationHours: null, ratePerHourRupiah: 15000, amountRupiah: 0, baseAmountRupiah: 0, discountRupiah: 0,
+        status: "ACTIVE", paymentStatus: "WAITING_CASHIER", bookingMode: "WALKIN", paymentMethod: "cashier",
+      }).returning();
+      await expect(
+        checkoutBooking(orgAId, active.id, "online" as unknown as CheckoutPaymentMethod),
+      ).rejects.toThrow(/INVALID_PAYMENT_METHOD/);
+      const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, active.id));
+      expect(fresh.status).toBe("ACTIVE"); // untouched
+    });
+
+    it("AC-823: insufficient credits for a PENDING extension charge — checkout rolls back atomically (no lot/booking/ledger change)", async () => {
+      // The base charge is already prepaid (COMPLETED) — only the PENDING
+      // 2h extension is genuinely owed, and the member's lot falls short of
+      // covering it (1h available, 2h owed).
       const [poorUser] = await testDb
         .insert(appUsers)
         .values({ orgId: orgAId, email: "poor@x.test", name: "Poor", role: "MEMBER" })
@@ -724,7 +813,11 @@ describe("lib/db/bookings", () => {
       }).returning();
       await testDb.insert(transactions).values({
         orgId: orgAId, userId: poorUser.id, type: "BOOKING", description: "Booking Meja A",
-        amountRupiah: 60000, status: "COMPLETED", bookingId: active.id,
+        amountRupiah: 20000, status: "COMPLETED", bookingId: active.id,
+      });
+      await testDb.insert(transactions).values({
+        orgId: orgAId, userId: poorUser.id, type: "BOOKING", description: "Extension Meja A",
+        amountRupiah: 40000, discountRupiah: 0, status: "PENDING", bookingId: active.id,
       });
 
       await expect(checkoutBooking(orgAId, active.id, "time_credits")).rejects.toThrow(/INSUFFICIENT_CREDITS/);
@@ -733,8 +826,9 @@ describe("lib/db/bookings", () => {
       expect(freshBooking.status).toBe("ACTIVE"); // unchanged
       const [freshLot] = await testDb.select().from(schema.timeCreditLots).where(eq(schema.timeCreditLots.userId, poorUser.id));
       expect(freshLot.remainingHours).toBe(1); // unchanged
-      const [freshTxn] = await testDb.select().from(transactions).where(eq(transactions.bookingId, active.id));
-      expect(freshTxn.status).toBe("COMPLETED"); // still the create-time ledger row, unchanged
+      const freshTxns = await testDb.select().from(transactions).where(eq(transactions.bookingId, active.id));
+      expect(freshTxns.every((t) => t.status !== "COMPLETED" || t.amountRupiah === 20000)).toBe(true);
+      expect(freshTxns.find((t) => t.description === "Extension Meja A")?.status).toBe("PENDING"); // unsettled
     });
 
     it("AC-836/AC-845: checkout on a non-ACTIVE booking is rejected, no state/ledger mutation (CAS)", async () => {

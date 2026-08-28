@@ -43,6 +43,7 @@ import {
   recordTransaction,
   updateBookingTransaction,
   settleCheckoutTransactions,
+  pendingBookingHours,
 } from "@/lib/db/transactions";
 import { spendTimeCredits } from "@/lib/db/time-credit-lots";
 import { getTierDiscounts } from "@/lib/db/tier-config";
@@ -66,6 +67,10 @@ export type BookingPaymentChoice = "online" | "time_credits" | "cashier";
 
 /** How an admin settles checkout for an ACTIVE booking (OBS-820). */
 export type CheckoutPaymentMethod = "cash" | "qris" | "time_credits";
+/** [SEC] Runtime guard — the TS union above does not validate a server
+ *  action's actual request body (e.g. a crafted "online", a valid
+ *  BookingPaymentMethod but never a legitimate CHECKOUT method). */
+const CHECKOUT_PAYMENT_METHODS: readonly CheckoutPaymentMethod[] = ["cash", "qris", "time_credits"];
 
 export type CreateBookingInput = {
   orgId: string;
@@ -732,6 +737,11 @@ export async function checkoutBooking(
   id: string,
   paymentMethod: CheckoutPaymentMethod,
 ): Promise<Booking> {
+  // [SEC] Runtime-validate BEFORE any read/write — the TS union is
+  // compile-time only and does not guard a server action's actual request.
+  if (!CHECKOUT_PAYMENT_METHODS.includes(paymentMethod)) {
+    throw new Error("INVALID_PAYMENT_METHOD");
+  }
   return db.transaction(async (tx) => {
     // Cheap pre-read for the lock keys only (mirrors extendBooking's
     // two-phase read). [SEC] Serializes checkout against a concurrent
@@ -762,7 +772,20 @@ export async function checkoutBooking(
     const now = new Date();
     const price = await resolveCheckoutPricing(tx, booking, now);
     const walkin = booking.bookingMode === "WALKIN";
-    const paymentStatus: BookingPaymentStatus = paymentMethod === "time_credits" ? "PAID_ONLINE" : "PAID_CASHIER";
+
+    // [SEC][MONEY] Prepaid double-debit fix: a SCHEDULED booking's base
+    // charge is ALWAYS already settled by the time it reaches ACTIVE — via
+    // spendTimeCredits/online at create (paymentStatus PAID_ONLINE), or via
+    // approvePayment (PAID_CASHIER) BEFORE runStatusSweep ever activates it.
+    // Checkout must never re-debit/re-settle that base charge — only a
+    // genuinely-PENDING extension charge (if any) is actually owed. A
+    // walk-in has no prepay path at all: its full elapsed-based charge is
+    // always first owed (and first known) right here, at checkout.
+    const owedHours = walkin ? price.billedHours : await pendingBookingHours(orgId, id, booking.ratePerHourRupiah, tx);
+    const settling = walkin || owedHours > 0;
+    const paymentStatus: BookingPaymentStatus = settling
+      ? (paymentMethod === "time_credits" ? "PAID_ONLINE" : "PAID_CASHIER")
+      : booking.paymentStatus; // nothing newly settled here — leave as-is
 
     const [updated] = await tx
       .update(bookings)
@@ -780,8 +803,8 @@ export async function checkoutBooking(
       .returning();
     if (!updated) throw new Error("INVALID_TRANSITION");
 
-    if (paymentMethod === "time_credits") {
-      await spendTimeCredits({ orgId, userId: booking.userId, hours: price.billedHours, tx });
+    if (paymentMethod === "time_credits" && owedHours > 0) {
+      await spendTimeCredits({ orgId, userId: booking.userId, hours: owedHours, tx });
     }
 
     // [SEC][MONEY] Settle by TRANSACTION ID, preserving each PENDING row's

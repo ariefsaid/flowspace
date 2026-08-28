@@ -958,6 +958,15 @@ export async function extendBooking(orgId: string, id: string, extraHours: numbe
     const cappedTotalHours = Math.min(fresh.durationHours + extraHours, EXTENSION_CAP_HOURS);
     const proposedEnd = new Date(fresh.startAt.getTime() + cappedTotalHours * HOUR_MS);
     if (proposedEnd.getTime() <= fresh.endAt.getTime()) throw new Error("EXTENSION_LIMIT_REACHED");
+    // [SEC] Same one-day constraint as createBooking, for the same reason:
+    // the org-day advisory lock + full-room day-window exclusivity taken
+    // above are both keyed by the START day's calendarDayOf(fresh.startAt) —
+    // an extension whose proposed end lands on the NEXT calendar day would
+    // escape that day's lock/exclusivity window for its tail end, exactly
+    // like a cross-midnight create would.
+    if (calendarDayOf(fresh.startAt) !== calendarDayOf(proposedEnd)) {
+      throw new Error("CROSS_MIDNIGHT_NOT_ALLOWED");
+    }
 
     // [SEC] The extended interval [fresh.endAt, proposedEnd) must not itself
     // overlap another active-like booking on the SAME facility (or a

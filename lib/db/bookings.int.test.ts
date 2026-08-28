@@ -1169,6 +1169,31 @@ describe("lib/db/bookings", () => {
       const extended = await extendBooking(orgAId, active.id, 1);
       expect(extended.durationHours).toBe(3);
     });
+
+    it("[SEC] rejects an extension whose proposed end crosses into the next calendar day (same rule as create)", async () => {
+      // createBooking already rejects a cross-midnight INTERVAL outright,
+      // because the org-day advisory lock + full-room day-window exclusivity
+      // are both keyed by a SINGLE calendarDayOf(startAt) — a booking
+      // spanning two calendar days would escape that day's lock/exclusivity
+      // window for its tail end. extendBooking took only the START day's
+      // lock too, but had no equivalent guard on the PROPOSED end — it could
+      // extend a 21:00-23:00 booking past midnight while still only locking
+      // the start day.
+      const start = new Date("2026-08-17T21:00:00Z");
+      const [active] = await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatAId,
+        facilityName: "Meja A", startAt: start, endAt: new Date(start.getTime() + 2 * HOUR), // 21:00-23:00
+        durationHours: 2, ratePerHourRupiah: 20000, amountRupiah: 40000, baseAmountRupiah: 40000, discountRupiah: 0,
+        status: "ACTIVE", paymentStatus: "PAID_ONLINE", bookingMode: "SCHEDULED", paymentMethod: "online",
+      }).returning();
+
+      // +2h -> total 4h (within the 4h cap) -> proposed end 01:00 next day.
+      await expect(extendBooking(orgAId, active.id, 2)).rejects.toThrow(/CROSS_MIDNIGHT_NOT_ALLOWED/);
+      const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, active.id));
+      expect(fresh.durationHours).toBe(2); // unchanged
+      const txns = await testDb.select().from(transactions).where(eq(transactions.bookingId, active.id));
+      expect(txns).toHaveLength(0); // no extension ledger row written
+    });
   });
 
   // -------------------------------------------------------------------------

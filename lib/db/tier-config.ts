@@ -13,7 +13,33 @@ import { membershipTierConfig, type MembershipTierConfig } from "@/lib/db/schema
 import { MEMBERSHIP_TIERS, type MembershipTier } from "@/lib/db/enums";
 import type { TierDiscounts } from "@/lib/tier-discounts";
 
-const PCT_DIMS = ["coworking", "meeting", "cafe", "print"] as const;
+/**
+ * The four discount dimensions, keyed by their `TierDiscounts` field name and
+ * mapped to the short label used in `INVALID_PCT:<dimension>` errors.
+ * `satisfies Record<keyof TierDiscounts, string>` makes this compiler-enforced:
+ * adding/removing a `TierDiscounts` field forces this map (and both loops
+ * below that iterate it) to be updated too — validation and the insert/update
+ * field allow-list can never silently drift apart.
+ */
+const PCT_DIMS = {
+  coworkingDiscountPct: "coworking",
+  meetingDiscountPct: "meeting",
+  cafeDiscountPct: "cafe",
+  printDiscountPct: "print",
+} satisfies Record<keyof TierDiscounts, string>;
+
+/**
+ * Picks exactly the four known discount fields off `rates` — an explicit
+ * allow-list, not a spread, so an extra/unexpected property on the input
+ * object (however it got there) can never reach the insert/update statement.
+ */
+function pickPctFields(rates: TierDiscounts): TierDiscounts {
+  const picked = {} as TierDiscounts;
+  for (const field of Object.keys(PCT_DIMS) as (keyof TierDiscounts)[]) {
+    picked[field] = rates[field];
+  }
+  return picked;
+}
 
 /** All tier-config rows for the org, ordered by tier (admin editor + listing). */
 export function listTierConfig(orgId: string): Promise<MembershipTierConfig[]> {
@@ -64,25 +90,15 @@ export async function updateTierDiscounts(
   txdb: Pick<typeof db, "insert"> = db,
 ): Promise<void> {
   if (!MEMBERSHIP_TIERS.includes(tier)) throw new Error("INVALID_TIER");
-  PCT_DIMS.forEach((d) => assertPct(rates[`${d}DiscountPct`], d));
+  for (const [field, label] of Object.entries(PCT_DIMS) as [keyof TierDiscounts, string][]) {
+    assertPct(rates[field], label);
+  }
+  const pct = pickPctFields(rates);
   await txdb
     .insert(membershipTierConfig)
-    .values({
-      orgId,
-      tier,
-      coworkingDiscountPct: rates.coworkingDiscountPct,
-      meetingDiscountPct: rates.meetingDiscountPct,
-      cafeDiscountPct: rates.cafeDiscountPct,
-      printDiscountPct: rates.printDiscountPct,
-    })
+    .values({ orgId, tier, ...pct })
     .onConflictDoUpdate({
       target: [membershipTierConfig.orgId, membershipTierConfig.tier],
-      set: {
-        coworkingDiscountPct: rates.coworkingDiscountPct,
-        meetingDiscountPct: rates.meetingDiscountPct,
-        cafeDiscountPct: rates.cafeDiscountPct,
-        printDiscountPct: rates.printDiscountPct,
-        updatedAt: new Date(),
-      },
+      set: { ...pct, updatedAt: new Date() },
     });
 }

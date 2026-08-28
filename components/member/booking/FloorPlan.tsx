@@ -36,10 +36,10 @@ function Legend() {
         <span className="inline-block h-3 w-3 rounded-sm bg-teal-500" /> Tersedia
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="inline-block h-3 w-3 rounded-sm bg-slate-300" /> Terisi
+        <span className="inline-block h-3 w-3 rounded-sm bg-slate-200" /> Terisi
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="inline-block h-3 w-3 rounded-sm bg-teal-600 ring-2 ring-teal-300" /> Dipilih
+        <span className="inline-block h-3 w-3 rounded-sm border-2 border-teal-500 bg-teal-100" /> Dipilih
       </span>
     </div>
   );
@@ -77,7 +77,7 @@ function DeskGrid({
                 isOccupied
                   ? "border-slate-200 bg-slate-200 text-slate-400 cursor-not-allowed"
                   : isSelected
-                    ? "border-teal-500 bg-teal-500 text-white shadow-md"
+                    ? "border-teal-500 bg-teal-100 text-teal-700 shadow-md"
                     : "border-teal-200 bg-white text-teal-700 hover:border-teal-400 hover:bg-teal-50",
               )}
             >
@@ -191,7 +191,7 @@ function FullRoomCard({
           isOccupied
             ? "border-2 border-slate-200 text-slate-400 bg-slate-100 cursor-not-allowed"
             : isSelected
-              ? "bg-purple-500 text-white shadow-md"
+              ? "bg-purple-600 text-white shadow-md"
               : "border-2 border-purple-400 text-purple-600 bg-white hover:bg-purple-50",
         )}
       >

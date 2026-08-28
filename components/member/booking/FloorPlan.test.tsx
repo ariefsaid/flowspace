@@ -68,6 +68,28 @@ describe("FloorPlan (AC-803/843)", () => {
     ).toBeInTheDocument();
   });
 
+  it("design-review: selected desk uses AA-passing teal-100/teal-700, not white-on-teal-500", () => {
+    render(<FloorPlan seats={desks} selectedId="fac_a" onSelect={vi.fn()} />);
+    const selectedBtn = screen.getByRole("button", { name: /Meja A/ });
+    expect(selectedBtn).toHaveClass("bg-teal-100", "text-teal-700", "border-teal-500");
+    expect(selectedBtn).not.toHaveClass("bg-teal-500", "text-white");
+  });
+
+  it("design-review: legend 'Terisi' swatch matches the actual occupied desk fill (slate-200)", () => {
+    render(<FloorPlan seats={desks} selectedId={null} onSelect={vi.fn()} />);
+    const legendItem = screen.getByText("Terisi");
+    const swatch = legendItem.querySelector("span");
+    expect(swatch).toHaveClass("bg-slate-200");
+    expect(swatch).not.toHaveClass("bg-slate-300");
+  });
+
+  it("design-review: selected full-room card uses AA-passing purple-600 (not purple-500, 3.96:1)", () => {
+    render(<FloorPlan seats={fullRoom} selectedId="fac_fr" onSelect={vi.fn()} />);
+    const selectedBtn = screen.getByRole("button", { name: /Dipilih/ });
+    expect(selectedBtn).toHaveClass("bg-purple-600");
+    expect(selectedBtn).not.toHaveClass("bg-purple-500");
+  });
+
   it("AC-843: imports/defines no hardcoded seat catalog — renders only prop labels", async () => {
     const fs = await import("node:fs/promises");
     const path = await import("node:path");

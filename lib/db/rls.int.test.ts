@@ -130,8 +130,10 @@ describe("RLS backstop — org isolation on app_users", () => {
 });
 
 describe("RLS backstop — I-043 print tables", () => {
-  it("AC-632: scoped org claims isolate printers, pricing, jobs, agent config, packages, and rate events", async () => {
-    const tables = ["printers", "org_print_pricing", "print_jobs", "print_agent_configs", "print_topup_packages", "print_agent_rate_limit_events"];
+  it("AC-632: scoped org claims isolate printers, pricing, jobs, and packages", async () => {
+    // print_agent_configs / print_agent_rate_limit_events are deliberately
+    // NOT in this list — they carry zero Data-API grant at all (see below).
+    const tables = ["printers", "org_print_pricing", "print_jobs", "print_topup_packages"];
     for (const table of tables) {
       const rows = await selectScopedOrgIds(table);
       expect(rows.every((row) => row.org_id === orgAId)).toBe(true);
@@ -140,10 +142,39 @@ describe("RLS backstop — I-043 print tables", () => {
     const symmetric = await selectScopedOrgIds("printers", orgBId);
     expect(symmetric).toHaveLength(0);
   });
+
+  it("AC-632: print_agent_configs and print_agent_rate_limit_events reject scoped SELECT too (server-only, no Data-API grant)", async () => {
+    // These carry credentials (key_hash/key_selector) — the admin page reads
+    // them via the service-role connection only. Unlike the write-lockdown
+    // tables, `authenticated` gets NO grant here at all, not even SELECT.
+    for (const table of ["print_agent_configs", "print_agent_rate_limit_events"]) {
+      let caught: { code?: string; message?: string } | undefined;
+      const claims = JSON.stringify({ org_id: orgAId }).replace(/'/g, "''");
+      try {
+        await rootSql.begin(async (tx) => {
+          await tx.unsafe(`SET LOCAL ROLE authenticated`);
+          await tx.unsafe(`SET LOCAL "request.jwt.claims" = '${claims}'`);
+          return tx.unsafe(`SELECT org_id FROM "${table}"`);
+        });
+      } catch (err) {
+        caught = err as { code?: string; message?: string };
+      }
+      expect(caught, `expected scoped SELECT on "${table}" to be denied`).toBeDefined();
+      expect(caught?.code).toBe("42501");
+      expect(caught?.message).toMatch(new RegExp(`permission denied for table ${table}`, "i"));
+    }
+
+    // The service role (server authority) still reads both — the admin
+    // print-server page depends on this.
+    const configRows = await rootDb.select().from(printAgentConfigs);
+    expect(configRows.some((r) => r.orgId === orgAId)).toBe(true);
+    const rateEventRows = await rootDb.select().from(printAgentRateLimitEvents);
+    expect(rateEventRows.some((r) => r.orgId === orgAId)).toBe(true);
+  });
 });
 
 async function selectScopedOrgIds(table: string, orgId = orgAId): Promise<{ org_id: string }[]> {
-  const allowed = new Set(["printers", "org_print_pricing", "print_jobs", "print_agent_configs", "print_topup_packages", "print_agent_rate_limit_events"]);
+  const allowed = new Set(["printers", "org_print_pricing", "print_jobs", "print_topup_packages"]);
   if (!allowed.has(table)) throw new Error("invalid test table");
   const claims = JSON.stringify({ org_id: orgId }).replace(/'/g, "''");
   return rootSql.begin(async (tx) => {

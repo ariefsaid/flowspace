@@ -142,8 +142,19 @@ CREATE INDEX "print_jobs_printer_id_idx" ON "public"."print_jobs" USING btree ("
 DO $$
 DECLARE t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['org_print_pricing','printers','print_agent_configs','print_agent_rate_limit_events'] LOOP
+  FOREACH t IN ARRAY ARRAY['org_print_pricing','printers'] LOOP
     EXECUTE format('GRANT SELECT ON TABLE %I TO authenticated', t);
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('CREATE POLICY %I ON %I FOR ALL TO authenticated USING (org_id = current_org()) WITH CHECK (org_id = current_org())', t || '_org_isolation', t);
+  END LOOP;
+
+  -- print_agent_configs / print_agent_rate_limit_events are server-only
+  -- (the admin print-server page reads them via the service-role
+  -- connection, never the browser client): NO Data-API grant at all —
+  -- not even SELECT of key_hash/key_selector — so `authenticated` has zero
+  -- privileges on these two. RLS is still enabled + org-scoped as
+  -- defense-in-depth for any future grant, but no GRANT means no access.
+  FOREACH t IN ARRAY ARRAY['print_agent_configs','print_agent_rate_limit_events'] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('CREATE POLICY %I ON %I FOR ALL TO authenticated USING (org_id = current_org()) WITH CHECK (org_id = current_org())', t || '_org_isolation', t);
   END LOOP;

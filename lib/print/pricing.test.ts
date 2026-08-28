@@ -84,4 +84,16 @@ describe("computePrintTotal", () => {
     expect(t.discountRupiah).toBe(12000);
     expect(t.totalRupiah).toBe(48000);
   });
+
+  it("AC-516: discounts round to whole Rupiah on a fractional subtotal", () => {
+    const t = computePrintTotal({
+      pages: 2, copies: 1, colorMode: "BW",
+      bwRateRupiah: 3333, colorRateRupiah: 1000, discountPct: 10,
+    });
+    // subtotal = 3333 × 2 = 6666 → 10% = 666.6 → Math.round = 667
+    expect(t.discountRupiah).toBe(667);
+    expect(t.totalRupiah).toBe(5999);
+    expect(Number.isInteger(t.discountRupiah)).toBe(true);
+    expect(Number.isInteger(t.totalRupiah)).toBe(true);
+  });
 });

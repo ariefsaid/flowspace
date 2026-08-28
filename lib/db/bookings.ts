@@ -16,7 +16,7 @@
  * - The booking insert + the ledger row (recordTransaction) are atomic in one
  *   db.transaction — the domain write and the reporting write commit together.
  */
-import { and, eq, isNull, asc, desc, gte, inArray } from "drizzle-orm";
+import { and, eq, isNull, asc, desc, gte, inArray, or, sql, lt, gt, ne, notExists } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import { bookings, facilities, type Booking, type Facility } from "@/lib/db/schema";
 import {
@@ -76,6 +76,175 @@ export function listFacilities(
     .from(facilities)
     .where(and(...conds))
     .orderBy(asc(facilities.name));
+}
+
+// ---------------------------------------------------------------------------
+// Availability read model (I-040, spec 0007)
+//
+// Occupancy is decided by two rules (OBS-810/811):
+//   (a) same-facility overlap — any active-like (PENDING/CONFIRMED/ACTIVE)
+//       booking on the SAME facility overlapping the window occupies it.
+//   (b) full-room ↔ individual-seat exclusivity, asymmetric:
+//       - a FULL_ROOM booking occupies EVERY individual facility for its own
+//         reserved interval (interval-granularity — getFacilityAvailability).
+//       - ANY individual-seat/meeting booking on a calendar day makes the
+//         full-room facility unavailable for that WHOLE DAY (day-granularity
+//         — getFullRoomAvailability), not just the overlapping window.
+// Both read paths reuse the half-open overlap semantics from
+// lib/booking/interval.ts's intervalsOverlap (AC-848: "availability
+// semantics match creation conflict semantics") — expressed here as
+// `startAt < end AND (endAt IS NULL OR endAt > start)` via Drizzle's typed
+// operators (not a raw sql template — mixing a custom Postgres enum column
+// with a Date parameter inside one raw `sql` fragment trips a postgres-js
+// param-serialization bug) so it runs as one indexed query rather than a JS
+// post-filter; an open-ended walk-in (`end_at IS NULL`) counts as unbounded
+// (always the second half of the AND).
+// ---------------------------------------------------------------------------
+
+/** The three booking statuses that occupy a facility (OBS-810). */
+export function activeLikeStatuses(): BookingStatus[] {
+  return ["PENDING", "CONFIRMED", "ACTIVE"];
+}
+
+/**
+ * Org-scoped, bookable facilities with NO active-like booking overlapping
+ * `[start, end)` — either on the facility itself, or (for individual
+ * facilities) blocked by a FULL_ROOM booking overlapping the same window.
+ */
+export async function facilitiesAvailableInWindow(
+  orgId: string,
+  start: Date,
+  end: Date,
+): Promise<Facility[]> {
+  return db
+    .select()
+    .from(facilities)
+    .where(
+      and(
+        eq(facilities.orgId, orgId),
+        isNull(facilities.archivedAt),
+        eq(facilities.available, true),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(bookings)
+            .where(
+              and(
+                eq(bookings.orgId, orgId),
+                inArray(bookings.status, activeLikeStatuses()),
+                lt(bookings.startAt, end),
+                or(isNull(bookings.endAt), gt(bookings.endAt, start)),
+                or(eq(bookings.facilityId, facilities.id), eq(bookings.facilityType, "FULL_ROOM")),
+              ),
+            ),
+        ),
+      ),
+    )
+    .orderBy(asc(facilities.name));
+}
+
+/**
+ * True when `facilityId` has NO active-like booking overlapping
+ * `[start, end)` — either directly, or via a FULL_ROOM booking overlapping
+ * the same window (OBS-811, "a full-room booking makes individual seats
+ * unavailable for its reserved interval"). AC-804/AC-806.
+ */
+export async function getFacilityAvailability(
+  orgId: string,
+  facilityId: string,
+  start: Date,
+  end: Date,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ count: sql<number>`count(1)::int` })
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.orgId, orgId),
+        inArray(bookings.status, activeLikeStatuses()),
+        lt(bookings.startAt, end),
+        or(isNull(bookings.endAt), gt(bookings.endAt, start)),
+        or(eq(bookings.facilityId, facilityId), eq(bookings.facilityType, "FULL_ROOM")),
+      ),
+    );
+  return (row?.count ?? 0) === 0;
+}
+
+/**
+ * True only when NO individual-facility (non-FULL_ROOM) active-like booking
+ * exists anywhere in `[dayStart, dayEnd)` — day-granularity, not merely the
+ * requested window (OBS-811, FR-851, AC-805).
+ */
+export async function getFullRoomAvailability(
+  orgId: string,
+  dayStart: Date,
+  dayEnd: Date,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ count: sql<number>`count(1)::int` })
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.orgId, orgId),
+        inArray(bookings.status, activeLikeStatuses()),
+        ne(bookings.facilityType, "FULL_ROOM"),
+        lt(bookings.startAt, dayEnd),
+        or(isNull(bookings.endAt), gt(bookings.endAt, dayStart)),
+      ),
+    );
+  return (row?.count ?? 0) === 0;
+}
+
+// ---------------------------------------------------------------------------
+// Race-safe write serialization (Design decision, docs/plans/2026-08-28-
+// booking-parity.md — advisory-lock serialization over a hard exclusion
+// constraint, chosen because AC-804/810 need overlapping active-like rows to
+// exist as fixtures, and an open-ended walk-in's null end_at would make a
+// GiST exclusion treat it as +infinity forever).
+//
+// These two helpers are the reusable lock primitives FR-850/FR-851 require:
+// the future createBooking/extendBooking transaction (Phase 5, a separate
+// dispatch) takes one of these as its FIRST statement, inside the SAME
+// db.transaction as its overlap re-check and insert/update, so the check
+// and the write are atomic against a concurrent writer. They are proven
+// here as a generic mechanism (lib/db/booking-lock.int.test.ts) — no
+// booking-create call site exists yet to integration-test AC-815/AC-816
+// against; those land with the createBooking rewrite.
+//
+// pg_advisory_xact_lock auto-releases at COMMIT/ROLLBACK of the enclosing
+// transaction — never needs an explicit unlock. hashtextextended(text, salt)
+// collapses the key to one bigint (the single-argument lock overload); the
+// salt namespaces this lock domain from any other advisory-lock user in the
+// codebase (e.g. lib/db/printers.ts's default-printer lock uses salt 42).
+// ---------------------------------------------------------------------------
+
+/**
+ * Serializes writers on the same (org, facility) for the life of the
+ * caller's transaction — same-facility seat/room overlap (FR-850, AC-815).
+ */
+export async function acquireFacilityLock(
+  tx: Pick<typeof db, "execute">,
+  orgId: string,
+  facilityId: string,
+): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${orgId} || ':' || ${facilityId}, 850))`,
+  );
+}
+
+/**
+ * Serializes writers across the whole org for one calendar day — full-room ↔
+ * individual-seat exclusivity, both directions (FR-851, AC-816). `calendarDay`
+ * is caller-normalized (e.g. an ISO `YYYY-MM-DD` in the org's local day).
+ */
+export async function acquireOrgDayLock(
+  tx: Pick<typeof db, "execute">,
+  orgId: string,
+  calendarDay: string,
+): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${orgId} || ':' || ${calendarDay}, 851))`,
+  );
 }
 
 // ---------------------------------------------------------------------------

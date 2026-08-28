@@ -25,7 +25,6 @@ import {
   cafeMenuItems,
   timeCreditPackages,
   facilities,
-  membershipTierConfig,
   orgPrintPricing,
 } from "@/lib/db/schema";
 import {
@@ -35,12 +34,9 @@ import {
   type CafeCategory,
   type FacilityType,
 } from "@/lib/db/enums";
-import { DEFAULT_CAFE_DISCOUNT_PCT } from "@/lib/cafe/pricing";
-import {
-  PRINT_RATE_BW,
-  PRINT_RATE_COLOR,
-  DEFAULT_PRINT_DISCOUNT_PCT,
-} from "@/lib/print/pricing";
+import { PRINT_RATE_BW, PRINT_RATE_COLOR } from "@/lib/print/pricing";
+import { LOCKED_TIER_DISCOUNTS } from "@/lib/tier-discounts";
+import { updateTierDiscounts } from "@/lib/db/tier-config";
 import { createId } from "@paralleldrive/cuid2";
 
 // ---------------------------------------------------------------------------
@@ -364,23 +360,14 @@ async function main() {
   }
   console.log(`Seeded ${FACILITIES.length} facilities.`);
 
-  // -- Pricing config (I-027) — seed to current behaviour, idempotent ---------
+  // -- Pricing config (I-041, spec 0008) — 4-dim locked map, idempotent upsert ----
+  // Surprising but intentional: re-running the seed RESETS every org's tier
+  // config back to the locked map, including any values an admin has since
+  // edited via /admin/settings/tiers. The seed is a dev-reset tool, not a
+  // one-time bootstrap — don't run it against a DB you want to keep admin
+  // edits on.
   for (const tier of MEMBERSHIP_TIERS) {
-    const id = `${org.id}__tiercfg-${tier}`;
-    const [existing] = await db
-      .select()
-      .from(membershipTierConfig)
-      .where(eq(membershipTierConfig.id, id))
-      .limit(1);
-    if (!existing) {
-      await db.insert(membershipTierConfig).values({
-        id,
-        orgId: org.id,
-        tier,
-        cafeDiscountPct: DEFAULT_CAFE_DISCOUNT_PCT, // 5% all tiers (flat, active-session)
-        printDiscountPct: DEFAULT_PRINT_DISCOUNT_PCT[tier], // 0 / 20 / 20
-      });
-    }
+    await updateTierDiscounts(org.id, tier, LOCKED_TIER_DISCOUNTS[tier], db);
   }
   const [existingPrintPricing] = await db
     .select()

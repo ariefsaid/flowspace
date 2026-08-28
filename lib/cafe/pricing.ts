@@ -6,13 +6,11 @@
  */
 import type { OrderTotals, PricedLine } from "@/lib/cafe/types";
 
-/** Default member cafe discount % (the seed for membership_tier_config.cafe_discount_pct, OBS-070). */
-export const DEFAULT_CAFE_DISCOUNT_PCT = 5;
-
 /**
  * Computes subtotal, discount, and total for a set of priced lines.
  * `discountPct` (0–100) is resolved server-side: the member tier's
- * `cafeDiscountPct` when eligible (active session), else 0.
+ * `cafeDiscountPct` when eligible (active session), else 0. The fail-safe for
+ * a missing/unconfigured tier is the repo's `getTierDiscounts` (0%, I-041).
  */
 export function computeOrderTotals(
   lines: PricedLine[],

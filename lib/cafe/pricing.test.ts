@@ -31,4 +31,19 @@ describe("computeOrderTotals", () => {
       totalRupiah: 73800,
     });
   });
+
+  it("AC-514: discount rounds with Math.round on a fractional-Rupiah subtotal", () => {
+    // subtotal 100000 × 3 = ... use a subtotal that fractions: 3 lines summing to 100001
+    const frac: PricedLine[] = [
+      { menuItemId: "a", nameSnapshot: "A", qty: 1, unitPriceRupiah: 50000 },
+      { menuItemId: "b", nameSnapshot: "B", qty: 1, unitPriceRupiah: 33334 },
+      { menuItemId: "c", nameSnapshot: "C", qty: 1, unitPriceRupiah: 16667 },
+    ]; // subtotal = 100001
+    // 10% → 10000.1 → Math.round → 10000
+    expect(computeOrderTotals(frac, { discountPct: 10 })).toEqual({
+      subtotalRupiah: 100001,
+      discountRupiah: 10000,
+      totalRupiah: 90001,
+    });
+  });
 });

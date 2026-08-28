@@ -820,4 +820,32 @@ describe("lib/db/cafe", () => {
       await expect(setOrderStatus(orgBId, o.id, "COMPLETED")).rejects.toThrow();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // DB CHECK constraint — cafe_menu_items.price_rupiah >= 0 [MONEY]
+  // -------------------------------------------------------------------------
+  describe("cafe_menu_items price_rupiah CHECK constraint [MONEY]", () => {
+    it("rejects a direct write of a negative base price at the DB level (defence-in-depth)", async () => {
+      await expect(
+        testSql`
+          insert into cafe_menu_items
+            (id, org_id, name, emoji, category, price_rupiah, description, has_variants, available)
+          values
+            (gen_random_uuid()::text, ${orgAId}, 'Negative Item', '❌', 'SNACK', -1, 'x', false, true)
+        `,
+      ).rejects.toThrow();
+    });
+
+    it("accepts a zero base price (free item) — only negative is rejected", async () => {
+      const [row] = await testSql`
+        insert into cafe_menu_items
+          (id, org_id, name, emoji, category, price_rupiah, description, has_variants, available)
+        values
+          (gen_random_uuid()::text, ${orgAId}, 'Free Item', '🆓', 'SNACK', 0, 'x', false, true)
+        returning id
+      `;
+      expect(row.id).toBeDefined();
+      await testSql`delete from cafe_menu_items where id = ${row.id}`;
+    });
+  });
 });

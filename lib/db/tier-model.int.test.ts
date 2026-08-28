@@ -15,7 +15,7 @@
  *  - Org C: no config rows at all (used for the fail-closed / no-cross-org-
  *    leak proof below).
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { eq } from "drizzle-orm";
 import postgres from "postgres";
@@ -130,11 +130,17 @@ afterAll(async () => {
   await testSql.end();
 }, 30_000);
 
-/** Restore org A's PREMIUM/GOLD rows to the locked map (tests mutate and must undo). */
+/** Restore org A's PREMIUM/GOLD rows to the locked map (some tests mutate them). */
 async function restoreOrgALocked(): Promise<void> {
   await updateTierDiscounts(orgAId, "PREMIUM", LOCKED_TIER_DISCOUNTS.PREMIUM);
   await updateTierDiscounts(orgAId, "GOLD", LOCKED_TIER_DISCOUNTS.GOLD);
 }
+
+// Runs after every test (idempotent no-op for tests that never mutated org A)
+// so a mutating test can never leak state into a later test regardless of order.
+afterEach(async () => {
+  await restoreOrgALocked();
+});
 
 describe("Schema, migration, and seed", () => {
   it("AC-500: all four pct columns are integer NOT NULL DEFAULT 0; enum is exactly REGULAR/PREMIUM/GOLD", async () => {
@@ -170,10 +176,6 @@ describe("Schema, migration, and seed", () => {
     for (const tier of MEMBERSHIP_TIERS) {
       expect(await getTierDiscounts(orgAId, tier)).toEqual(LOCKED_TIER_DISCOUNTS[tier]);
     }
-    // Stale spec-0006 guesses would have been cafeDiscountPct=5 (flat) and
-    // printDiscountPct=20 for PREMIUM/GOLD — neither appears in the locked map.
-    expect(LOCKED_TIER_DISCOUNTS.PREMIUM.printDiscountPct).not.toBe(20);
-    expect(LOCKED_TIER_DISCOUNTS.GOLD.printDiscountPct).not.toBe(20);
   });
 
   it("AC-503: re-running the seed-upsert twice leaves one row per (org,tier), still the locked values", async () => {
@@ -233,9 +235,6 @@ describe("Repository and authorization", () => {
   it("AC-506: a tier with no config row fails closed to four zeroes and never reads another org's row", async () => {
     const d = await getTierDiscounts(orgCId, "GOLD");
     expect(d).toEqual({ coworkingDiscountPct: 0, meetingDiscountPct: 0, cafeDiscountPct: 0, printDiscountPct: 0 });
-    // Not org A's real GOLD values, and not org B's real PREMIUM values.
-    expect(d).not.toEqual(LOCKED_TIER_DISCOUNTS.GOLD);
-    expect(d.cafeDiscountPct).not.toBe(20);
   });
 
   it("AC-507: updateTierDiscounts(A, PREMIUM, values) upserts all four; org B's PREMIUM is unaffected", async () => {
@@ -248,7 +247,6 @@ describe("Repository and authorization", () => {
     expect(await getTierDiscounts(orgBId, "PREMIUM")).toEqual({
       coworkingDiscountPct: 20, meetingDiscountPct: 20, cafeDiscountPct: 20, printDiscountPct: 20,
     });
-    await restoreOrgALocked();
   });
 
   it("AC-509: within one transaction, a valid write followed by an invalid write rolls back BOTH (no partial persistence)", async () => {
@@ -276,7 +274,6 @@ describe("Repository and authorization", () => {
     // All of A's rows remain scoped to A.
     const rowsA = await listTierConfig(orgAId);
     expect(rowsA.every((r) => r.orgId === orgAId)).toBe(true);
-    await restoreOrgALocked();
   });
 });
 
@@ -337,8 +334,6 @@ describe("[MONEY-PATH] Money-path proofs", () => {
     const newJob = await submitPrintJob({ orgId: orgAId, userId: premiumAId, fileName: "after.pdf", pages: 10, copies: 1, colorMode: "BW" });
     expect(newOrder.discountRupiah).toBe(10000); // 50% of 20000
     expect(newJob.discountRupiah).toBe(2500); // 50% of 5000
-
-    await restoreOrgALocked();
   });
 
   it("AC-519: an otherwise-valid member with no config row for their tier gets 0% on cafe and print", async () => {
@@ -349,15 +344,5 @@ describe("[MONEY-PATH] Money-path proofs", () => {
     const job = await submitPrintJob({ orgId: orgBId, userId: regularBId, fileName: "b.pdf", pages: 10, copies: 1, colorMode: "BW" });
     expect(job.discountRupiah).toBe(0);
     expect(job.totalRupiah).toBe(5000);
-  });
-});
-
-// Re-verify the money-path proofs left org A's config exactly at the locked
-// map for any test file that (re-)reads it afterward in the same DB session.
-describe("cleanup invariant", () => {
-  it("org A ends the suite at the locked map", async () => {
-    for (const tier of MEMBERSHIP_TIERS) {
-      expect(await getTierDiscounts(orgAId, tier)).toEqual(LOCKED_TIER_DISCOUNTS[tier]);
-    }
   });
 });

@@ -80,7 +80,7 @@ describe("TiersClient", () => {
     expect(screen.queryByText("Tersimpan")).not.toBeInTheDocument();
   });
 
-  it("AC-521: editing all four inputs for one tier forwards the four distinct edited values for that tier on Save", async () => {
+  it("editing all four discount inputs for one tier forwards the four distinct edited values for that tier on Save", async () => {
     vi.mocked(savePricingConfigAction).mockResolvedValueOnce(undefined);
     render(
       <TiersClient

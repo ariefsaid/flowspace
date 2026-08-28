@@ -18,12 +18,14 @@ export default async function AdminPricingConfigPage() {
     getPrintPricing(orgId),
   ]);
 
-  // Project to a row per known tier (fill 0/0 for any unconfigured tier).
+  // Project to a row per known tier (fill four zeroes for any unconfigured tier).
   const byTier = new Map(config.map((c) => [c.tier, c]));
   const tiers: TierRow[] = MEMBERSHIP_TIERS.map((tier) => {
     const row = byTier.get(tier);
     return {
       tier,
+      coworkingDiscountPct: row?.coworkingDiscountPct ?? 0,
+      meetingDiscountPct: row?.meetingDiscountPct ?? 0,
       cafeDiscountPct: row?.cafeDiscountPct ?? 0,
       printDiscountPct: row?.printDiscountPct ?? 0,
     };

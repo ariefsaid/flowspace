@@ -36,7 +36,7 @@ has no booking ACs; its auth, route-gate, and tenancy ACs remain in force.
 - **OBS-409** — When coworking place selection is shown, an interactive floor plan renders desk labels A–L and counter labels 1–8 with available, occupied, and selected states.
 - **OBS-410** — When a facility overlaps a `PENDING`, `CONFIRMED`, or `ACTIVE` booking, availability marks it occupied and selection is disabled.
 - **OBS-411** — When individual seats have any booking during a calendar day, the full-room facility is unavailable for that day; a full-room booking makes individual seats unavailable for its reserved interval.
-- **OBS-412** — When a full-room event is selected by a member, the UI presents a contact-for-price request rather than an online booking write.
+- **OBS-412** — When the full-room facility is available for the selected day, a member can select it and book it online like any other facility at its hourly rate; while any individual seat has a booking that day, it is shown unavailable and cannot be selected.
 
 ### Lifecycle, payment, and pricing
 - **OBS-413** — When a scheduled booking is created, its lifecycle is `PENDING → CONFIRMED → ACTIVE → COMPLETED|CANCELLED`; a walk-in follows `PENDING → ACTIVE → COMPLETED|CANCELLED` after cashier start.
@@ -126,7 +126,7 @@ has no booking ACs; its auth, route-gate, and tenancy ACs remain in force.
 - **AC-403** (unit/RTL) — Given an interactive floor plan, when an available labeled seat is clicked, then it becomes selected and an occupied seat cannot be selected.
 - **AC-404** (integration) — Given overlapping active-like bookings, when availability is requested, then the facility is marked occupied and all three statuses block it.
 - **AC-405** (integration) — Given an individual booking on a calendar day, when full-room availability is requested, then full room is unavailable for that day.
-- **AC-406** (unit/RTL) — Given full-room member selection, when confirmation is submitted, then a contact state appears and no online booking action is called.
+- **AC-406** (integration) — Given a day with no individual-seat bookings, when a member books the full-room facility online, then the booking is created at the full-room rate and every individual seat is unavailable for its interval.
 - **AC-407** (integration) — Given the lifecycle enum, when legal transitions run, then scheduled rows accept PENDING→CONFIRMED→ACTIVE→COMPLETED/CANCELLED and walk-ins accept PENDING→ACTIVE→COMPLETED/CANCELLED only.
 - **AC-408** (integration) — Given an online scheduled booking, when it is created, then it is CONFIRMED/PAID_ONLINE with server-priced amount.
 - **AC-409** (integration) — Given a cashier scheduled booking, when it is created, then it is PENDING/WAITING_CASHIER and its ledger row is pending.

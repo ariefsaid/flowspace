@@ -195,6 +195,19 @@ export function activeLikeStatuses(): BookingStatus[] {
   return ["PENDING", "CONFIRMED", "ACTIVE"];
 }
 
+/**
+ * The half-open overlap condition `[start, end)` vs a booking's own
+ * `[startAt, endAt)` — the SAME semantics as lib/booking/interval.ts's
+ * `intervalsOverlap` (AC-848), expressed once as Drizzle conditions and
+ * reused by every overlap query in this repository (dedupe: single oracle,
+ * never re-inlined per call site). An open-ended walk-in (`end_at IS NULL`)
+ * counts as unbounded. See the block comment above for why this is typed
+ * Drizzle operators, not a raw `sql` template.
+ */
+function overlapsWindow(start: Date, end: Date) {
+  return and(lt(bookings.startAt, end), or(isNull(bookings.endAt), gt(bookings.endAt, start)));
+}
+
 async function facilityHasActiveOverlap(
   dbLike: Pick<typeof db, "select">,
   orgId: string,
@@ -206,8 +219,7 @@ async function facilityHasActiveOverlap(
   const conds = [
     eq(bookings.orgId, orgId),
     inArray(bookings.status, activeLikeStatuses()),
-    lt(bookings.startAt, end),
-    or(isNull(bookings.endAt), gt(bookings.endAt, start)),
+    overlapsWindow(start, end),
     or(eq(bookings.facilityId, facilityId), eq(bookings.facilityType, "FULL_ROOM")),
   ];
   if (excludeBookingId) conds.push(ne(bookings.id, excludeBookingId));
@@ -232,8 +244,7 @@ async function individualBookingExistsOnDay(
         eq(bookings.orgId, orgId),
         inArray(bookings.status, activeLikeStatuses()),
         ne(bookings.facilityType, "FULL_ROOM"),
-        lt(bookings.startAt, dayEnd),
-        or(isNull(bookings.endAt), gt(bookings.endAt, dayStart)),
+        overlapsWindow(dayStart, dayEnd),
       ),
     );
   return (row?.count ?? 0) > 0;
@@ -265,8 +276,7 @@ export async function facilitiesAvailableInWindow(
               and(
                 eq(bookings.orgId, orgId),
                 inArray(bookings.status, activeLikeStatuses()),
-                lt(bookings.startAt, end),
-                or(isNull(bookings.endAt), gt(bookings.endAt, start)),
+                overlapsWindow(start, end),
                 or(eq(bookings.facilityId, facilities.id), eq(bookings.facilityType, "FULL_ROOM")),
               ),
             ),

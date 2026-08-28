@@ -40,6 +40,7 @@ export default async function GuestCafePage() {
     priceRupiah: m.priceRupiah,
     description: m.description,
     hasVariants: m.hasVariants,
+    variantConfig: m.variantConfig,
   }));
 
   return <GuestCafeClient menu={menu} />;

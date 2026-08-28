@@ -10,8 +10,11 @@ import { formatRupiah } from "@/lib/format";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { VariantPickerModal } from "@/components/cafe/VariantPickerModal";
+import { cartLineKey, addCartLine } from "@/lib/cafe/cart";
+import type { CartLine } from "@/lib/cafe/cart";
 import { placeOrder } from "@/app/cafe/actions";
-import type { OrderLineInput } from "@/lib/cafe/types";
+import type { OrderLineInput, VariantConfig, VariantSelectionInput } from "@/lib/cafe/types";
 
 // ---------------------------------------------------------------------------
 // View shape — DB CafeMenuItem mapped to what this component consumes
@@ -26,20 +29,7 @@ export interface GuestMenuItemView {
   priceRupiah: number;
   description: string;
   hasVariants: boolean;
-}
-
-// ---------------------------------------------------------------------------
-// Local types
-// ---------------------------------------------------------------------------
-
-type TemperatureOption = "Hot" | "Cold" | "Ice Blended";
-type SugarOption = "Normal Sugar" | "Less Sugar" | "No Sugar";
-
-interface CartItem {
-  menuItem: GuestMenuItemView;
-  qty: number;
-  temperature?: TemperatureOption;
-  sugar?: SugarOption;
+  variantConfig?: VariantConfig | null;
 }
 
 type CategoryTab = "Semua" | string;
@@ -60,103 +50,16 @@ const CATEGORY_TABS: { key: CategoryTab; label: string }[] = [
   { key: "SNACK", label: "Snack" },
 ];
 
-// ---------------------------------------------------------------------------
-// Variant Modal
-// ---------------------------------------------------------------------------
-
-interface VariantModalProps {
-  item: GuestMenuItemView;
-  onClose: () => void;
-  onAdd: (item: GuestMenuItemView, temperature: TemperatureOption, sugar: SugarOption) => void;
+/** A cart line carries a display-only price snapshot alongside the generic selections. */
+interface GuestCartLine extends CartLine {
+  menuItem: GuestMenuItemView;
+  price: number;
 }
 
-function VariantModal({ item, onClose, onAdd }: VariantModalProps) {
-  const [temperature, setTemperature] = useState<TemperatureOption>("Hot");
-  const [sugar, setSugar] = useState<SugarOption>("Normal Sugar");
-
-  const temperatures: TemperatureOption[] = ["Hot", "Cold", "Ice Blended"];
-  const sugars: SugarOption[] = ["Normal Sugar", "Less Sugar", "No Sugar"];
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      {/* Modal */}
-      <div className="relative w-full max-w-sm rounded-xl border border-slate-200 bg-white shadow-md">
-        {/* Header */}
-        <div className="border-b border-slate-200 p-4">
-          <div className="flex items-center gap-3">
-            <span className="text-3xl">{item.emoji}</span>
-            <div>
-              <h3 className="text-lg font-semibold text-gray-800">{item.name}</h3>
-              <p className="text-sm text-gray-500">{formatRupiah(item.priceRupiah)}</p>
-            </div>
-          </div>
-        </div>
-        {/* Body */}
-        <div className="space-y-4 p-4">
-          {/* Temperature */}
-          <div>
-            <p className="mb-2 text-sm font-medium text-gray-800">Suhu</p>
-            <div className="flex flex-wrap gap-2">
-              {temperatures.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setTemperature(t)}
-                  className={cn(
-                    "rounded-[10px] border px-3 py-1.5 text-sm font-medium transition-colors",
-                    temperature === t
-                      ? "border-teal-500 bg-teal-50 text-teal-700"
-                      : "border-slate-200 bg-white text-gray-600 hover:border-slate-300",
-                  )}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-          {/* Sugar level */}
-          <div>
-            <p className="mb-2 text-sm font-medium text-gray-800">Level Gula</p>
-            <div className="flex flex-wrap gap-2">
-              {sugars.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setSugar(s)}
-                  className={cn(
-                    "rounded-[10px] border px-3 py-1.5 text-sm font-medium transition-colors",
-                    sugar === s
-                      ? "border-teal-500 bg-teal-50 text-teal-700"
-                      : "border-slate-200 bg-white text-gray-600 hover:border-slate-300",
-                  )}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        {/* Footer */}
-        <div className="flex gap-2 border-t border-slate-200 p-4">
-          <Button variant="ghost" className="flex-1" onClick={onClose}>
-            Batal
-          </Button>
-          <Button
-            variant="primary"
-            className="flex-1"
-            onClick={() => onAdd(item, temperature, sugar)}
-          >
-            Tambah ke Keranjang
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
+/** Renders an ordered set of selected variant options as "Group: Option, Group: Option". */
+function formatOptions(options: VariantSelectionInput[]): string | null {
+  if (!options.length) return null;
+  return options.map((o) => `${o.variantName}: ${o.optionName}`).join(", ");
 }
 
 // ---------------------------------------------------------------------------
@@ -231,11 +134,13 @@ function MenuItemCard({ item, onAddDirect, onPickVariant }: MenuItemCardProps) {
 // Checkout Modal
 // ---------------------------------------------------------------------------
 
+const NOTES_MAX_LENGTH = 500;
+
 interface CheckoutModalProps {
-  cart: CartItem[];
+  cart: GuestCartLine[];
   total: number;
   onClose: () => void;
-  onConfirm: (guestName: string) => void;
+  onConfirm: (guestName: string, notes: string) => void;
   /** Indonesian error message to display when placeOrder rejects. */
   error?: string | null;
   /** Whether the order submission is in flight. */
@@ -244,11 +149,12 @@ interface CheckoutModalProps {
 
 function CheckoutModal({ cart, total, onClose, onConfirm, error, pending }: CheckoutModalProps) {
   const [guestName, setGuestName] = useState("");
+  const [notes, setNotes] = useState("");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (guestName.trim()) {
-      onConfirm(guestName.trim());
+      onConfirm(guestName.trim(), notes);
     }
   }
 
@@ -266,20 +172,18 @@ function CheckoutModal({ cart, total, onClose, onConfirm, error, pending }: Chec
           <div className="space-y-4 p-4">
             {/* Order summary */}
             <div className="space-y-2">
-              {cart.map((ci, idx) => (
-                <div key={idx} className="flex items-start justify-between gap-2 text-sm">
+              {cart.map((line) => (
+                <div key={line.key} className="flex items-start justify-between gap-2 text-sm">
                   <div className="min-w-0">
                     <span className="font-medium text-gray-800">
-                      {ci.qty}x {ci.menuItem.name}
+                      {line.qty}x {line.menuItem.name}
                     </span>
-                    {ci.temperature && (
-                      <p className="text-xs text-gray-500">
-                        {ci.temperature}, {ci.sugar}
-                      </p>
+                    {formatOptions(line.options) && (
+                      <p className="text-xs text-gray-500">{formatOptions(line.options)}</p>
                     )}
                   </div>
                   <span className="shrink-0 text-gray-700">
-                    {formatRupiah(ci.menuItem.priceRupiah * ci.qty)}
+                    {formatRupiah(line.price * line.qty)}
                   </span>
                 </div>
               ))}
@@ -304,6 +208,24 @@ function CheckoutModal({ cart, total, onClose, onConfirm, error, pending }: Chec
               <p className="mt-1 text-xs text-gray-500">
                 Nama akan dipanggil saat pesanan siap.
               </p>
+            </div>
+            {/* Notes (I-044, FR-724) */}
+            <div>
+              <label
+                htmlFor="guest-cafe-notes"
+                className="mb-1.5 block text-sm font-medium text-gray-800"
+              >
+                Catatan (opsional)
+              </label>
+              <textarea
+                id="guest-cafe-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                maxLength={NOTES_MAX_LENGTH}
+                rows={2}
+                placeholder="mis. tanpa gula, extra panas"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              />
             </div>
             {/* Server-action error (AC-102) */}
             {error && (
@@ -378,6 +300,9 @@ function toOrderErrorMessage(err: unknown): string {
   const map: Record<string, string> = {
     INVALID_MENU_ITEMS: "Sebagian item tidak tersedia. Perbarui keranjang Anda.",
     INVALID_QUANTITY: "Jumlah pesanan tidak valid.",
+    INVALID_VARIANTS: "Pilihan variant tidak valid. Perbarui keranjang Anda.",
+    MISSING_REQUIRED_VARIANT: "Lengkapi pilihan variant yang wajib diisi.",
+    INVALID_NOTES: "Catatan terlalu panjang (maksimal 500 karakter).",
     EMPTY_ORDER: "Keranjang masih kosong.",
     GUEST_NAME_REQUIRED: "Nama wajib diisi.",
     ORG_NOT_FOUND: "Pesanan gagal diproses. Coba lagi.",
@@ -390,7 +315,7 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [activeTab, setActiveTab] = useState<CategoryTab>("Semua");
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<GuestCartLine[]>([]);
   const [variantItem, setVariantItem] = useState<GuestMenuItemView | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [successName, setSuccessName] = useState<string | null>(null);
@@ -403,68 +328,55 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
       ? menu
       : menu.filter((m) => m.category === activeTab);
 
-  // Cart helpers
-  function addToCart(item: GuestMenuItemView, temperature?: TemperatureOption, sugar?: SugarOption) {
-    setCart((prev) => {
-      const matchIdx = prev.findIndex(
-        (ci) =>
-          ci.menuItem.id === item.id &&
-          ci.temperature === temperature &&
-          ci.sugar === sugar,
-      );
-      if (matchIdx >= 0) {
-        const updated = [...prev];
-        updated[matchIdx] = { ...updated[matchIdx], qty: updated[matchIdx].qty + 1 };
-        return updated;
-      }
-      return [...prev, { menuItem: item, qty: 1, temperature, sugar }];
-    });
+  // Cart helpers — generic selections (I-044); different combinations of the
+  // same item stay separate lines, identical selections merge (AC-704).
+  function addToCart(item: GuestMenuItemView, options: VariantSelectionInput[] = []) {
+    const priceAdjustment = options.reduce((sum, sel) => {
+      const group = item.variantConfig?.variants.find((g) => g.name === sel.variantName);
+      const option = group?.options.find((o) => o.name === sel.optionName);
+      return sum + (option?.priceAdjustment ?? 0);
+    }, 0);
+    const key = cartLineKey(item.id, options);
+    setCart((prev) =>
+      addCartLine(prev, {
+        key,
+        menuItemId: item.id,
+        options,
+        qty: 1,
+        menuItem: item,
+        price: item.priceRupiah + priceAdjustment,
+      }),
+    );
   }
 
-  function removeFromCart(idx: number) {
-    setCart((prev) => {
-      const updated = [...prev];
-      if (updated[idx].qty > 1) {
-        updated[idx] = { ...updated[idx], qty: updated[idx].qty - 1 };
-        return updated;
-      }
-      return updated.filter((_, i) => i !== idx);
-    });
+  function removeFromCart(key: string) {
+    setCart((prev) =>
+      prev
+        .map((l) => (l.key === key ? { ...l, qty: l.qty - 1 } : l))
+        .filter((l) => l.qty > 0),
+    );
   }
 
-  const cartTotal = cart.reduce((sum, ci) => sum + ci.menuItem.priceRupiah * ci.qty, 0);
-  const cartCount = cart.reduce((sum, ci) => sum + ci.qty, 0);
+  const cartTotal = cart.reduce((sum, l) => sum + l.price * l.qty, 0);
+  const cartCount = cart.reduce((sum, l) => sum + l.qty, 0);
 
-  function handleVariantAdd(item: GuestMenuItemView, temp: TemperatureOption, sugar: SugarOption) {
-    addToCart(item, temp, sugar);
+  function handleVariantAdd(item: GuestMenuItemView, selections: VariantSelectionInput[]) {
+    addToCart(item, selections);
     setVariantItem(null);
   }
 
-  async function handleConfirmOrder(guestName: string) {
+  async function handleConfirmOrder(guestName: string, notes: string) {
     setOrderError(null);
     setOrderPending(true);
 
-    // Map temperature/sugar to DB enums
-    const tempMap: Record<TemperatureOption, OrderLineInput["temperature"]> = {
-      Hot: "HOT",
-      Cold: "COLD",
-      "Ice Blended": "ICE_BLENDED",
-    };
-    const sugarMap: Record<SugarOption, OrderLineInput["sugar"]> = {
-      "Normal Sugar": "NORMAL",
-      "Less Sugar": "LESS",
-      "No Sugar": "NONE",
-    };
-
-    const lines: OrderLineInput[] = cart.map((ci) => ({
-      menuItemId: ci.menuItem.id,
-      qty: ci.qty,
-      temperature: ci.temperature ? tempMap[ci.temperature] : null,
-      sugar: ci.sugar ? sugarMap[ci.sugar] : null,
+    const lines: OrderLineInput[] = cart.map((l) => ({
+      menuItemId: l.menuItemId,
+      qty: l.qty,
+      options: l.options,
     }));
 
     try {
-      await placeOrder({ lines, guestName });
+      await placeOrder({ lines, guestName, notes: notes.trim() || undefined });
     } catch (err) {
       setOrderError(toOrderErrorMessage(err));
       setOrderPending(false);
@@ -603,41 +515,39 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
                 ) : (
                   <>
                     <div className="space-y-3">
-                      {cart.map((ci, idx) => (
+                      {cart.map((line) => (
                         <div
-                          key={idx}
+                          key={line.key}
                           className="flex items-start justify-between gap-2"
                         >
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-gray-800">
-                              {ci.menuItem.name}
+                              {line.menuItem.name}
                             </p>
-                            {ci.temperature && (
-                              <p className="text-xs text-gray-500">
-                                {ci.temperature}, {ci.sugar}
-                              </p>
+                            {formatOptions(line.options) && (
+                              <p className="text-xs text-gray-500">{formatOptions(line.options)}</p>
                             )}
                             <p className="text-xs text-teal-600">
-                              {formatRupiah(ci.menuItem.priceRupiah * ci.qty)}
+                              {formatRupiah(line.price * line.qty)}
                             </p>
                           </div>
                           <div className="flex shrink-0 items-center gap-1.5">
                             <button
                               type="button"
-                              onClick={() => removeFromCart(idx)}
+                              onClick={() => removeFromCart(line.key)}
                               className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-gray-600 hover:bg-slate-50 text-sm font-medium transition-colors"
                             >
                               −
                             </button>
                             <span className="w-5 text-center text-sm font-semibold text-gray-800">
-                              {ci.qty}
+                              {line.qty}
                             </span>
                             <button
                               type="button"
                               onClick={() =>
-                                ci.menuItem.hasVariants
-                                  ? setVariantItem(ci.menuItem)
-                                  : addToCart(ci.menuItem)
+                                line.menuItem.hasVariants
+                                  ? setVariantItem(line.menuItem)
+                                  : addToCart(line.menuItem)
                               }
                               className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-gray-600 hover:bg-slate-50 text-sm font-medium transition-colors"
                             >
@@ -688,12 +598,18 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
         )}
       </div>
 
-      {/* Variant picker modal */}
-      {variantItem && (
-        <VariantModal
-          item={variantItem}
+      {/* Variant picker modal (I-044) */}
+      {variantItem && variantItem.variantConfig && (
+        <VariantPickerModal
+          item={{
+            name: variantItem.name,
+            emoji: variantItem.emoji,
+            description: variantItem.description,
+            priceRupiah: variantItem.priceRupiah,
+            variantConfig: variantItem.variantConfig,
+          }}
           onClose={() => setVariantItem(null)}
-          onAdd={handleVariantAdd}
+          onConfirm={(selections) => handleVariantAdd(variantItem, selections)}
         />
       )}
 

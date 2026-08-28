@@ -22,6 +22,7 @@ export type RecordTxnInput = {
   bookingId?: string | null;
   printJobId?: string | null;
   packageId?: string | null;
+  printTopupPackageId?: string | null;
 };
 
 /**
@@ -46,6 +47,7 @@ export async function recordTransaction(
       bookingId: input.bookingId ?? null,
       printJobId: input.printJobId ?? null,
       packageId: input.packageId ?? null,
+      printTopupPackageId: input.printTopupPackageId ?? null,
     })
     .returning();
   return row;

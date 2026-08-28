@@ -1,56 +1,55 @@
 /**
- * Repository: PrintJob (I-023, [SEC] money path).
+ * Server-authoritative print-job repository (I-043).
  *
- * All reads/writes are server-side via Drizzle over Supabase Postgres (ADR-0015).
- * Every function takes `orgId` derived from the server session — the client
- * NEVER supplies it (ADR-0004). Totals are ALWAYS server-computed via
- * computePrintTotal from the user's loaded tier; no client price is trusted.
- *
- * The print balance lives on `app_users.printBalance` (integer pages/sheets).
- * A job of N pages × C copies consumes N×C sheets. The debit + job insert +
- * ledger write happen in ONE db.transaction so they are atomic.
+ * Every operation is scoped by a server-derived organization id. Pricing,
+ * printer capabilities, page ranges, balance debits, and ledger writes are
+ * checked on the server; the browser never supplies an authoritative value.
  */
-import { and, eq, desc, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
-import { printJobs, appUsers, type PrintJob } from "@/lib/db/schema";
+import {
+  appUsers,
+  orgPrintPricing,
+  printJobs,
+  printers,
+  type PrintJob,
+} from "@/lib/db/schema";
 import { recordTransaction } from "@/lib/db/transactions";
-import { computePrintTotal } from "@/lib/print/pricing";
-import { getPrintPricing } from "@/lib/db/print-pricing";
 import { getTierDiscounts } from "@/lib/db/tier-config";
 import type { PrintColorMode } from "@/lib/db/enums";
+import { parsePageRange, computeEffectiveSheets } from "@/lib/print/page-range";
+import { computePrintTotal, resolvePrintPrice } from "@/lib/print/pricing";
+import { transitionPrintJob } from "@/lib/print/lifecycle";
+import type { PrintJobStatus } from "@/lib/db/enums";
 
-// ---------------------------------------------------------------------------
-// P1: listPrintJobsByUser
-// ---------------------------------------------------------------------------
+export type PrintJobHistoryRow = PrintJob & {
+  printerName: string | null;
+  printerDisplayName: string | null;
+};
 
-/**
- * Org + user scoped print history, newest first (member /print surface).
- * AC-0237 / FR-243.
- */
-export function listPrintJobsByUser(
+/** Member history is deliberately bounded and org + user scoped. */
+export async function listPrintJobsByUser(
   orgId: string,
   userId: string,
-  limit = 100,
-): Promise<PrintJob[]> {
-  return db
-    .select()
+  limit = 20,
+): Promise<PrintJobHistoryRow[]> {
+  const rows = await db
+    .select({ job: printJobs, printerName: printers.name, printerDisplayName: printers.displayName })
     .from(printJobs)
+    .leftJoin(printers, eq(printJobs.printerId, printers.id))
     .where(and(eq(printJobs.orgId, orgId), eq(printJobs.userId, userId)))
     .orderBy(desc(printJobs.createdAt))
-    .limit(limit);
+    .limit(Math.min(Math.max(limit, 1), 20));
+
+  return rows.map(({ job, printerName, printerDisplayName }) => ({
+    ...job,
+    printerName,
+    printerDisplayName,
+  }));
 }
 
-/**
- * Org-scoped listing of print jobs for the admin "Laporan Print" report table,
- * newest first (member names are joined in the page via findProfilesByIds,
- * matching the admin bookings pattern). The `limit` caps the rendered TABLE only
- * — summary aggregates come from getPrintReportSummary (SQL, uncapped) so they
- * never understate. AC-300 / FR-300, FR-301.
- */
-export function listPrintJobsForAdmin(
-  orgId: string,
-  limit = 500,
-): Promise<PrintJob[]> {
+/** Org-scoped, bounded admin report listing. */
+export function listPrintJobsForAdmin(orgId: string, limit = 500): Promise<PrintJob[]> {
   return db
     .select()
     .from(printJobs)
@@ -63,122 +62,125 @@ export type PrintReportSummary = {
   totalJobs: number;
   totalPages: number;
   uniqueUsers: number;
-  /** Σ net charge (totalRupiah) over COMPLETED jobs. */
   totalRevenue: number;
   completedCount: number;
 };
 
-/**
- * Org-scoped print-report summary computed in SQL over ALL the org's jobs —
- * independent of the table's row cap, so totals/revenue never understate on a
- * high-volume org (security review M2). FR-302 / AC-301.
- */
 export async function getPrintReportSummary(orgId: string): Promise<PrintReportSummary> {
   const [row] = await db
     .select({
       totalJobs: sql<number>`count(*)::int`,
-      totalPages: sql<number>`coalesce(sum(${printJobs.pages}), 0)::int`,
+      totalPages: sql<number>`coalesce(sum(coalesce(${printJobs.totalPages}, ${printJobs.pages} * ${printJobs.copies})), 0)::int`,
       uniqueUsers: sql<number>`count(distinct ${printJobs.userId})::int`,
       totalRevenue: sql<number>`coalesce(sum(${printJobs.totalRupiah}) filter (where ${printJobs.status} = 'COMPLETED'), 0)::int`,
       completedCount: sql<number>`count(*) filter (where ${printJobs.status} = 'COMPLETED')::int`,
     })
     .from(printJobs)
     .where(eq(printJobs.orgId, orgId));
-  return (
-    row ?? {
-      totalJobs: 0,
-      totalPages: 0,
-      uniqueUsers: 0,
-      totalRevenue: 0,
-      completedCount: 0,
-    }
-  );
+  return row ?? { totalJobs: 0, totalPages: 0, uniqueUsers: 0, totalRevenue: 0, completedCount: 0 };
 }
 
-// ---------------------------------------------------------------------------
-// P2: submitPrintJob  [SEC] — server-priced atomic submit
-// ---------------------------------------------------------------------------
-
-/**
- * Submits a print job for the signed-in member.
- *
- * Security / money contract:
- * - `orgId`/`userId` are server-derived (from the session); the client never
- *   supplies them. The user row is loaded scoped to `(id, orgId)` so a
- *   cross-org userId resolves to NOT_FOUND.
- * - The tier is loaded from that row and the total is computed server-side via
- *   computePrintTotal — no client price/total is ever trusted.
- * - The printBalance debit is an atomic conditional UPDATE guarded by
- *   `printBalance >= sheets`, evaluated at write time inside the tx — so two
- *   concurrent jobs for the same user cannot overdraw (race-safe).
- * - On insufficient balance the tx throws INSUFFICIENT_BALANCE and rolls back:
- *   no job, no ledger row, no debit (AC-0235, "no write").
- * - Job insert + balance debit + ledger write are all in ONE db.transaction.
- *
- * AC-0234, AC-0235, AC-0236 / FR-240–242.
- */
-export async function submitPrintJob(input: {
+type SubmitPrintJobInput = {
   orgId: string;
   userId: string;
   fileName: string;
-  pages: number;
+  /** Legacy alias for documentPages; new callers should use documentPages. */
+  pages?: number;
+  pageRange?: string;
+  documentPages?: number;
+  printerId?: string;
   copies: number;
   colorMode: PrintColorMode;
   paperSize?: string;
   duplex?: boolean;
   storagePath?: string | null;
-}): Promise<PrintJob> {
-  // --- Input validation (client-supplied scalars; bound before any DB work) ---
+};
+
+/**
+ * Validate, price, debit, and persist one print job atomically.
+ * The optional legacy fields are retained for existing callers during the
+ * migration; all new action submissions provide pageRange/documentPages.
+ */
+export async function submitPrintJob(input: SubmitPrintJobInput): Promise<PrintJob> {
   const fileName = (input.fileName ?? "").trim().slice(0, 255);
   if (!fileName) throw new Error("INVALID_FILE");
-  if (!Number.isInteger(input.pages) || input.pages <= 0) {
-    throw new Error("INVALID_PAGES");
+  const documentPages = input.documentPages ?? input.pages ?? 0;
+  if (!Number.isInteger(documentPages) || documentPages <= 0) {
+    throw new Error("INVALID_DOCUMENT_PAGES");
   }
+  const validDocumentPages = documentPages;
   if (!Number.isInteger(input.copies) || input.copies <= 0) {
     throw new Error("INVALID_COPIES");
   }
-  const paperSize = (input.paperSize ?? "").trim() || "A4";
-  const duplex = input.duplex ?? false;
+  if (input.colorMode !== "BW" && input.colorMode !== "COLOR") {
+    throw new Error("INVALID_COLOR_MODE");
+  }
+  const paperSize = input.paperSize ?? "A4";
+  if (paperSize !== "A4" && paperSize !== "A3" && paperSize !== "F4") {
+    throw new Error("INVALID_PAPER_SIZE");
+  }
 
-  // --- Load the user within the org (tier + cross-org isolation) ---
+  const parsed = parsePageRange(input.pageRange ?? "all", validDocumentPages);
+  const totalPages = computeEffectiveSheets(parsed.pageCount, input.copies);
   const [user] = await db
     .select()
     .from(appUsers)
     .where(and(eq(appUsers.id, input.userId), eq(appUsers.orgId, input.orgId)))
     .limit(1);
   if (!user) throw new Error("NOT_FOUND");
-
-  // --- Server-side pricing from org config + the loaded tier ([SEC]) ---
-  const [pricing, tierDiscounts] = await Promise.all([
-    getPrintPricing(input.orgId),
-    getTierDiscounts(input.orgId, user.membershipTier),
-  ]);
-  const totals = computePrintTotal({
-    pages: input.pages,
-    copies: input.copies,
-    colorMode: input.colorMode,
-    bwRateRupiah: pricing.bwRatePerPageRupiah,
-    colorRateRupiah: pricing.colorRatePerPageRupiah,
-    discountPct: tierDiscounts.printDiscountPct,
-  });
-
-  const sheets = input.pages * input.copies;
+  const tierDiscounts = await getTierDiscounts(input.orgId, user.membershipTier);
 
   return db.transaction(async (tx) => {
-    // Atomic, race-safe debit: the guard `printBalance >= sheets` is evaluated
-    // at write time, so concurrent jobs can't overdraw. Returning 0 rows ⇒ the
-    // balance was insufficient at commit time → throw + rollback (no write).
+    // Re-check capability and pricing in the same transaction as the debit.
+    const printerRows = await tx
+      .select()
+      .from(printers)
+      .where(
+        and(
+          eq(printers.orgId, input.orgId),
+          eq(printers.isActive, true),
+          isNull(printers.archivedAt),
+          input.printerId ? eq(printers.id, input.printerId) : eq(printers.isDefault, true),
+        ),
+      )
+      .limit(1);
+    const printer = printerRows[0];
+    if (!printer) throw new Error("INVALID_PRINTER");
+    if (input.colorMode === "COLOR" && !printer.colorSupport) {
+      throw new Error("UNSUPPORTED_COLOR");
+    }
+    if (!printer.paperSizes.includes(paperSize)) {
+      throw new Error("UNSUPPORTED_PAPER");
+    }
+
+    const pricingRows = await tx
+      .select({
+        colorMode: orgPrintPricing.colorMode,
+        paperSize: orgPrintPricing.paperSize,
+        pricePerPageRupiah: orgPrintPricing.pricePerPageRupiah,
+        isActive: orgPrintPricing.isActive,
+      })
+      .from(orgPrintPricing)
+      .where(eq(orgPrintPricing.orgId, input.orgId));
+    const pricePerPageRupiah = resolvePrintPrice(pricingRows, input.colorMode, paperSize);
+    const totals = computePrintTotal({
+      pages: parsed.pageCount,
+      copies: input.copies,
+      pricePerPageRupiah,
+      discountPct: tierDiscounts.printDiscountPct,
+    });
+
     const [debited] = await tx
       .update(appUsers)
       .set({
-        printBalance: sql`${appUsers.printBalance} - ${sheets}`,
+        printBalance: sql`${appUsers.printBalance} - ${totalPages}`,
         updatedAt: new Date(),
       })
       .where(
         and(
           eq(appUsers.id, user.id),
           eq(appUsers.orgId, input.orgId),
-          gte(appUsers.printBalance, sheets),
+          gte(appUsers.printBalance, totalPages),
         ),
       )
       .returning({ id: appUsers.id });
@@ -190,15 +192,18 @@ export async function submitPrintJob(input: {
         orgId: input.orgId,
         userId: input.userId,
         fileName,
-        pages: input.pages,
+        pages: validDocumentPages,
         copies: input.copies,
         colorMode: input.colorMode,
         paperSize,
-        duplex,
-        pricePerPageRupiah: totals.pricePerPageRupiah,
+        duplex: input.duplex ?? false,
+        pricePerPageRupiah,
         discountRupiah: totals.discountRupiah,
         totalRupiah: totals.totalRupiah,
         storagePath: input.storagePath ?? null,
+        pageRange: parsed.normalized,
+        totalPages,
+        printerId: printer.id,
         status: "PENDING",
       })
       .returning();
@@ -208,17 +213,60 @@ export async function submitPrintJob(input: {
         orgId: input.orgId,
         userId: input.userId,
         type: "PRINT_JOB",
-        description: `Print ${fileName} · ${input.pages}×${input.copies} ${input.colorMode}`,
+        description: `Print ${fileName} · ${parsed.normalized}×${input.copies} ${input.colorMode}`,
         amountRupiah: totals.totalRupiah,
         discountRupiah: totals.discountRupiah,
-        // Job is created PENDING; the ledger row mirrors that until the
-        // printer marks it READY/COMPLETED (admin flow, separate issue).
         status: "PENDING",
         printJobId: job.id,
       },
       tx,
     );
-
     return job;
+  });
+}
+
+/** Advance one job through the server-owned lifecycle, with an org row lock. */
+export async function advancePrintJob(
+  orgId: string,
+  jobId: string,
+  nextStatus: PrintJobStatus,
+  metadata: { processedBy?: string; errorMessage?: string } = {},
+): Promise<PrintJob> {
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(printJobs)
+      .where(and(eq(printJobs.id, jobId), eq(printJobs.orgId, orgId)))
+      .for("update")
+      .limit(1);
+    if (!current) throw new Error("NOT_FOUND");
+
+    transitionPrintJob(current.status, nextStatus, {
+      processedBy: metadata.processedBy,
+      errorMessage: metadata.errorMessage,
+    });
+    const now = new Date();
+    const values: Partial<typeof printJobs.$inferInsert> = {
+      status: nextStatus,
+      updatedAt: now,
+    };
+    if (nextStatus === "PROCESSING" || nextStatus === "READY" || nextStatus === "FAILED") {
+      values.processedBy = metadata.processedBy ?? current.processedBy;
+      values.processedAt = now;
+    }
+    if (nextStatus === "FAILED") values.errorMessage = metadata.errorMessage ?? "Print processing failed";
+    if (nextStatus === "PROCESSING" && current.status === "FAILED") values.errorMessage = null;
+    if (nextStatus === "COMPLETED") {
+      values.completedAt = now;
+      values.processedBy = metadata.processedBy ?? current.processedBy;
+      values.processedAt = current.processedAt ?? now;
+      values.errorMessage = null;
+    }
+    const [updated] = await tx
+      .update(printJobs)
+      .set(values)
+      .where(and(eq(printJobs.id, jobId), eq(printJobs.orgId, orgId)))
+      .returning();
+    return updated;
   });
 }

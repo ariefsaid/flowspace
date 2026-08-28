@@ -47,6 +47,34 @@ beforeEach(() => {
 });
 
 describe("PrintClient (AC-0239 / AC-0240)", () => {
+  it("AC-627: disables unsupported printer capabilities and previews server matrix discount", () => {
+    render(
+      <PrintClient
+        printBalance={50}
+        jobs={[]}
+        discountPct={5}
+        pricing={[
+          { colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, isActive: true },
+          { colorMode: "COLOR", paperSize: "A4", pricePerPageRupiah: 2000, isActive: true },
+        ]}
+        printers={[{
+          id: "p1", name: "bw", displayName: "Printer B/W", location: null,
+          printerType: "LASER", colorSupport: false, paperSizes: ["A4"],
+          isActive: true, isDefault: true,
+        }]}
+      />,
+    );
+    expect(screen.getByRole("option", { name: /warna/i })).toBeDisabled();
+    expect(screen.getByText(/diskon/i)).toBeInTheDocument();
+    expect(screen.getByText(/475/)).toBeInTheDocument();
+  });
+
+  it("disables submission when the server sends no active pricing rows", () => {
+    render(<PrintClient printBalance={50} jobs={[]} printers={[{ id: "p1", name: "bw", displayName: "Printer B/W", location: null, printerType: "LASER", colorSupport: false, paperSizes: ["A4"], isActive: true, isDefault: true }]} pricing={[]} />);
+    expect(screen.getByRole("button", { name: /submit print job/i })).toBeDisabled();
+    expect(screen.getByText(/harga belum tersedia/i)).toBeInTheDocument();
+  });
+
   // -------------------------------------------------------------------------
   // AC-0239: renders the seeded summary
   // -------------------------------------------------------------------------

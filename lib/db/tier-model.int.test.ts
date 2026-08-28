@@ -9,6 +9,8 @@
  *  - Org A: full locked config for REGULAR/PREMIUM/GOLD (0/0/0/0, 10/10/5/5,
  *    15/15/10/10) + three members (one per tier) + a cafe item + print
  *    balance, used for the money-path proofs.
+ *  - Org A + B also get a default printer + BW/A4 matrix cell (I-043
+ *    precondition for submitPrintJob — resolved before the tier discount).
  *  - Org B: a PREMIUM row with DISTINCT values (used for cross-org isolation)
  *    and a REGULAR member with NO config row (used for the fail-safe 0%
  *    money-path proof below).
@@ -27,6 +29,8 @@ import {
   cafeOrders,
   printJobs,
   membershipTierConfig,
+  printers,
+  orgPrintPricing,
 } from "@/lib/db/schema";
 import {
   listTierConfig,
@@ -123,6 +127,27 @@ beforeAll(async () => {
   });
 
   // Org C — no config rows at all (the fail-closed / no-leak fixture below).
+
+  // Print-parity preconditions (I-043) — submitPrintJob requires an active
+  // default printer + a resolved BW/A4 matrix cell; org A and org B both
+  // submit print jobs below.
+  for (const orgId of [orgAId, orgBId]) {
+    await testDb.insert(printers).values({
+      orgId,
+      name: "tier-model-printer",
+      displayName: "Tier Model Printer",
+      colorSupport: true,
+      paperSizes: ["A4", "A3", "F4"],
+      isDefault: true,
+    });
+    await testDb.insert(orgPrintPricing).values({
+      orgId,
+      colorMode: "BW",
+      paperSize: "A4",
+      pricePerPageRupiah: 500,
+      isActive: true,
+    });
+  }
 }, 30_000);
 
 afterAll(async () => {

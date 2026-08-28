@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/app/(member)/topup/actions", () => ({
   purchasePackageAction: vi.fn().mockResolvedValue({ timeCredits: 0 }),
-  topUpPrintAction: vi.fn().mockResolvedValue({ printBalance: 0 }),
+  topUpPrintAction: vi.fn().mockResolvedValue({} as never),
 }));
 
 import {
@@ -43,10 +43,21 @@ const samplePackages: PackageView[] = [
 
 beforeEach(() => {
   vi.mocked(purchasePackageAction).mockResolvedValue({ timeCredits: 0 });
-  vi.mocked(topUpPrintAction).mockResolvedValue({ printBalance: 0 });
+  vi.mocked(topUpPrintAction).mockResolvedValue({} as never);
 });
 
 describe("TopupClient (I-020)", () => {
+  it(": renders server-provided print package rows and sends packageId", async () => {
+    render(<TopupClient packages={samplePackages} printPackages={[
+      { id: "print-10", pages: 10, priceRupiah: 10000, sortOrder: 1 },
+      { id: "print-50", pages: 50, priceRupiah: 45000, sortOrder: 2 },
+    ]} timeCredits={0} printBalance={0} />);
+    fireEvent.click(screen.getByRole("button", { name: /print balance/i }));
+    expect(screen.getByText("10 Pages")).toBeInTheDocument();
+    expect(screen.getByText("Rp 10.000")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("10 Pages"));
+    await waitFor(() => expect(topUpPrintAction).toHaveBeenCalledWith("print-10"));
+  });
   it("renders DB-sourced packages + balances passed as props", () => {
     render(
       <TopupClient
@@ -88,6 +99,7 @@ describe("TopupClient (I-020)", () => {
     render(
       <TopupClient
         packages={samplePackages}
+        printPackages={[{ id: "print-50", pages: 50, priceRupiah: 25000, sortOrder: 1 }, { id: "print-100", pages: 100, priceRupiah: 50000, sortOrder: 2 }]}
         timeCredits={0}
         printBalance={0}
       />,
@@ -96,11 +108,11 @@ describe("TopupClient (I-020)", () => {
     // open the print tab (balance tile acts as a tab)
     fireEvent.click(screen.getByRole("button", { name: /print balance/i }));
 
-    // 100-page denomination card
+    // 100-page server package card
     fireEvent.click(screen.getByText("100 Pages"));
 
     await waitFor(() => {
-      expect(topUpPrintAction).toHaveBeenCalledWith(100);
+      expect(topUpPrintAction).toHaveBeenCalledWith("print-100");
     });
   });
 

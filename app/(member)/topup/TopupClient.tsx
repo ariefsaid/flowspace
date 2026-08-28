@@ -21,36 +21,13 @@ export interface PackageView {
   popular: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Print-balance packages (denomination shortcuts).
-// ponytail: these are UI-only denominations — there is no print-package table.
-// The displayed price == the server charge (pages × flat Rp500/page), so the
-// member is never shown a price the ledger doesn't match ([SEC]). Must stay in
-// sync with lib/db/packages.ts PRINT_RATE_PER_PAGE_RUPIAH (server is authority).
-// ---------------------------------------------------------------------------
-
-const PRINT_RATE_PER_PAGE = 500;
-
-interface PrintPackage {
+export interface PrintPackageView {
   id: string;
   pages: number;
-  price: number;
-  pricePerPage: number;
+  priceRupiah: number;
+  sortOrder: number;
   popular?: boolean;
 }
-
-const printPackages: PrintPackage[] = [
-  { id: "pp-50", pages: 50 },
-  { id: "pp-100", pages: 100 },
-  { id: "pp-200", pages: 200, popular: true },
-  { id: "pp-500", pages: 500 },
-].map((p) => ({
-  id: p.id,
-  pages: p.pages,
-  price: p.pages * PRINT_RATE_PER_PAGE,
-  pricePerPage: PRINT_RATE_PER_PAGE,
-  popular: p.popular,
-}));
 
 // ---------------------------------------------------------------------------
 // Tab type
@@ -64,6 +41,7 @@ type TabKey = "time" | "print";
 
 export interface TopupClientProps {
   packages: PackageView[];
+  printPackages?: PrintPackageView[];
   timeCredits: number;
   printBalance: number;
 }
@@ -86,6 +64,7 @@ function toErrorMessage(err: unknown): string {
 
 export function TopupClient({
   packages,
+  printPackages = [],
   timeCredits,
   printBalance,
 }: TopupClientProps) {
@@ -115,12 +94,12 @@ export function TopupClient({
     });
   }
 
-  async function handlePurchasePrint(pages: number, packageId: string) {
+  async function handlePurchasePrint(packageId: string) {
     if (pendingId) return;
     setError(null);
     setPendingId(packageId);
     try {
-      await topUpPrintAction(pages);
+      await topUpPrintAction(packageId);
     } catch (err) {
       setError(toErrorMessage(err));
       setPendingId(null);
@@ -260,15 +239,16 @@ export function TopupClient({
             })}
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          printPackages.length === 0 ? <p className="py-10 text-center text-sm text-gray-400">Belum ada paket print tersedia.</p> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {printPackages.map((pkg) => {
               const isPending = pendingId === pkg.id;
+              const pricePerPage = Math.round(pkg.priceRupiah / pkg.pages);
               return (
                 <button
                   key={pkg.id}
                   type="button"
                   disabled={pendingId !== null}
-                  onClick={() => handlePurchasePrint(pkg.pages, pkg.id)}
+                  onClick={() => handlePurchasePrint(pkg.id)}
                   className={cn(
                     "relative rounded-xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/40",
                     isPending
@@ -276,14 +256,6 @@ export function TopupClient({
                       : "border border-slate-200 bg-white shadow-sm hover:border-purple-300",
                   )}
                 >
-                  {/* Popular badge */}
-                  {pkg.popular && (
-                    <span className="absolute -top-3 right-4 inline-flex items-center gap-1 rounded-full bg-orange-500 px-2.5 py-0.5 text-xs font-medium text-white shadow-sm">
-                      <Star className="h-3 w-3 fill-white" aria-hidden="true" />
-                      Popular
-                    </span>
-                  )}
-
                   <p className="text-base font-semibold text-gray-900">
                     {pkg.pages} Pages
                   </p>
@@ -291,10 +263,10 @@ export function TopupClient({
                     {pkg.pages} pages of print balance
                   </p>
                   <p className="mt-3 text-xl font-bold text-gray-900">
-                    {formatRupiah(pkg.price)}
+                    {formatRupiah(pkg.priceRupiah)}
                   </p>
                   <p className="text-sm text-gray-500">
-                    {formatRupiah(pkg.pricePerPage)}/page
+                    {formatRupiah(pricePerPage)}/page
                   </p>
                 </button>
               );

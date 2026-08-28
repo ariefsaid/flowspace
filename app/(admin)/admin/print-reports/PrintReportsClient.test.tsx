@@ -96,6 +96,21 @@ describe("print-reports source hygiene", () => {
 });
 
 describe("PrintReportsClient render", () => {
+  it("AC-626: renders every status with effective pages, printer, and available action", () => {
+    const statuses = ["PENDING", "PROCESSING", "READY", "COMPLETED", "FAILED"] as const;
+    render(<PrintReportsClient jobs={statuses.map((status, index) => ({
+      id: `p-${index}`, user: "Budi", fileName: `${status}.pdf`, pages: 6, copies: 2,
+      pageRange: "1-3", printer: "Printer Lobi", colorMode: "BW", paperSize: "A4", discountRupiah: 100, grossRupiah: 3100,
+      netRupiah: 3000, datetime: "2026-06-15T10:00:00Z", status,
+      processedBy: "agent", processedAt: "2026-06-15T10:01:00Z", completedAt: null,
+      canAdvance: status !== "COMPLETED",
+    }))} summary={{ totalJobs: 5, totalPages: 15, uniqueUsers: 1, totalRevenue: 3000, completedCount: 0 }} />);
+    expect(screen.getByText("PROCESSING")).toBeInTheDocument();
+    expect(screen.getByText("Diproses")).toBeInTheDocument();
+    expect(screen.getByText("Gagal")).toBeInTheDocument();
+    expect(screen.getAllByText("Printer Lobi").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("6 lembar")).toHaveLength(5);
+  });
   it("AC-302: renders a discounted row with derived % and struck-through gross", () => {
     render(
       <PrintReportsClient
@@ -117,7 +132,7 @@ describe("PrintReportsClient render", () => {
     // plain row: no discount → em dash, BW label, Menunggu
     expect(screen.getByText("B/W")).toBeInTheDocument();
     expect(screen.getByText("Menunggu")).toBeInTheDocument();
-    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
   });
 
   it("AC-303: renders the empty state and no table when there are no jobs", () => {

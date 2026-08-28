@@ -35,7 +35,14 @@ const TEST_URL =
 const rootSql = postgres(TEST_URL, { prepare: false, max: 3 });
 const rootDb = drizzle(rootSql, { schema });
 
-/** The 12 business tables the I-046 REVOKE migration must lock down. */
+/**
+ * The 12 business tables the I-046 REVOKE migration must lock down, plus the
+ * 4 new print-parity tables (I-043, migration 0012/0013) that adopt the same
+ * SELECT-only convention from their first migration (ADR-0015 addendum) —
+ * `org_print_pricing` is re-created (renamed to `_legacy` + a new matrix
+ * table under the same name) by migration 0012, so it must be re-proven here
+ * too, not just inherited from I-046's original REVOKE.
+ */
 const BUSINESS_TABLES = [
   "app_users",
   "organizations",
@@ -49,6 +56,10 @@ const BUSINESS_TABLES = [
   "transactions",
   "membership_tier_config",
   "org_print_pricing",
+  "printers",
+  "print_agent_configs",
+  "print_agent_rate_limit_events",
+  "print_topup_packages",
 ] as const;
 
 let orgAId: string;

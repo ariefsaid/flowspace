@@ -12,7 +12,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "@/lib/db/schema";
-import { appUsers, organizations, transactions } from "@/lib/db/schema";
+import {
+  appUsers,
+  organizations,
+  transactions,
+  orgPrintPricing,
+  printers,
+} from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 const TEST_URL =
@@ -79,6 +85,39 @@ beforeAll(async () => {
     { orgId: orgBId, tier: "PREMIUM", cafeDiscountPct: 5, printDiscountPct: 20 },
     { orgId: orgBId, tier: "GOLD", cafeDiscountPct: 5, printDiscountPct: 20 },
   ]);
+
+  await testDb.insert(orgPrintPricing).values([
+    ...([
+      ["BW", "A4", 500], ["BW", "A3", 1000], ["BW", "F4", 600],
+      ["COLOR", "A4", 2000], ["COLOR", "A3", 4000], ["COLOR", "F4", 2500],
+    ] as const).map(([colorMode, paperSize, pricePerPageRupiah]) => ({
+      orgId: orgAId, colorMode, paperSize, pricePerPageRupiah, isActive: true,
+    })),
+    ...([
+      ["BW", "A4", 500], ["BW", "A3", 1000], ["BW", "F4", 600],
+      ["COLOR", "A4", 2000], ["COLOR", "A3", 4000], ["COLOR", "F4", 2500],
+    ] as const).map(([colorMode, paperSize, pricePerPageRupiah]) => ({
+      orgId: orgBId, colorMode, paperSize, pricePerPageRupiah, isActive: true,
+    })),
+  ]);
+  await testDb.insert(printers).values([
+    {
+      orgId: orgAId,
+      name: "test-printer-a",
+      displayName: "Test Printer A",
+      colorSupport: true,
+      paperSizes: ["A4", "A3", "F4"],
+      isDefault: true,
+    },
+    {
+      orgId: orgBId,
+      name: "test-printer-b",
+      displayName: "Test Printer B",
+      colorSupport: false,
+      paperSizes: ["A4"],
+      isDefault: true,
+    },
+  ]);
 }, 30_000);
 
 afterAll(async () => {
@@ -94,6 +133,7 @@ import {
   listPrintJobsByUser,
   listPrintJobsForAdmin,
   getPrintReportSummary,
+  advancePrintJob,
 } from "@/lib/db/print";
 import { printJobs, membershipTierConfig } from "@/lib/db/schema";
 
@@ -152,7 +192,7 @@ describe("lib/db/print", () => {
       expect(txn.userId).toBe(aUserId);
     });
 
-    it("AC-0236: COLOR + PREMIUM tier discount computed server-side (3× rate, 20% off)", async () => {
+    it("AC-0236: COLOR + PREMIUM tier discount computed server-side (A4 rate, 20% off)", async () => {
       const job = await submitPrintJob({
         orgId: orgAId,
         userId: aUserId,
@@ -161,10 +201,10 @@ describe("lib/db/print", () => {
         copies: 1,
         colorMode: "COLOR",
       });
-      // rate 1500 × 4 × 1 = 6000 → 20% = 1200 → 4800
-      expect(job.pricePerPageRupiah).toBe(1500);
-      expect(job.discountRupiah).toBe(1200);
-      expect(job.totalRupiah).toBe(4800);
+      // bridge default A4 rate 2000 × 4 × 1 = 8000 → 20% = 1600 → 6400
+      expect(job.pricePerPageRupiah).toBe(2000);
+      expect(job.discountRupiah).toBe(1600);
+      expect(job.totalRupiah).toBe(6400);
     });
   });
 
@@ -440,5 +480,116 @@ describe("lib/db/print", () => {
         completedCount: 0,
       });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// I-043 member contract: effective sheets, capabilities, pricing, and history
+// ---------------------------------------------------------------------------
+describe("print lifecycle repository", () => {
+  it("AC-616: advances an org-scoped job and records transition metadata", async () => {
+    const [job] = await testDb.insert(printJobs).values({
+      orgId: orgAId, userId: aUserId, fileName: "lifecycle.pdf", pages: 2, copies: 1,
+      colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, discountRupiah: 0,
+      totalRupiah: 1000, totalPages: 2, pageRange: "all", status: "PENDING",
+    }).returning();
+    const processing = await advancePrintJob(orgAId, job.id, "PROCESSING", { processedBy: "agent-1" });
+    expect(processing.status).toBe("PROCESSING");
+    expect(processing.processedBy).toBe("agent-1");
+    expect(processing.processedAt).toBeInstanceOf(Date);
+    const ready = await advancePrintJob(orgAId, job.id, "READY", { processedBy: "agent-1" });
+    expect(ready.status).toBe("READY");
+  });
+
+  it(": illegal org-scoped status changes perform no write", async () => {
+    const [job] = await testDb.insert(printJobs).values({
+      orgId: orgAId, userId: aUserId, fileName: "illegal.pdf", pages: 1, copies: 1,
+      colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, discountRupiah: 0,
+      totalRupiah: 500, totalPages: 1, pageRange: "all", status: "PENDING",
+    }).returning();
+    await expect(advancePrintJob(orgAId, job.id, "COMPLETED")).rejects.toThrow(/INVALID_PRINT_TRANSITION/);
+    const [unchanged] = await testDb.select().from(printJobs).where(eq(printJobs.id, job.id));
+    expect(unchanged.status).toBe("PENDING");
+  });
+
+  it("AC-637: report pages use effective total_pages and revenue only counts COMPLETED", async () => {
+    const [org] = await testDb.insert(organizations).values({ name: "Summary Org", slug: "summary-org" }).returning();
+    const [member] = await testDb.insert(appUsers).values({ orgId: org.id, email: "summary@x.test", name: "Summary", role: "MEMBER" }).returning();
+    await testDb.insert(printJobs).values([
+      { orgId: org.id, userId: member.id, fileName: "done.pdf", pages: 10, copies: 2, totalPages: 3, pageRange: "1-3", colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, discountRupiah: 0, totalRupiah: 1500, status: "COMPLETED" },
+      { orgId: org.id, userId: member.id, fileName: "pending.pdf", pages: 10, copies: 2, totalPages: 4, pageRange: "1-4", colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, discountRupiah: 0, totalRupiah: 2000, status: "PENDING" },
+    ]);
+    expect(await getPrintReportSummary(org.id)).toMatchObject({ totalPages: 7, totalRevenue: 1500, completedCount: 1 });
+  });
+});
+
+describe("submitPrintJob — I-043 member contract", () => {
+  it("AC-601: parses the selected range and debits effective sheets, not document pages", async () => {
+    const [before] = await testDb.select({ balance: appUsers.printBalance }).from(appUsers).where(eq(appUsers.id, aUserId));
+    const [printer] = await testDb.select({ id: printers.id }).from(printers).where(eq(printers.orgId, orgAId)).limit(1);
+    const job = await submitPrintJob({
+      orgId: orgAId, userId: aUserId, fileName: "range.pdf", pageRange: "1-3,5", documentPages: 8,
+      printerId: printer.id, copies: 2, colorMode: "BW", paperSize: "A4", duplex: true,
+    });
+    expect(job.pageRange).toBe("1-3,5");
+    expect(job.pages).toBe(8);
+    expect(job.totalPages).toBe(8);
+    expect(job.copies).toBe(2);
+    expect(job.duplex).toBe(true);
+    const [after] = await testDb.select({ balance: appUsers.printBalance }).from(appUsers).where(eq(appUsers.id, aUserId));
+    expect(after.balance).toBe(before.balance - 8);
+  });
+
+  it("AC-607: requires an active default or selected printer before any write", async () => {
+    await testSql`UPDATE printers SET is_active = false, is_default = false WHERE org_id = ${orgBId}`;
+    await expect(submitPrintJob({
+      orgId: orgBId, userId: bUserId, fileName: "none.pdf", pageRange: "all", documentPages: 1,
+      copies: 1, colorMode: "BW", paperSize: "A4",
+    })).rejects.toThrow(/INVALID_PRINTER/);
+  });
+
+  it("AC-608: rejects printer capability mismatches before balance debit", async () => {
+    await testSql`UPDATE printers SET is_active = true, is_default = true WHERE org_id = ${orgBId}`;
+    await expect(submitPrintJob({
+      orgId: orgBId, userId: bUserId, fileName: "color.pdf", pageRange: "all", documentPages: 1,
+      copies: 1, colorMode: "COLOR", paperSize: "A4",
+    })).rejects.toThrow(/UNSUPPORTED_COLOR/);
+  });
+
+  it("AC-610: rejects an inactive matrix cell rather than using a fallback rate", async () => {
+    await testSql`UPDATE org_print_pricing SET is_active = false WHERE org_id = ${orgAId} AND color_mode = 'BW' AND paper_size = 'F4'`;
+    await expect(submitPrintJob({
+      orgId: orgAId, userId: aUserId, fileName: "inactive.pdf", pageRange: "all", documentPages: 1,
+      copies: 1, colorMode: "BW", paperSize: "F4",
+    })).rejects.toThrow(/INVALID_PRINT_PRICING/);
+    await testSql`UPDATE org_print_pricing SET is_active = true WHERE org_id = ${orgAId} AND color_mode = 'BW' AND paper_size = 'F4'`;
+  });
+
+  it("AC-611: snapshots server-resolved tier discount and selected matrix price", async () => {
+    const job = await submitPrintJob({
+      orgId: orgAId, userId: aUserId, fileName: "discount.pdf", pageRange: "all", documentPages: 3,
+      copies: 1, colorMode: "COLOR", paperSize: "A3",
+    });
+    expect(job.pricePerPageRupiah).toBe(4000);
+    expect(job.discountRupiah).toBe(2400);
+    expect(job.totalRupiah).toBe(9600);
+  });
+
+  it("AC-613: member history is org/user scoped, capped at 20, and maps all five statuses", async () => {
+    await testDb.insert(printJobs).values(["PENDING", "PROCESSING", "READY", "COMPLETED", "FAILED"].map((status, index) => ({
+      orgId: orgAId, userId: aUserId, fileName: `status-${index}.pdf`, pages: 1, copies: 1,
+      colorMode: "BW" as const, paperSize: "A4", pricePerPageRupiah: 500, discountRupiah: 0,
+      totalRupiah: 500, totalPages: 1, pageRange: "all", status: status as "PENDING" | "PROCESSING" | "READY" | "COMPLETED" | "FAILED",
+    })));
+    const rows = await listPrintJobsByUser(orgAId, aUserId, 999);
+    expect(new Set(rows.filter((row) => row.fileName.startsWith("status-")).map((row) => row.status))).toEqual(new Set(["PENDING", "PROCESSING", "READY", "COMPLETED", "FAILED"]));
+  });
+
+  it("AC-635: member history is capped at 20 rows and includes printer display data", async () => {
+    const rows = await listPrintJobsByUser(orgAId, aUserId, 999);
+    expect(rows.length).toBeLessThanOrEqual(20);
+    const newest = rows.find((row) => row.fileName === "range.pdf");
+    expect(newest).toBeDefined();
+    expect((newest as typeof newest & { printerDisplayName?: string }).printerDisplayName).toBe("Test Printer A");
   });
 });

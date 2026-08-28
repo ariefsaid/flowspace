@@ -116,7 +116,7 @@ export async function upsertPrintPricingCell(
 // Legacy A4 bridge (I-027 tiers settings page edits BW/COLOR A4). The matrix
 // above is the authority; these map the flat editor onto the two A4 cells.
 // NOTE: the bridge reads fall back to the SIGNED A4 defaults only so the legacy
-// editor can render before migration 0013 seeds a matrix — submitPrintJob (the
+// editor can render before migration 0012 seeds a matrix — submitPrintJob (the
 // money path) never uses this fallback (it resolves cells via getActivePrintPrice
 // and rejects null, FR-631).
 // ---------------------------------------------------------------------------

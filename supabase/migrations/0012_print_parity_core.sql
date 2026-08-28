@@ -133,11 +133,17 @@ CREATE INDEX "print_jobs_org_id_status_created_at_idx"
 CREATE INDEX "print_jobs_printer_id_idx" ON "public"."print_jobs" USING btree ("printer_id");
 
 -- 7. RLS backstop (ADR-0015 §3) — org isolation; the server stays authoritative.
+-- SELECT-only grant (I-046 / ADR-0015 addendum): these are all NEW physical
+-- tables (org_print_pricing is renamed+recreated above, not the pre-existing
+-- relation), so they start with no client write DML rather than inheriting
+-- I-046's revoke. All writes go through the server's service-role connection;
+-- the FOR ALL policy below is defense-in-depth only (RLS never grants beyond
+-- what GRANT allows).
 DO $$
 DECLARE t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY['org_print_pricing','printers','print_agent_configs','print_agent_rate_limit_events'] LOOP
-    EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO authenticated', t);
+    EXECUTE format('GRANT SELECT ON TABLE %I TO authenticated', t);
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('CREATE POLICY %I ON %I FOR ALL TO authenticated USING (org_id = current_org()) WITH CHECK (org_id = current_org())', t || '_org_isolation', t);
   END LOOP;

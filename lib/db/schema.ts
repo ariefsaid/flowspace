@@ -396,7 +396,7 @@ export const orgPrintPricing = pgTable(
 
 // ---------------------------------------------------------------------------
 // Print parity (I-043, spec 0009): printers + agent key config + packages.
-// DDL authority = supabase/migrations/0013_print_parity_core.sql (0014 for
+// DDL authority = supabase/migrations/0012_print_parity_core.sql (0013 for
 // print_topup_packages). TS mirror kept in lockstep.
 // ---------------------------------------------------------------------------
 export const printers = pgTable(

@@ -1,5 +1,5 @@
 /**
- * Integration test for the I-043 print-parity core migration (0013).
+ * Integration test for the I-043 print-parity core migration (0012).
  * Runs against the Supabase local Postgres via TEST_DATABASE_URL after
  * `pnpm exec supabase db reset`.
  *
@@ -10,7 +10,7 @@
  * The standard `db reset` applies all migrations in one ordered pass against an
  * EMPTY legacy table, so the only way to prove the migration's data-mapping is
  * to seed a legacy-shaped row + a historic job and then replay the migration's
- * data-transformation SQL (the exact statements 0013 runs on an upgrade). This
+ * data-transformation SQL (the exact statements 0012 runs on an upgrade). This
  * file asserts both the post-reset structure (tables/enum/columns exist) and
  * the replayed backfill (values preserved + seeded + jobs updated + none lost).
  */
@@ -50,7 +50,7 @@ afterAll(async () => {
 
 // -- Migration structure (applied by `db reset`) -----------------------------
 
-describe("I-043 print-parity migration (0013) — structure", () => {
+describe("I-043 print-parity migration (0012) — structure", () => {
   it("AC-634: the legacy flat pricing table is preserved as org_print_pricing_legacy", async () => {
     const rows = await sql`
       SELECT column_name FROM information_schema.columns
@@ -115,7 +115,7 @@ describe("I-043 print-parity migration (0013) — structure", () => {
  *  - maps a legacy (flat) pricing row into BW/A4 + COLOR/A4 matrix rows;
  *  - seeds the missing A3/F4 defaults for each color mode;
  *  - backfills historic jobs with page_range='all' and total_pages=pages×copies.
- * These are the exact statements 0013 runs on an upgrade.
+ * These are the exact statements 0012 runs on an upgrade.
  */
 async function replayMigrationBackfill() {
   // 1. Preserve legacy A4 values into the matrix.
@@ -152,7 +152,7 @@ async function replayMigrationBackfill() {
     WHERE org_id = ${orgId}`;
 }
 
-describe("I-043 print-parity migration (0013) — backfill", () => {
+describe("I-043 print-parity migration (0012) — backfill", () => {
   let jobId: string;
 
   beforeAll(async () => {

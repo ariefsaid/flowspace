@@ -22,7 +22,10 @@ SELECT "id" || '__print-topup-50', "id", 50, 45000, 2 FROM "public"."organizatio
 UNION ALL
 SELECT "id" || '__print-topup-100', "id", 100, 80000, 3 FROM "public"."organizations";
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "public"."print_topup_packages" TO authenticated;
+-- SELECT-only (I-046 / ADR-0015 addendum) — all writes go through the
+-- server's service-role connection; the FOR ALL policy below is
+-- defense-in-depth only (RLS never grants beyond what GRANT allows).
+GRANT SELECT ON TABLE "public"."print_topup_packages" TO authenticated;
 ALTER TABLE "public"."print_topup_packages" ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "print_topup_packages_org_isolation" ON "public"."print_topup_packages"
   FOR ALL TO authenticated USING (org_id = current_org()) WITH CHECK (org_id = current_org());

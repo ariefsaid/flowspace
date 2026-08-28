@@ -93,7 +93,7 @@ export function CartPanel({
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <ShoppingCart className="h-10 w-10 text-slate-300 mb-3" />
               <p className="text-sm text-gray-500">Keranjang masih kosong</p>
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-gray-500 mt-1">
                 Tambahkan menu favorit Anda
               </p>
             </div>

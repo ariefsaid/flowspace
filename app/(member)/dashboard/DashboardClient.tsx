@@ -74,10 +74,12 @@ export interface DashboardClientProps {
 
 function statusBadgeTone(
   status: BookingPreviewView["status"],
-): "completed" | "neutral" | "cancelled" {
+): "completed" | "neutral" | "cancelled" | "pending" | "active" {
   if (status === "ACTIVE") return "completed";
   if (status === "COMPLETED") return "neutral";
-  return "cancelled";
+  if (status === "PENDING") return "pending";
+  if (status === "CONFIRMED") return "active";
+  return "cancelled"; // CANCELLED
 }
 
 // Riwayat preview shows the raw (English) status label, matching the original.
@@ -314,7 +316,9 @@ export function DashboardClient({
         <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="min-w-0">
             <p className="text-sm text-gray-500">Status Sesi</p>
-            <p className="mt-1 text-sm font-bold text-green-600">
+            <p
+              className={`mt-1 text-sm font-bold ${hasSession ? "text-green-600" : "text-gray-500"}`}
+            >
               {hasSession ? "AKTIF" : "Tidak Ada"}
             </p>
             <p className="text-xs text-gray-500">
@@ -343,6 +347,11 @@ export function DashboardClient({
         </div>
 
         <div className="space-y-3">
+          {recentBookings.length === 0 && (
+            <p className="py-4 text-center text-sm text-gray-500">
+              Belum ada riwayat booking.
+            </p>
+          )}
           {recentBookings.map((booking) => (
             <div
               key={booking.id}

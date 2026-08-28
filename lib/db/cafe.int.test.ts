@@ -11,7 +11,15 @@
  * AC-124: advanceOrderStatus on a cross-org order forbids, no write
  * AC-125: listOrders / getOrder returns org-scoped orders with items + customer
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// Mock only generateOrderCode (keep nextStatus real) so AC-728 can force a
+// collision deterministically; default implementation delegates to the real
+// generator so every other test still gets a real random 6-char code.
+vi.mock("@/lib/cafe/status", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/cafe/status")>();
+  return { ...actual, generateOrderCode: vi.fn(actual.generateOrderCode) };
+});
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "@/lib/db/schema";
@@ -41,6 +49,7 @@ let bUserId: string;
 let latteAId: string;
 let croissantAId: string;
 let orgBItemId: string;
+let variantLatteAId: string;
 
 beforeAll(async () => {
   // Truncate via raw sql (postgres-js) to avoid Drizzle execute hang on
@@ -119,6 +128,43 @@ beforeAll(async () => {
     .returning();
   croissantAId = croissant.id;
 
+  // Variant-enabled item (I-044): Temperature (required) × Sugar (required).
+  const [variantLatte] = await testDb
+    .insert(cafeMenuItems)
+    .values({
+      orgId: orgAId,
+      name: "Kopi Susu",
+      emoji: "🧋",
+      category: "COFFEE",
+      priceRupiah: 22000,
+      description: "Kopi susu with configurable variants",
+      hasVariants: true,
+      variantConfig: {
+        variants: [
+          {
+            name: "Temperature",
+            required: true,
+            options: [
+              { name: "Hot", priceAdjustment: 0 },
+              { name: "Cold", priceAdjustment: 3000 },
+            ],
+          },
+          {
+            name: "Sugar",
+            required: true,
+            options: [
+              { name: "Normal Sugar", priceAdjustment: 0 },
+              { name: "Less Sugar", priceAdjustment: 0 },
+              { name: "No Sugar", priceAdjustment: 0 },
+            ],
+          },
+        ],
+      },
+      available: true,
+    })
+    .returning();
+  variantLatteAId = variantLatte.id;
+
   // Unavailable item — should NOT appear in listMenu
   await testDb.insert(cafeMenuItems).values({
     orgId: orgAId,
@@ -178,6 +224,9 @@ import {
   setOrderStatus,
 } from "@/lib/db/cafe";
 import { advanceOrderStatusAsActor } from "@/lib/cafe/authz";
+import { generateOrderCode } from "@/lib/cafe/status";
+
+const mockedGenerateOrderCode = generateOrderCode as unknown as ReturnType<typeof vi.fn>;
 
 describe("lib/db/cafe", () => {
   // -------------------------------------------------------------------------
@@ -216,7 +265,7 @@ describe("lib/db/cafe", () => {
   // C2 — createOrder (member path + cross-org rejection)
   // -------------------------------------------------------------------------
   describe("createOrder — member + cross-org guard", () => {
-    it("AC-112: createOrder persists member order with server totals, NEW, unique code, line snapshots", async () => {
+    it("AC-112 / AC-723: createOrder persists member order with server totals, NEW, unique code, line snapshots", async () => {
       const order = await createOrder({
         orgId: orgAId,
         customerUserId: aUserId,
@@ -266,28 +315,194 @@ describe("lib/db/cafe", () => {
       expect(order.totalRupiah).toBe(77900);
     });
 
-    it("AC-112: createOrder accepts the same item on two lines (multi-variant drink: hot + cold)", async () => {
-      // A member orders one Latte hot + one Latte cold — two lines, same menuItemId.
-      // The cross-org guard must validate distinct ids, not raw line count.
+    it("AC-112 / AC-704: createOrder accepts the same item on two lines (multi-variant drink: hot + cold)", async () => {
+      // A member orders one Kopi Susu hot + one Kopi Susu cold — two lines,
+      // same menuItemId. The cross-org guard must validate distinct ids, not
+      // raw line count.
       const order = await createOrder({
         orgId: orgAId,
         customerUserId: aUserId,
         guestName: null,
         lines: [
-          { menuItemId: latteAId, qty: 1, temperature: "HOT", sugar: "NORMAL" },
-          { menuItemId: latteAId, qty: 1, temperature: "COLD", sugar: "LESS" },
+          {
+            menuItemId: variantLatteAId,
+            qty: 1,
+            options: [
+              { variantName: "Temperature", optionName: "Hot" },
+              { variantName: "Sugar", optionName: "Normal Sugar" },
+            ],
+          },
+          {
+            menuItemId: variantLatteAId,
+            qty: 1,
+            options: [
+              { variantName: "Temperature", optionName: "Cold" },
+              { variantName: "Sugar", optionName: "Less Sugar" },
+            ],
+          },
         ],
         discountEligible: false,
       });
-      expect(order.subtotalRupiah).toBe(64000); // 32000 × 2
+      expect(order.subtotalRupiah).toBe(47000); // 22000 (Hot) + 25000 (Cold +3000)
       const items = await testDb
         .select()
         .from(cafeOrderItems)
         .where(eq(cafeOrderItems.orderId, order.id));
       expect(items).toHaveLength(2);
-      expect(items.filter((i) => i.menuItemId === latteAId)).toHaveLength(2);
-      const temps = items.map((i) => i.temperature).sort();
-      expect(temps).toEqual(["COLD", "HOT"]);
+      expect(items.filter((i) => i.menuItemId === variantLatteAId)).toHaveLength(2);
+      const temps = items
+        .map((i) => (i.variantOptions as { variantName: string; optionName: string }[]).find((o) => o.variantName === "Temperature")?.optionName)
+        .sort();
+      expect(temps).toEqual(["Cold", "Hot"]);
+      // Legacy compatibility columns are never populated by new writes (NFR-044-04)
+      expect(items.every((i) => i.temperature === null && i.sugar === null)).toBe(true);
+    });
+
+    it("AC-707: a variant order line snapshots group/option/adjustment in variant_options", async () => {
+      const order = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [
+          {
+            menuItemId: variantLatteAId,
+            qty: 1,
+            options: [
+              { variantName: "Temperature", optionName: "Cold" },
+              { variantName: "Sugar", optionName: "No Sugar" },
+            ],
+          },
+        ],
+        discountEligible: false,
+      });
+      const [item] = await testDb
+        .select()
+        .from(cafeOrderItems)
+        .where(eq(cafeOrderItems.orderId, order.id));
+      expect(item.unitPriceRupiah).toBe(25000); // 22000 + 3000
+      expect(item.variantOptions).toEqual([
+        { variantName: "Temperature", optionName: "Cold", priceAdjustmentRupiah: 3000 },
+        { variantName: "Sugar", optionName: "No Sugar", priceAdjustmentRupiah: 0 },
+      ]);
+    });
+
+    it("AC-708: a later menu rename/reprice does not alter a prior order's line snapshots", async () => {
+      const order = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+      });
+      const [before] = await testDb
+        .select()
+        .from(cafeOrderItems)
+        .where(eq(cafeOrderItems.orderId, order.id));
+      expect(before.nameSnapshot).toBe("Latte");
+      expect(before.unitPriceRupiah).toBe(32000);
+
+      // Rename + reprice the live menu row after the order was placed
+      await testDb
+        .update(cafeMenuItems)
+        .set({ name: "Latte Deluxe", priceRupiah: 99000 })
+        .where(eq(cafeMenuItems.id, latteAId));
+
+      const [after] = await testDb
+        .select()
+        .from(cafeOrderItems)
+        .where(eq(cafeOrderItems.orderId, order.id));
+      expect(after.nameSnapshot).toBe("Latte");
+      expect(after.unitPriceRupiah).toBe(32000);
+
+      // Restore for subsequent tests in this file
+      await testDb
+        .update(cafeMenuItems)
+        .set({ name: "Latte", priceRupiah: 32000 })
+        .where(eq(cafeMenuItems.id, latteAId));
+    });
+
+    it("AC-705: a missing required variant group is rejected, no write", async () => {
+      const [{ count: before }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      await expect(
+        createOrder({
+          orgId: orgAId,
+          customerUserId: aUserId,
+          guestName: null,
+          lines: [
+            {
+              menuItemId: variantLatteAId,
+              qty: 1,
+              options: [{ variantName: "Temperature", optionName: "Hot" }], // Sugar omitted
+            },
+          ],
+          discountEligible: false,
+        }),
+      ).rejects.toThrow(/MISSING_REQUIRED_VARIANT/);
+      const [{ count: after }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      expect(after).toBe(before);
+    });
+
+    it("AC-712: order notes are trimmed and persisted; blank notes store null", async () => {
+      const withNotes = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+        notes: "  less sugar please  ",
+      });
+      expect(withNotes.notes).toBe("less sugar please");
+
+      const withBlank = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+        notes: "   ",
+      });
+      expect(withBlank.notes).toBeNull();
+
+      const [{ count: before }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      await expect(
+        createOrder({
+          orgId: orgAId,
+          customerUserId: aUserId,
+          guestName: null,
+          lines: [{ menuItemId: latteAId, qty: 1 }],
+          discountEligible: false,
+          notes: "a".repeat(501),
+        }),
+      ).rejects.toThrow(/INVALID_NOTES/);
+      const [{ count: after }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      expect(after).toBe(before);
+    });
+
+    it("AC-728: retries within the bounded code-generation policy after a collision, never duplicate org codes", async () => {
+      const existing = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+      });
+      mockedGenerateOrderCode
+        .mockReturnValueOnce(existing.code) // forces a unique-violation on attempt 1
+        .mockReturnValueOnce("zzz999"); // attempt 2 succeeds with a fresh code
+
+      const second = await createOrder({
+        orgId: orgAId,
+        customerUserId: aUserId,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+      });
+      expect(second.code).toBe("zzz999");
+      expect(second.code).not.toBe(existing.code);
     });
 
     it("AC-112: createOrder rejects a non-positive / fractional qty (no total manipulation), no write", async () => {
@@ -309,7 +524,7 @@ describe("lib/db/cafe", () => {
       expect(after).toBe(before);
     });
 
-    it("AC-112: createOrder rejects an unavailable or archived item (orderability enforced), no write", async () => {
+    it("AC-112 / AC-727: createOrder rejects an unavailable or archived item (orderability enforced), no write", async () => {
       // Capture the seeded non-orderable item ids.
       const seeded = await testDb
         .select()
@@ -352,7 +567,7 @@ describe("lib/db/cafe", () => {
   // C3 — createOrder (guest path + zero-line rejection)
   // -------------------------------------------------------------------------
   describe("createOrder — guest + empty lines", () => {
-    it("AC-113: guest order captures name, no discount, customerUserId null", async () => {
+    it("AC-113 / AC-723: guest order captures name, no discount, customerUserId null", async () => {
       const o = await createOrder({
         orgId: orgAId,
         customerUserId: null,
@@ -389,7 +604,7 @@ describe("lib/db/cafe", () => {
   // C4 — advanceOrderStatus
   // -------------------------------------------------------------------------
   describe("advanceOrderStatus", () => {
-    it("AC-122: advanceOrderStatus walks NEW→PREPARING→READY→COMPLETED then rejects a 4th call", async () => {
+    it("AC-122 / AC-724: advanceOrderStatus walks NEW→PREPARING→READY→COMPLETED then rejects a 4th call", async () => {
       const o = await createOrder({
         orgId: orgAId,
         customerUserId: aUserId,

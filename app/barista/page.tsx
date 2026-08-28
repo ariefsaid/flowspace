@@ -8,31 +8,12 @@ import { requireSession } from "@/lib/auth/session";
 import { listOrders } from "@/lib/db/cafe";
 import { BaristaClient } from "./BaristaClient";
 import type { BaristaOrderView, BaristaOrderLineView } from "./BaristaClient";
-import type { DrinkTemperature, SugarLevel } from "@/lib/db/enums";
+import type { VariantOptionSnapshot } from "@/lib/cafe/types";
 
-/** Format temperature + sugar enum values into a display string. */
-function formatVariant(
-  temp: DrinkTemperature | null,
-  sugar: SugarLevel | null,
-): string | undefined {
-  const parts: string[] = [];
-  if (temp) {
-    const tempLabel: Record<DrinkTemperature, string> = {
-      HOT: "Hot",
-      COLD: "Cold",
-      ICE_BLENDED: "Ice Blended",
-    };
-    parts.push(tempLabel[temp]);
-  }
-  if (sugar) {
-    const sugarLabel: Record<SugarLevel, string> = {
-      NORMAL: "Normal Sugar",
-      LESS: "Less Sugar",
-      NONE: "No Sugar",
-    };
-    parts.push(sugarLabel[sugar]);
-  }
-  return parts.length > 0 ? parts.join(", ") : undefined;
+/** Formats the canonical option snapshots into "Group: Option, Group: Option" (I-044, FR-728). */
+function formatVariantOptions(options: VariantOptionSnapshot[]): string | undefined {
+  if (!options.length) return undefined;
+  return options.map((o) => `${o.variantName}: ${o.optionName}`).join(", ");
 }
 
 /** Map DB CafeOrderStatus enum (uppercase) to KDS status (lowercase). */
@@ -61,7 +42,7 @@ export default async function BaristaPage() {
       const lines: BaristaOrderLineView[] = o.items.map((item) => ({
         name: item.nameSnapshot,
         qty: item.qty,
-        variant: formatVariant(item.temperature, item.sugar),
+        variant: formatVariantOptions(item.variantOptions),
       }));
 
       const view: BaristaOrderView = {
@@ -70,6 +51,7 @@ export default async function BaristaPage() {
         customer,
         status: kdsStatus,
         placedAt: o.createdAt.toISOString(),
+        notes: o.notes,
         lines,
       };
       return view;

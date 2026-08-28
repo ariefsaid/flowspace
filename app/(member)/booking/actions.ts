@@ -106,8 +106,16 @@ export async function createBookingAction(input: {
   time: TimeSelection;
   place: FacilitySeat;
   paymentMethod: BookingPaymentChoice;
+  /** [SEC] The wizard's policy-acceptance checkbox — validated HERE,
+   *  server-side, before any write. The client-side `disabled` state on the
+   *  confirm button is UX only; a crafted request with this false (or
+   *  omitted) must never create a booking. */
+  acceptedPolicy: boolean;
 }): Promise<CreatedBookingResult> {
   const user = await requireSession();
+  if (input.acceptedPolicy !== true) {
+    throw new Error("POLICY_NOT_ACCEPTED");
+  }
   const profile = await findById(user.orgId, user.id);
   const tier = profile?.membershipTier ?? "REGULAR";
   const { bookingType, time, place } = input;
@@ -125,6 +133,7 @@ export async function createBookingAction(input: {
         bookingType === "walkin-coworking" ? "Walk-in Coworking" : "Walk-in Meeting Room",
       // startAt defaults to now inside createBooking; no endAt (open duration).
       paymentMethod: "cashier",
+      acceptedPolicy: input.acceptedPolicy,
     });
     return {
       id: booking.id,
@@ -158,6 +167,7 @@ export async function createBookingAction(input: {
     startAt,
     endAt,
     paymentMethod: input.paymentMethod,
+    acceptedPolicy: input.acceptedPolicy,
   });
   return {
     id: booking.id,

@@ -307,6 +307,10 @@ export const bookings = pgTable(
     baseAmountRupiah: integer("base_amount_rupiah").notNull().default(0),
     discountRupiah: integer("discount_rupiah").notNull().default(0),
     paymentMethod: bookingPaymentMethodEnum("payment_method"),
+    // [SEC] Migration 0018: server-recorded evidence of the member wizard's
+    // policy-acceptance checkbox (AC-849) — null for walk-ins/admin-created
+    // rows that have no such checkbox.
+    policyAcceptedAt: timestamp("policy_accepted_at", { precision: 3, mode: "date" }),
     createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
   },

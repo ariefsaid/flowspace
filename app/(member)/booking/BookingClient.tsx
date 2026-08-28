@@ -127,7 +127,13 @@ export function BookingClient({ discounts, timeCredits }: BookingClientProps) {
     setError(null);
     setSubmitting(true);
     try {
-      const created = await createBookingAction({ bookingType, time, place, paymentMethod });
+      const created = await createBookingAction({
+        bookingType,
+        time,
+        place,
+        paymentMethod,
+        acceptedPolicy: policyAccepted,
+      });
       setResult(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal membuat booking. Silakan coba lagi.");

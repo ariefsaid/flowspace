@@ -91,6 +91,16 @@ export type CreateBookingInput = {
   startAt?: Date;
   endAt?: Date;
   paymentMethod: BookingPaymentChoice;
+  /**
+   * [SEC] The caller's own server-side confirmation that the member accepted
+   * the cancellation/payment policy — validated by `createBookingAction`
+   * BEFORE this function is even called (a caller MUST NOT set this true
+   * without having independently checked). Recorded on the booking row
+   * (`policyAcceptedAt`) as an audit trail; not itself re-validated here
+   * (this repository trusts its caller within the server boundary, same as
+   * every other server-derived field on this input).
+   */
+  acceptedPolicy?: boolean;
 };
 
 export type CheckoutPrice = {
@@ -440,7 +450,8 @@ export function listBookings(
 // ---------------------------------------------------------------------------
 
 export async function createBooking(input: CreateBookingInput): Promise<Booking> {
-  const { orgId, userId, facilityType, paymentMethod } = input;
+  const { orgId, userId, facilityType, paymentMethod, acceptedPolicy } = input;
+  const policyAcceptedAt = acceptedPolicy ? new Date() : null;
   const isFullRoom = facilityType === "FULL_ROOM";
   const walkin = isWalkin(facilityType);
   const scheduled = isFullRoom || isScheduled(facilityType);
@@ -469,6 +480,7 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
           paymentStatus: "WAITING_CASHIER",
           bookingMode: "WALKIN",
           paymentMethod: "cashier",
+          policyAcceptedAt,
         })
         .returning();
 
@@ -608,6 +620,7 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
         paymentStatus,
         bookingMode: "SCHEDULED",
         paymentMethod,
+        policyAcceptedAt,
       })
       .returning();
 

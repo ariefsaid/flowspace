@@ -9,7 +9,8 @@ import { describe, it, expect } from "vitest";
 import {
   canAdminBookings,
   approvePaymentAsActor,
-  completeBookingAsActor,
+  checkoutBookingAsActor,
+  approveAndStartWalkInAsActor,
 } from "@/lib/admin/authz";
 
 describe("lib/admin/authz — role gate", () => {
@@ -28,11 +29,21 @@ describe("lib/admin/authz — role gate", () => {
     ).rejects.toThrow(/FORBIDDEN/);
   });
 
-  it("completeBookingAsActor throws FORBIDDEN for a BARISTA (before any DB write)", async () => {
+  it("AC-835: checkoutBookingAsActor throws FORBIDDEN for a BARISTA (before any DB write)", async () => {
     await expect(
-      completeBookingAsActor(
+      checkoutBookingAsActor(
         { id: "u2", role: "BARISTA", orgId: "org1" },
         "bk_2",
+        "cash",
+      ),
+    ).rejects.toThrow(/FORBIDDEN/);
+  });
+
+  it("AC-835: approveAndStartWalkInAsActor throws FORBIDDEN for a MEMBER (before any DB write)", async () => {
+    await expect(
+      approveAndStartWalkInAsActor(
+        { id: "u3", role: "MEMBER", orgId: "org1" },
+        "bk_3",
       ),
     ).rejects.toThrow(/FORBIDDEN/);
   });

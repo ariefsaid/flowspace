@@ -6,7 +6,7 @@
  */
 import type { BookingFacilityType } from "@/lib/db/enums";
 
-/** Walk-in charge cap in hours (recon: "MAX 4h charge"). Enforced in completeBooking. */
+/** Walk-in charge cap in hours (recon: "MAX 4h charge"). Enforced in checkoutBooking. */
 export const WALKIN_MAX_HOURS = 4;
 
 /** True for a walk-in (pay-at-cashier, capped) facility type. */

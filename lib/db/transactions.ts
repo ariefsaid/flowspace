@@ -23,6 +23,9 @@ export type RecordTxnInput = {
   printJobId?: string | null;
   packageId?: string | null;
   printTopupPackageId?: string | null;
+  /** Settlement detail for a booking-create/checkout ledger row
+   *  (`cash|qris|time_credits|online`); null while unsettled (I-040). */
+  paymentMethod?: string | null;
 };
 
 /**
@@ -48,6 +51,7 @@ export async function recordTransaction(
       printJobId: input.printJobId ?? null,
       packageId: input.packageId ?? null,
       printTopupPackageId: input.printTopupPackageId ?? null,
+      paymentMethod: input.paymentMethod ?? null,
     })
     .returning();
   return row;
@@ -111,7 +115,7 @@ export async function sumRevenueSince(orgId: string, since: Date): Promise<numbe
 export async function updateBookingTransaction(
   orgId: string,
   bookingId: string,
-  patch: { status?: TransactionStatus; amountRupiah?: number },
+  patch: { status?: TransactionStatus; amountRupiah?: number; paymentMethod?: string | null },
   txdb: Pick<typeof db, "update"> = db,
 ): Promise<void> {
   await txdb

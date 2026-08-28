@@ -1,15 +1,21 @@
 /**
  * Server-side authorization helpers for admin booking/payment mutations
- * (I-021 admin surfaces). SoD: only ADMIN may approve an offline cashier
- * payment or force-complete an active session. The role gate is enforced
- * again inside each "use server" action (defence-in-depth — the action is the
- * real gate; this module exposes the same gate as a pure function + a test
- * seam so integration tests can prove the no-write behaviour for non-admins).
+ * (I-021/I-040 admin surfaces). SoD: only ADMIN may approve an offline
+ * cashier payment, start a walk-in, or check out an active session. The role
+ * gate is enforced again inside each "use server" action (defence-in-depth —
+ * the action is the real gate; this module exposes the same gate as a pure
+ * function + a test seam so integration tests can prove the no-write
+ * behaviour for non-admins, AC-835).
  */
 import type { Role } from "@/lib/db/enums";
-import { approvePayment, completeBooking } from "@/lib/db/bookings";
+import {
+  approvePayment,
+  approveAndStartWalkIn,
+  checkoutBooking,
+  type CheckoutPaymentMethod,
+} from "@/lib/db/bookings";
 
-/** Returns true if the role is allowed to approve payments / complete sessions. */
+/** Returns true if the role is allowed to approve payments / start / check out sessions. */
 export function canAdminBookings(role: Role): boolean {
   return role === "ADMIN";
 }
@@ -30,15 +36,32 @@ export async function approvePaymentAsActor(
 }
 
 /**
- * Test seam: same ADMIN role gate + completeBooking without a live session.
- * Throws FORBIDDEN before any DB write for non-admins.
+ * Test seam: same ADMIN role gate + approveAndStartWalkIn without a live
+ * session. Throws FORBIDDEN before any DB write for non-admins (AC-835).
  */
-export async function completeBookingAsActor(
+export async function approveAndStartWalkInAsActor(
   actor: { id: string; role: Role; orgId: string },
   bookingId: string,
 ) {
   if (!canAdminBookings(actor.role)) {
     throw new Error("FORBIDDEN");
   }
-  return completeBooking(actor.orgId, bookingId);
+  return approveAndStartWalkIn(actor.orgId, bookingId);
+}
+
+/**
+ * Test seam: same ADMIN role gate + checkoutBooking without a live session.
+ * Throws FORBIDDEN before any DB write for non-admins (AC-835). Supersedes
+ * `completeBookingAsActor` (I-021) — `completeBooking` was replaced by
+ * `checkoutBooking` (I-040).
+ */
+export async function checkoutBookingAsActor(
+  actor: { id: string; role: Role; orgId: string },
+  bookingId: string,
+  paymentMethod: CheckoutPaymentMethod,
+) {
+  if (!canAdminBookings(actor.role)) {
+    throw new Error("FORBIDDEN");
+  }
+  return checkoutBooking(actor.orgId, bookingId, paymentMethod);
 }

@@ -98,6 +98,18 @@ export type PackageCatalogItem = {
   sortOrder: number;
 };
 
+/**
+ * Walk-in flat hourly rates (server-authoritative — never client-supplied).
+ * Walk-ins have no facility row (facility_id stays null; a member has not
+ * chosen a specific seat yet), so their rate cannot be read off a `facilities`
+ * row the way scheduled bookings' can — this is the single source of truth
+ * `createBooking` reads for `WALKIN_COWORKING`/`WALKIN_MEETING`.
+ */
+export const WALKIN_RATES: Record<"WALKIN_COWORKING" | "WALKIN_MEETING", number> = {
+  WALKIN_COWORKING: 15_000,
+  WALKIN_MEETING: 120_000,
+};
+
 export const PACKAGE_CATALOG: readonly PackageCatalogItem[] = [
   { slug: "5h", name: "5 Hours", hours: 5, priceRupiah: 75_000, pricePerHourRupiah: 15_000, popular: false, sortOrder: 1 },
   { slug: "10h", name: "10 Hours", hours: 10, priceRupiah: 140_000, pricePerHourRupiah: 14_000, popular: true, sortOrder: 2 },

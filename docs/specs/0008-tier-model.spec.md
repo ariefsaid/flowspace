@@ -188,7 +188,7 @@ ignored as a defect (**DIV-2**), and all monetary rounding follows our integer-R
   server-derived org's rows and money paths are affected. **Integration**.
 - **AC-529** — Given the implementation is complete, When the issue verification suite runs, Then every AC-500–AC-528
   has exactly one tagged canonical test, including integration proof for cafe, print, and the I-040 booking seam.
-  **Unit/integration traceability check**.
+  **Unit (traceability check).**
 
 ## Migration and code delta
 
@@ -205,12 +205,11 @@ implementation must update the existing pricing repository integration rather th
 
 ## Supersedes from spec 0006
 
-- **AC-400:** its guessed seeded values are superseded by AC-502/AC-503; org scoping remains required.
-- **AC-402:** its flat 5% seed premise is superseded by AC-512/AC-513; config-driven active-session mechanics remain.
-- **AC-403:** its two-field save contract is superseded by AC-507/AC-509/AC-526; ADMIN validation remains.
-- **AC-405:** its two-input editor is superseded by AC-520/AC-521.
-- **AC-401, AC-404, AC-406, and AC-407:** mechanisms remain valid and are re-proven against the widened model by
-  AC-515/AC-516, AC-510, and the applicable existing print-config tests; their old seeded-rate assumptions do not.
+The following spec-0006 criteria are superseded for the tier-model surface: **AC-400, AC-402, AC-403, and AC-405**.
+Their old seed values, flat-rate premise, two-field save payload, and two-input editor are replaced by this spec's
+AC-502/AC-503, AC-512/AC-513, AC-507/AC-509/AC-526, and AC-520/AC-521 respectively. **AC-401, AC-404, AC-406,
+and AC-407 remain authoritative** for the unchanged print/cafe mechanisms, authz, pricing math, and print base-rate
+configuration; their tier-dependent proofs must use the widened four-column model.
 
 ## Out of scope and follow-up
 

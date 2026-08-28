@@ -2,7 +2,10 @@
 
 - **Spec:** `docs/specs/0010-cafe-variants.spec.md` (signed off; FR-720..729, NFR-044-01..04, AC-700..729).
 - **Issue:** I-044.
-- **Migration claim:** `0015` — this issue merges after I-041/I-040/I-043; run the renumber-check at release. Do **not** claim `0010`–`0014`.
+- **Migration claim:** `0015` (draft) → **actual: `0019`** (Director, build brief 2026-08-29) — by the
+  time this issue built, current main head had already advanced to `0018` (I-041/I-040/I-043/I-046 merged
+  first); the renumber-check resolved to `0019_cafe_variants.sql`. No new table (cafe tables are already
+  SELECT-only to `authenticated` per I-046's lockdown), so the ALTER-only migration needed no grant work.
 - **ADR:** none.
 - **Stack:** Supabase Postgres DDL in `supabase/migrations/`, Drizzle query mirror in `lib/db/schema.ts`, repositories in `lib/db/*`, server actions at the route boundary, Vitest unit/integration ownership per ADR-0010.
 - **Verification convention:** integration tests require the Supabase CLI local stack and `TEST_DATABASE_URL`/`DATABASE_URL` pointed at it; migration verification is `pnpm exec supabase db reset`.

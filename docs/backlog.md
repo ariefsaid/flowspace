@@ -100,7 +100,7 @@ ahead; these close the functional gaps, in dependency order:
 - [x] **I-041** Tier model correction — **merged [PR #7](https://github.com/ariefsaid/flowspace/pull/7)** (migration 0010, ADR-0016). 4 dims, ORIG-true values (0/0/0/0 · 10/10/5/5 · 15/15/10/10).
 - [ ] **I-042** Admin CRUD completion: users add/edit (soft-archive, not ORIG's cascade delete) · manual booking · facilities + cafe-menu CRUD · `/admin/reports` charts · bulk pending-approve. Gap §2.6.
 - [x] **I-043** Print parity — **merged [PR #9](https://github.com/ariefsaid/flowspace/pull/9)** (migrations 0012–0013) + **hotfix [PR #10](https://github.com/ariefsaid/flowspace/pull/10)** (PDF page-count crash — a real bug that slipped in because #9 was merged with a red PR CI; process corrected: CI-green now gates every merge). Pricing matrix, printers CRUD, page-range, agent pull API, top-up packages.
-- [ ] **I-044** Cafe nuances (NEXT/final): priced variants (Sugar-only seed — our menu name-encodes temperature; Cold +3k mechanics via fixtures) · order notes · POS member lookup (tier-driven) · **cafe cart preview discount FR-730** (I-041 made the hardcoded 5% wrong for REGULAR). Gap §2.5, spec 0010.
+- [x] **I-044** Cafe nuances — **merged [PR #12](https://github.com/ariefsaid/flowspace/pull/12)** (migration 0019). Server-priced variants (closes ORIG's client-price hole), order notes, POS tier-driven discount, FR-730 cart-preview fix. Cross-family money review (2 rounds) closed a cart-key collision undercharge, an active-booking discount TOCTOU (now `FOR UPDATE`), and a pool deadlock (tx-threaded). Design round-2 a11y fixes landed.
 - [ ] **I-045** Integrations (owner-gated, one ADR each): WiFi vouchers (controller cloud/local) · email notifications (welcome/booking/receipt behind a provider seam) · door `verify-access` **with the HMAC actually verified** (ORIG ignores it). Gap §2.7. **+ I1 (owner decision):** print non-PDF page count is client-declared (spec-compliant FR-632) → underpayment risk; clean fix = agent-side enforcement in the print-agent integration.
 - [x] **I-046** RLS write lockdown (SECURITY) — **merged [PR #8](https://github.com/ariefsaid/flowspace/pull/8)** (migration 0011). Revoked client write DML from `authenticated` on all business tables (closes the Data-API privilege-escalation); SELECT-only convention (ADR-0015 addendum) adopted by I-043/I-040 new tables.
 
@@ -110,6 +110,8 @@ ahead; these close the functional gaps, in dependency order:
 - [ ] **I-040 defense-in-depth**: composite `(org_id, user_id)` FK on bookings; per-user concurrent-pending-hold limit.
 - [ ] **I-043 cleanup**: drop the `org_print_pricing_legacy` orphan table (later migration); infra-layer rate-limit on failed print-agent auth.
 - [ ] **Money-path audit log** (recurring): pricing/discount changes record who/when/old→new (repudiation).
+- [ ] **I-044 UI follow-ups**: variant options → radiogroup semantics (arrow-key + `option N of M`, vs current `aria-pressed` buttons); shared `<Modal>` primitive (focus-trap + Esc + focus-return — replaces the hand-rolled overlays across VariantPicker/CartPanel).
+- [ ] **Guest-checkout abuse controls**: IP/edge rate-limit + idempotency on the unauthenticated `/cafe/guest` order path (line-count cap already shipped in I-044).
 
 ## Tech debt / enhancements
 - [ ] Changed-lines-precise coverage gate (PMO had a root-anchored script; dropped here — re-add root-aware version).

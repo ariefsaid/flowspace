@@ -102,6 +102,7 @@ ahead; these close the functional gaps, in dependency order:
 - [ ] **I-043** Print parity: colorMode×paperSize pricing matrix (A4/A3/F4) · printers CRUD · page-range · PROCESSING/FAILED statuses · page-package top-ups (10/10k · 50/45k · 100/80k) · print-agent pull API (API-key). Gap §2.4.
 - [ ] **I-044** Cafe nuances: priced variants (Cold +3k, sugar) · order notes · POS member lookup (tier-driven, NOT ORIG's hardcoded 15%) · menu-truth reconciliation w/ owner. Gap §2.5.
 - [ ] **I-045** Integrations (owner-gated, one ADR each): WiFi vouchers (controller cloud/local) · email notifications (welcome/booking/receipt behind a provider seam) · door `verify-access` **with the HMAC actually verified** (ORIG ignores it). Gap §2.7.
+- [ ] **I-046** RLS write lockdown (SECURITY, spec 0011) — **revoke client write DML** (`INSERT/UPDATE/DELETE`) from the `authenticated` role on all 12 business tables, keep `SELECT`. Closes a verified privilege-escalation: a member's browser JWT could hit the Supabase Data API directly to set org discounts to 100% or self-upgrade `membership_tier`, bypassing server ADMIN gates. Pre-existing since migration 0002 (not an I-041 regression). Owner-approved 2026-08-28 to run **ahead of the I-040/43/44 table merges** so new tables adopt the SELECT-only convention (NFR-1000). Migration 0011.
 
 ## Tech debt / enhancements
 - [ ] Changed-lines-precise coverage gate (PMO had a root-anchored script; dropped here — re-add root-aware version).

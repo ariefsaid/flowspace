@@ -84,6 +84,12 @@ export function validateVariantSelections(
 ): VariantOptionSnapshot[] {
   const provided = selections ?? [];
 
+  // A non-array truthy value (object/string/number) has an undefined/falsy
+  // `.length`, so a `.length > 0` check alone would let it slip through the
+  // hasVariants=false branch below as if it were an empty selection — reject
+  // it as malformed input up front, for BOTH branches [SEC].
+  if (!Array.isArray(provided)) throw new Error("INVALID_VARIANTS");
+
   if (!item.hasVariants) {
     if (provided.length > 0) throw new Error("INVALID_VARIANTS");
     return [];
@@ -92,7 +98,6 @@ export function validateVariantSelections(
   const config = parseVariantConfig(item.variantConfig);
 
   if (
-    !Array.isArray(provided) ||
     !provided.every(
       (s) =>
         typeof s === "object" &&

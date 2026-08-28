@@ -13,6 +13,16 @@ describe("normalizeOrderNotes", () => {
     expect(normalizeOrderNotes(undefined)).toBeNull();
   });
 
+  it("AC-712: null normalizes to null (createOrder's declared `string | null` contract)", () => {
+    expect(normalizeOrderNotes(null)).toBeNull();
+  });
+
+  it("[SEC] rejects a non-string, non-null/undefined value rather than silently coercing to null", () => {
+    for (const bad of [123, true, {}, ["a"], () => {}]) {
+      expect(() => normalizeOrderNotes(bad)).toThrow(/INVALID_NOTES/);
+    }
+  });
+
   it("AC-712: blank/whitespace-only notes normalize to null", () => {
     expect(normalizeOrderNotes("   ")).toBeNull();
     expect(normalizeOrderNotes("")).toBeNull();

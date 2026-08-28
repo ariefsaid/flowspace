@@ -138,6 +138,20 @@ describe("validateVariantSelections", () => {
     ).toThrow(/INVALID_VARIANTS/);
   });
 
+  it("[SEC] hasVariants=false item rejects a non-array `selections` value (not silently treated as empty)", () => {
+    // A non-array truthy value (object/string/number) has an undefined/falsy
+    // `.length`, so a `.length > 0` check alone lets it slip through as if
+    // it were an empty selection — it must be rejected as malformed input.
+    for (const bad of [{}, "not-an-array", 42, true] as unknown[]) {
+      expect(() =>
+        validateVariantSelections(
+          { hasVariants: false, variantConfig: null },
+          bad as never,
+        ),
+      ).toThrow(/INVALID_VARIANTS/);
+    }
+  });
+
   it("resolves valid selections into ordered snapshots with adjustments from the live config, not the input", () => {
     const snapshots = validateVariantSelections(
       { hasVariants: true, variantConfig: VALID_CONFIG },

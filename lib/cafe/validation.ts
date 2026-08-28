@@ -12,9 +12,16 @@ const MAX_LINES_PER_ORDER = 50;
  * rejects (throws `INVALID_NOTES`) a trimmed value over 500 Unicode code
  * points (counted via `Array.from`, not UTF-16 code units, so astral-plane
  * emoji count as one character each).
+ *
+ * `null`/`undefined` are the only accepted "no notes" values (createOrder's
+ * declared contract is `notes?: string | null`) and normalize to `null`. Any
+ * OTHER non-string value (number, boolean, array, object) is malformed input
+ * — this is a server-action boundary a client fully controls, so it is
+ * rejected with `INVALID_NOTES` rather than silently coerced to `null` [SEC].
  */
 export function normalizeOrderNotes(value: unknown): string | null {
-  if (typeof value !== "string") return null;
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") throw new Error("INVALID_NOTES");
   const trimmed = value.trim();
   if (!trimmed) return null;
   if (Array.from(trimmed).length > MAX_NOTES_LENGTH) {

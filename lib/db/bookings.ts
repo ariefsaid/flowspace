@@ -732,6 +732,24 @@ export async function checkoutBooking(
   paymentMethod: CheckoutPaymentMethod,
 ): Promise<Booking> {
   return db.transaction(async (tx) => {
+    // Cheap pre-read for the lock keys only (mirrors extendBooking's
+    // two-phase read). [SEC] Serializes checkout against a concurrent
+    // extend/create on the SAME facility+day BEFORE any pricing read — a
+    // checkout that read the booking before a concurrent extend committed
+    // could otherwise still pass its status='ACTIVE' CAS (extend never
+    // changes status) and overwrite the extend's committed
+    // duration/amount with a stale, pre-extension value (a lost update).
+    const [pre] = await tx
+      .select({ facilityId: bookings.facilityId, startAt: bookings.startAt, bookingMode: bookings.bookingMode })
+      .from(bookings)
+      .where(and(eq(bookings.id, id), eq(bookings.orgId, orgId)))
+      .limit(1);
+    if (!pre) throw new Error("NOT_FOUND");
+    if (pre.bookingMode === "SCHEDULED" && pre.facilityId) {
+      await acquireOrgDayLock(tx, orgId, calendarDayOf(pre.startAt));
+      await acquireFacilityLock(tx, orgId, pre.facilityId);
+    }
+
     const [booking] = await tx
       .select()
       .from(bookings)

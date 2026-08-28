@@ -137,6 +137,48 @@ afterAll(async () => {
   await testSql.end();
 }, 30_000);
 
+// ---------------------------------------------------------------------------
+// Deterministic concurrency barrier (Luna cross-family review: bare
+// Promise.all doesn't GUARANTEE two operations actually overlap — it's
+// possible for one to fully complete before the other's first query even
+// reaches Postgres, which would make a "race" test pass for the wrong
+// reason). This barrier PROVES real overlap: it holds the SAME advisory-lock
+// key the racing operations will contend for, starts them, and polls
+// `pg_locks` until the expected number of backends are genuinely BLOCKED
+// waiting on that lock — only then does it release, guaranteeing both
+// operations were in flight simultaneously when the race actually happened.
+// -------------------------------------------------------------------------
+async function runWithLockBarrier<T>(
+  lockKeyExpr: string,
+  waiters: number,
+  ops: Array<() => Promise<T>>,
+): Promise<PromiseSettledResult<T>[]> {
+  let racePromise!: Promise<PromiseSettledResult<T>[]>;
+  await testSql.begin(async (holder) => {
+    await holder.unsafe(`select pg_advisory_xact_lock(${lockKeyExpr})`);
+    racePromise = Promise.allSettled(ops.map((op) => op()));
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      const rows = await holder.unsafe<{ n: number }[]>(
+        `select count(*)::int as n from pg_locks where locktype = 'advisory' and not granted`,
+      );
+      if (Number(rows[0]?.n ?? 0) >= waiters) break;
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for ${waiters} advisory-lock waiter(s)`);
+      }
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    // Returning here ends the holder's transaction (COMMIT), releasing the
+    // lock and letting every genuinely-waiting op proceed for real.
+  });
+  return racePromise;
+}
+
+/** The exact facility-lock key expression `acquireFacilityLock` computes (salt 850). */
+function facilityLockKeyExpr(orgId: string, facilityId: string): string {
+  return `hashtextextended('${orgId}' || ':' || '${facilityId}', 850)`;
+}
+
 async function bookingRowCount(orgId: string): Promise<number> {
   const [{ count }] = await testSql`select count(*)::int as count from bookings where org_id = ${orgId}`;
   return count as number;
@@ -701,6 +743,49 @@ describe("lib/db/bookings", () => {
       await expect(checkoutBooking(orgAId, pending.id, "cash")).rejects.toThrow(/INVALID_TRANSITION/);
       const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, pending.id));
       expect(fresh.status).toBe("PENDING");
+    });
+
+    it("[SEC] checkout is genuinely serialized against an in-flight extension on the same booking (deterministic lock barrier)", async () => {
+      const start = new Date("2026-08-17T09:00:00Z");
+      const [active] = await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatAId,
+        facilityName: "Meja A", startAt: start, endAt: new Date(start.getTime() + 2 * HOUR),
+        durationHours: 2, ratePerHourRupiah: 20000, amountRupiah: 40000, baseAmountRupiah: 40000, discountRupiah: 0,
+        status: "ACTIVE", paymentStatus: "PAID_ONLINE", bookingMode: "SCHEDULED", paymentMethod: "online",
+      }).returning();
+      await testDb.insert(transactions).values({
+        orgId: orgAId, userId: aUserId, type: "BOOKING", description: "Booking Meja A",
+        amountRupiah: 40000, status: "COMPLETED", bookingId: active.id,
+      });
+
+      // Both extend and checkout must acquire the SAME facility lock as
+      // their first act — the barrier proves both are genuinely blocked on
+      // it simultaneously before releasing (never a bare Promise.all guess).
+      const results = await runWithLockBarrier(facilityLockKeyExpr(orgAId, seatAId), 2, [
+        () => extendBooking(orgAId, active.id, 1),
+        () => checkoutBooking(orgAId, active.id, "cash"),
+      ]);
+      const [extendResult, checkoutResult] = results;
+      const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, active.id));
+
+      if (extendResult.status === "fulfilled") {
+        // Extension landed first (serialized) — checkout, running after,
+        // must reflect the EXTENDED duration, never a stale pre-extension
+        // amount silently overwriting the committed extension.
+        expect(checkoutResult.status).toBe("fulfilled");
+        expect(fresh.status).toBe("COMPLETED");
+        expect(fresh.durationHours).toBe(3);
+        expect(fresh.amountRupiah).toBe(60000); // 40000 base + 20000 extension — never 40000
+      } else {
+        // Checkout landed first (serialized) — the booking is already
+        // COMPLETED by the time extend's transaction proceeds, so extend is
+        // cleanly rejected, never silently applied to a closed booking.
+        expect((extendResult as PromiseRejectedResult).reason.message).toMatch(/INVALID_TRANSITION/);
+        expect(checkoutResult.status).toBe("fulfilled");
+        expect(fresh.status).toBe("COMPLETED");
+        expect(fresh.durationHours).toBe(2);
+        expect(fresh.amountRupiah).toBe(40000);
+      }
     });
 
     it("AC-836: two concurrent checkouts on the same ACTIVE booking — the loser gets a transition error, no double-settle", async () => {

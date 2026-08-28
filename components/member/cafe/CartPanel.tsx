@@ -7,31 +7,48 @@ import type { CartItem } from "./types";
 
 interface CartPanelProps {
   items: CartItem[];
-  hasActiveSession: boolean;
+  /**
+   * Server-resolved cafe discount percentage for this member (0 when
+   * ineligible). NEVER a hardcoded rate — FR-730/AC-730 fixes a live
+   * regression where this was hardcoded to 5% and shown to REGULAR members
+   * whose checkout charges 0%.
+   */
+  discountPct: number;
   onClose: () => void;
   onIncrement: (key: string) => void;
   onDecrement: (key: string) => void;
   onCheckout: () => void;
+  /** Notes textarea value + change handler (I-044, FR-724). */
+  notes: string;
+  onNotesChange: (value: string) => void;
   /** Indonesian error message to display above the CTA; cleared by the parent on next submit. */
   checkoutError?: string | null;
   /** Whether the checkout action is in flight. */
   checkoutPending?: boolean;
 }
 
-const CAFE_DISCOUNT = 0.05;
+const NOTES_MAX_LENGTH = 500;
+
+/** Renders an ordered set of selected variant options as "Group: Option, Group: Option". */
+function formatOptions(options: CartItem["options"]): string | null {
+  if (!options.length) return null;
+  return options.map((o) => `${o.variantName}: ${o.optionName}`).join(", ");
+}
 
 export function CartPanel({
   items,
-  hasActiveSession,
+  discountPct,
   onClose,
   onIncrement,
   onDecrement,
   onCheckout,
+  notes,
+  onNotesChange,
   checkoutError,
   checkoutPending,
 }: CartPanelProps) {
   const subtotal = items.reduce((sum, it) => sum + it.price * it.qty, 0);
-  const discountAmt = hasActiveSession ? subtotal * CAFE_DISCOUNT : 0;
+  const discountAmt = discountPct > 0 ? Math.round((subtotal * discountPct) / 100) : 0;
   const total = subtotal - discountAmt;
 
   return (
@@ -91,14 +108,9 @@ export function CartPanel({
                   <p className="text-sm font-medium text-gray-900 truncate">
                     {item.name}
                   </p>
-                  {item.variant && (
+                  {formatOptions(item.options) && (
                     <p className="text-xs text-gray-500 mt-0.5">
-                      {item.variant.temp === "Hot" ? "Panas" : "Dingin"},{" "}
-                      {item.variant.sugar === "Normal"
-                        ? "Normal"
-                        : item.variant.sugar === "Less Sugar"
-                        ? "Kurang Manis"
-                        : "Tanpa Gula"}
+                      {formatOptions(item.options)}
                     </p>
                   )}
                   <p className="text-sm text-teal-600 font-medium mt-0.5">
@@ -132,17 +144,34 @@ export function CartPanel({
           )}
         </div>
 
-        {/* footer summary + CTA */}
+        {/* footer summary + notes + CTA */}
         {items.length > 0 && (
           <div className="px-5 py-4 border-t border-slate-200 space-y-3">
+            <div>
+              <label
+                htmlFor="cafe-cart-notes"
+                className="mb-1.5 block text-sm font-medium text-gray-800"
+              >
+                Catatan (opsional)
+              </label>
+              <textarea
+                id="cafe-cart-notes"
+                value={notes}
+                onChange={(e) => onNotesChange(e.target.value)}
+                maxLength={NOTES_MAX_LENGTH}
+                rows={2}
+                placeholder="mis. tanpa gula, extra panas"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              />
+            </div>
             <div className="space-y-1.5">
               <div className="flex justify-between text-sm text-gray-600">
                 <span>Subtotal</span>
                 <span>{formatRupiah(subtotal)}</span>
               </div>
-              {hasActiveSession && (
+              {discountPct > 0 && (
                 <div className="flex justify-between text-sm text-green-700">
-                  <span>Diskon sesi aktif (5%)</span>
+                  <span>Diskon sesi aktif ({discountPct}%)</span>
                   <span>- {formatRupiah(discountAmt)}</span>
                 </div>
               )}

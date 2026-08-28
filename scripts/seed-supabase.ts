@@ -36,6 +36,7 @@ import {
   type MembershipTier,
   type CafeCategory,
 } from "@/lib/db/enums";
+import type { VariantConfig } from "@/lib/cafe/types";
 import { PRINT_PRICE_MATRIX, PRINT_MATRIX_CELLS } from "@/lib/print/pricing";
 import { LOCKED_TIER_DISCOUNTS } from "@/lib/tier-discounts";
 import { updateTierDiscounts } from "@/lib/db/tier-config";
@@ -123,7 +124,7 @@ const SEED_USERS: Array<{
 // +Rp3.000 pattern) are exercised by unit/integration test fixtures, not
 // this seed — every SUGAR_VARIANT_CONFIG option is +0.
 // ---------------------------------------------------------------------------
-const SUGAR_VARIANT_CONFIG = {
+const SUGAR_VARIANT_CONFIG: VariantConfig = {
   variants: [
     {
       name: "Sugar",
@@ -135,7 +136,7 @@ const SUGAR_VARIANT_CONFIG = {
       ],
     },
   ],
-} as const;
+};
 
 const SUGAR_VARIANT_SLUGS = new Set([
   "es-kopi-susu-aren", "es-kopi-susu-milo", "butter-scotch-latte",

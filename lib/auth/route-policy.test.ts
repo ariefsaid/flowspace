@@ -5,6 +5,10 @@ describe("route policy", () => {
   it(": print-agent jobs is key-only and not a member/session page", () => {
     expect(requiredRolesFor("/api/print-agent/jobs")).toBe("public");
   });
+
+  it("FR-852: /api/cron/* releases the edge session gate — the route does its own Bearer job auth", () => {
+    expect(requiredRolesFor("/api/cron/booking-status-sweep")).toBe("public");
+  });
   // ---------------------------------------------------------------------------
   // AC-015 — Public paths require no auth
   // ---------------------------------------------------------------------------

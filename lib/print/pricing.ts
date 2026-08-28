@@ -12,9 +12,6 @@ export const PRINT_RATE_BW = 500;
 // into org_print_pricing (I-027) and admin-editable; this is only the fallback.
 export const PRINT_RATE_COLOR = 1500;
 
-/** Default per-tier print discount % (the seed for membership_tier_config.print_discount_pct). */
-export const DEFAULT_PRINT_DISCOUNT_PCT = { REGULAR: 0, PREMIUM: 20, GOLD: 20 } as const;
-
 export interface PrintTotal {
   /** Per-page rate applied (BW or COLOR), in Rupiah. */
   pricePerPageRupiah: number;
@@ -27,7 +24,8 @@ export interface PrintTotal {
 /**
  * Computes the per-page rate, discount, and chargeable total for a print job.
  * `pages` × `copies` sheets at the resolved base rate; `discountPct` (0–100) is
- * the member tier's print discount, resolved server-side from config.
+ * the per-tier print discount resolved server-side from `membership_tier_config`
+ * via `getTierDiscounts` (fail-safe 0%, I-041).
  */
 export function computePrintTotal(input: {
   pages: number;

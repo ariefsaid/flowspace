@@ -81,8 +81,8 @@ ignored as a defect (**DIV-2**), and all monetary rounding follows our integer-R
 - **FR-520** (ubiquitous) — `membership_tier_config` shall contain non-null integer
   `coworking_discount_pct`, `meeting_discount_pct`, `cafe_discount_pct`, and `print_discount_pct`, each defaulting
   to 0, with unique `(org_id, tier)`, an `org_id` index, and a CHECK constraining every value to 0–100.
-- **FR-521** (ubiquitous) — A new ordered Supabase migration shall add the two booking columns, widen the CHECK, and
-  update every existing org's rows to the locked values without changing the existing enum or RLS policy.
+- **FR-521** (ubiquitous) — A new ordered Supabase migration shall add the two tier discount columns, widen the CHECK,
+  and update every existing org's rows to the locked values without changing the existing enum or RLS policy.
 - **FR-522** (ubiquitous) — `getTierDiscounts(orgId, tier)` shall return all four camel-case percentages and
   `listTierConfig(orgId)` shall return all four for only that org; a missing row shall fail closed to four zeroes.
 - **FR-523** (event-driven) — When `updateTierDiscounts` receives any non-integer or value outside `[0,100]`, it
@@ -160,8 +160,9 @@ ignored as a defect (**DIV-2**), and all monetary rounding follows our integer-R
 - **AC-517** — Given a persisted order or print job, When its tier config is changed, Then its stored total remains
   unchanged while a newly priced item uses the new percentage. **Integration**.
 - **AC-518** — Given I-040's booking pricing consumer and PREMIUM/GOLD config, When it reads the repository for a
-  coworking seat and meeting room, Then it receives 10%/15% for each applicable dimension and its totals reflect
-  those values; booking pricing implementation remains owned by I-040. **Integration (I-040 seam test)**.
+  coworking seat and meeting room, Then it receives the applicable coworking/meeting percentages (10% for PREMIUM,
+  15% for GOLD); I-040 owns the consumer's booking-total assertion and must prove those values flow into totals.
+  **Integration (I-040 seam test).**
 - **AC-519** — Given no config row for an otherwise valid member, When cafe or print pricing runs, Then it applies 0%
   rather than an unintended discount. **Integration**.
 

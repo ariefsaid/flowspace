@@ -607,7 +607,7 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
     const occupied = await facilityHasActiveOverlap(tx, orgId, facility.id, startAt, endAt);
     if (occupied) throw new Error("FACILITY_UNAVAILABLE");
 
-    const discounts = await getTierDiscounts(orgId, user.membershipTier);
+    const discounts = await getTierDiscounts(orgId, user.membershipTier, tx);
     const discountPct = resolveDiscountPct(facilityType, discounts);
     const price = computeBookingPrice({ hours: durationHours, ratePerHourRupiah: facility.ratePerHourRupiah, discountPct });
 
@@ -756,6 +756,10 @@ async function resolveCheckoutPricing(
   booking: Booking,
   now: Date,
 ): Promise<CheckoutPrice> {
+  // [SEC][POOL] `dbLike` is forwarded to getTierDiscounts below too — when
+  // this runs inside checkoutBooking's transaction (dbLike === tx), the
+  // discount lookup MUST reuse that same connection, not open a second one
+  // from the pool (see getTierDiscounts's own doc comment).
   const walkin = booking.bookingMode === "WALKIN";
   const billedHours = walkin
     ? computeWalkinBilledHours(now.getTime() - booking.startAt.getTime(), WALKIN_MAX_HOURS)
@@ -767,7 +771,7 @@ async function resolveCheckoutPricing(
     .where(and(eq(appUsers.id, booking.userId), eq(appUsers.orgId, booking.orgId)))
     .limit(1);
   const discounts = member
-    ? await getTierDiscounts(booking.orgId, member.membershipTier)
+    ? await getTierDiscounts(booking.orgId, member.membershipTier, dbLike)
     : { coworkingDiscountPct: 0, meetingDiscountPct: 0, cafeDiscountPct: 0, printDiscountPct: 0 };
   const discountPct = resolveDiscountPct(booking.facilityType, discounts);
   const price = computeBookingPrice({ hours: billedHours, ratePerHourRupiah: booking.ratePerHourRupiah, discountPct });
@@ -965,7 +969,7 @@ export async function extendBooking(orgId: string, id: string, extraHours: numbe
       .where(and(eq(appUsers.id, fresh.userId), eq(appUsers.orgId, orgId)))
       .limit(1);
     const discounts = member
-      ? await getTierDiscounts(orgId, member.membershipTier)
+      ? await getTierDiscounts(orgId, member.membershipTier, tx)
       : { coworkingDiscountPct: 0, meetingDiscountPct: 0, cafeDiscountPct: 0, printDiscountPct: 0 };
     const discountPct = resolveDiscountPct(fresh.facilityType, discounts);
     const price = computeBookingPrice({ hours: deltaHours, ratePerHourRupiah: fresh.ratePerHourRupiah, discountPct });

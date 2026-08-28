@@ -50,12 +50,28 @@ export function listTierConfig(orgId: string): Promise<MembershipTierConfig[]> {
     .orderBy(asc(membershipTierConfig.tier));
 }
 
-/** All four discount % for one (org, tier); fail-closed to four zeroes on a missing row (NFR-500). */
+/**
+ * All four discount % for one (org, tier); fail-closed to four zeroes on a
+ * missing row (NFR-500).
+ *
+ * [SEC][POOL] `txdb` — pass the caller's Drizzle tx when this is called from
+ * INSIDE a `db.transaction`. `createBooking`/`extendBooking`/`checkoutBooking`
+ * each already hold one pooled connection for the life of their transaction;
+ * a plain `db.select()` here would check out a SECOND connection from the
+ * SAME pool while the first is still held. Under contention (N concurrent
+ * money-path transactions, N >= pool.max), every transaction ends up holding
+ * its one connection while waiting on a second one that will never free up
+ * (every other connection is in the identical state) — a genuine pool-
+ * exhaustion deadlock, not just a slow path. Reusing the caller's own tx
+ * connection uses ZERO additional connections, so it can never contribute to
+ * that starvation.
+ */
 export async function getTierDiscounts(
   orgId: string,
   tier: MembershipTier,
+  txdb: Pick<typeof db, "select"> = db,
 ): Promise<TierDiscounts> {
-  const [row] = await db
+  const [row] = await txdb
     .select({
       coworkingDiscountPct: membershipTierConfig.coworkingDiscountPct,
       meetingDiscountPct: membershipTierConfig.meetingDiscountPct,

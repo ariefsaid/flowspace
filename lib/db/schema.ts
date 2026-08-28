@@ -9,10 +9,12 @@ import {
   uuid,
   index,
   uniqueIndex,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { createId } from "@paralleldrive/cuid2";
 import type { InferSelectModel } from "drizzle-orm";
 import { sql } from "drizzle-orm";
+import type { VariantConfig, VariantOptionSnapshot } from "@/lib/cafe/types";
 
 export const roleEnum = pgEnum("Role", ["MEMBER", "ADMIN", "BARISTA"]);
 export const membershipTierEnum = pgEnum("MembershipTier", [
@@ -115,6 +117,8 @@ export const cafeMenuItems = pgTable(
     priceRupiah: integer("price_rupiah").notNull(),
     description: text("description").notNull(),
     hasVariants: boolean("has_variants").notNull().default(false),
+    /** Nullable JSONB variant config (I-044, FR-720); null when hasVariants=false. */
+    variantConfig: jsonb("variant_config").$type<VariantConfig | null>(),
     available: boolean("available").notNull().default(true),
     archivedAt: timestamp("archived_at", { precision: 3, mode: "date" }),
     createdAt: timestamp("created_at", { precision: 3, mode: "date" })
@@ -144,6 +148,8 @@ export const cafeOrders = pgTable(
       onDelete: "set null",
     }),
     guestName: text("guest_name"),
+    /** Optional trimmed order notes, max 500 chars (DB-enforced), I-044 FR-724. */
+    notes: text("notes"),
     status: cafeOrderStatusEnum("status").notNull().default("NEW"),
     subtotalRupiah: integer("subtotal_rupiah").notNull(),
     discountRupiah: integer("discount_rupiah").notNull().default(0),
@@ -178,8 +184,14 @@ export const cafeOrderItems = pgTable(
     nameSnapshot: text("name_snapshot").notNull(),
     qty: integer("qty").notNull(),
     unitPriceRupiah: integer("unit_price_rupiah").notNull(),
+    /** Legacy compatibility columns — projection only for pre-I-044 rows (NFR-044-04). */
     temperature: drinkTemperatureEnum("temperature"),
     sugar: sugarLevelEnum("sugar"),
+    /** Canonical new-write variant snapshot (I-044, FR-723): ordered [{variantName, optionName, priceAdjustmentRupiah}]. */
+    variantOptions: jsonb("variant_options")
+      .$type<VariantOptionSnapshot[]>()
+      .notNull()
+      .default([]),
   },
   (t) => [index("cafe_order_items_order_id_idx").on(t.orderId)],
 );

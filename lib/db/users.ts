@@ -82,15 +82,23 @@ export async function listByOrg(orgId: string): Promise<AppUser[]> {
  * org. Used by admin surfaces (pending payments, bookings) to attach the
  * member display name to a booking row without selecting credential columns.
  * Org-scoped: ids from another org never match. Returns [] for an empty input.
+ *
+ * [SEC][POOL] `dbLike` — pass the caller's Drizzle tx when this is called
+ * from INSIDE a `db.transaction` (e.g. `createOrder`'s cafe-discount
+ * eligibility, I-044 fix round 2). A plain `db.select()` here would check
+ * out a SECOND connection from the SAME pool the caller's transaction
+ * already holds one of — under contention, a genuine pool-exhaustion
+ * deadlock (the exact class documented on `getTierDiscounts`, I-040).
  */
 export async function findProfilesByIds(
   orgId: string,
   ids: string[],
+  dbLike: Pick<typeof db, "select"> = db,
 ): Promise<
   { id: string; name: string; email: string; membershipTier: MembershipTier }[]
 > {
   if (!ids.length) return [];
-  return db
+  return dbLike
     .select({
       id: appUsers.id,
       name: appUsers.name,

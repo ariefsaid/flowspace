@@ -168,9 +168,15 @@ export async function createOrder(input: {
         if (discountEligible && customerUserId) {
           const activeBooking = await getActiveBookingForUpdate(orgId, customerUserId, tx);
           if (activeBooking) {
-            const [profile] = await findProfilesByIds(orgId, [customerUserId]);
+            // [SEC][POOL] Both calls below pass `tx` — the SAME connection
+            // this transaction already holds. Defaulting to the global `db`
+            // here would check out a SECOND pooled connection while this
+            // transaction's own connection is still held, the exact
+            // pool-exhaustion deadlock class `getTierDiscounts` is already
+            // documented against (I-040; I-044 fix round 2, item 3).
+            const [profile] = await findProfilesByIds(orgId, [customerUserId], tx);
             if (profile) {
-              discountPct = (await getTierDiscounts(orgId, profile.membershipTier))
+              discountPct = (await getTierDiscounts(orgId, profile.membershipTier, tx))
                 .cafeDiscountPct;
             }
           }

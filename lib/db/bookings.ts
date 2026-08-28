@@ -344,7 +344,10 @@ async function hasBookingStartingWithinGap(
     .where(
       and(
         eq(bookings.orgId, orgId),
-        eq(bookings.facilityId, facilityId),
+        // Same full-room↔individual-seat exclusivity as facilityHasActiveOverlap
+        // (AC-848 oracle): a booking on the SAME facility, OR any FULL_ROOM
+        // booking, starting within the gap also blocks — not just same-facility.
+        or(eq(bookings.facilityId, facilityId), eq(bookings.facilityType, "FULL_ROOM")),
         inArray(bookings.status, activeLikeStatuses()),
         ne(bookings.id, excludeBookingId),
         gte(bookings.startAt, gapStart),
@@ -966,6 +969,22 @@ export async function extendBooking(orgId: string, id: string, extraHours: numbe
     // like a cross-midnight create would.
     if (calendarDayOf(fresh.startAt) !== calendarDayOf(proposedEnd)) {
       throw new Error("CROSS_MIDNIGHT_NOT_ALLOWED");
+    }
+
+    // [SEC] Full-room↔individual-seat exclusivity is DAY-granularity, not
+    // interval-granularity (OBS-811, same rule createBooking applies at
+    // create time): ANY individual-seat/meeting booking anywhere on the
+    // calendar day makes the FULL_ROOM facility unavailable for the WHOLE
+    // day, regardless of whether it overlaps the specific extended window or
+    // sits inside the 60-min gap. The overlap/gap checks below are keyed to
+    // fresh.facilityId (the full room's OWN row) and would miss a seat
+    // booking entirely (different facility id) — reuse the same day-window
+    // oracle createBooking's FULL_ROOM branch uses, rather than relying on
+    // same-facility interval checks that don't apply to this direction.
+    if (fresh.facilityType === "FULL_ROOM") {
+      const { dayStart, dayEnd } = dayBounds(calendarDayOf(fresh.startAt));
+      const dayBlocked = await individualBookingExistsOnDay(tx, orgId, dayStart, dayEnd);
+      if (dayBlocked) throw new Error("EXTENSION_BLOCKED_BY_NEXT_BOOKING");
     }
 
     // [SEC] The extended interval [fresh.endAt, proposedEnd) must not itself

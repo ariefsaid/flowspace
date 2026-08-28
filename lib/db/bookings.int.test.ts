@@ -1194,6 +1194,39 @@ describe("lib/db/bookings", () => {
       const txns = await testDb.select().from(transactions).where(eq(transactions.bookingId, active.id));
       expect(txns).toHaveLength(0); // no extension ledger row written
     });
+
+    it("[SEC] a FULL_ROOM extension is blocked by a same-day individual-seat booking, even far outside the overlap/60-min-gap window (day-granularity exclusivity)", async () => {
+      // The old guard only matched the SAME facility id (facilityHasActiveOverlap
+      // / hasBookingStartingWithinGap keyed on fresh.facilityId), so it never
+      // saw a booking on a DIFFERENT facility (the seat) at all — regardless
+      // of full-room↔seat exclusivity (OBS-811: ANY individual booking on the
+      // calendar day makes the full-room facility unavailable for the WHOLE
+      // DAY, not just an overlapping window). This seat booking starts at
+      // 20:00 — hours after the full room's proposed 13:00 end and its 60-min
+      // gap window — so neither the interval-overlap nor the gap check would
+      // ever have caught it; only the day-granularity check does.
+      const start = new Date("2026-08-19T09:00:00Z");
+      const [fullRoomActive] = await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "FULL_ROOM", facilityId: fullRoomId,
+        facilityName: "Full Room Event", startAt: start, endAt: new Date(start.getTime() + 2 * HOUR), // 09:00-11:00
+        durationHours: 2, ratePerHourRupiah: 350000, amountRupiah: 700000, baseAmountRupiah: 700000, discountRupiah: 0,
+        status: "ACTIVE", paymentStatus: "PAID_ONLINE", bookingMode: "SCHEDULED", paymentMethod: "online",
+      }).returning();
+      await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatBId,
+        facilityName: "Meja B", startAt: new Date("2026-08-19T20:00:00Z"), endAt: new Date("2026-08-19T21:00:00Z"),
+        durationHours: 1, ratePerHourRupiah: 20000, amountRupiah: 20000, baseAmountRupiah: 20000, discountRupiah: 0,
+        status: "CONFIRMED", paymentStatus: "PAID_ONLINE", bookingMode: "SCHEDULED", paymentMethod: "online",
+      });
+
+      // +2h -> total 4h (within the 4h cap) -> proposed end 13:00, nowhere
+      // near the 20:00 seat booking under the OLD same-facility-only logic.
+      await expect(extendBooking(orgAId, fullRoomActive.id, 2)).rejects.toThrow(
+        /EXTENSION_BLOCKED_BY_NEXT_BOOKING/,
+      );
+      const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, fullRoomActive.id));
+      expect(fresh.durationHours).toBe(2); // unchanged
+    });
   });
 
   // -------------------------------------------------------------------------

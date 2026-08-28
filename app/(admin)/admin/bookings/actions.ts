@@ -6,9 +6,9 @@
  * recomputes billed hours (walk-in: elapsed ceil, capped; scheduled: booked
  * duration) and the current tier discount, settles payment (cash/qris →
  * PAID_CASHIER; time_credits → FIFO-debited, PAID_ONLINE), and flips status
- * to COMPLETED. Supersedes `completeBookingAction` (I-021), which force-
- * completed without a payment-method choice or billing recomputation
- * (OBS-839 — a defect this closes).
+ * to COMPLETED. `BookingsClient.tsx`'s checkout chooser calls this directly
+ * with the admin's chosen method — the transitional cash-only
+ * `completeBookingAction` shim (I-021/Chunk-2) is removed (OBS-839 fix).
  *
  * [SEC] orgId is always resolved from the server session; the booking id is the
  * only client input and is resolved within the caller's org (cross-org →
@@ -25,15 +25,4 @@ export async function checkoutBookingAction(bookingId: string, paymentMethod: Ch
     throw new Error("FORBIDDEN");
   }
   return checkoutBooking(user.orgId, bookingId, paymentMethod);
-}
-
-/**
- * ponytail: transitional cash-only shim preserving the pre-I-040
- * `completeBookingAction(bookingId)` call shape that `BookingsClient.tsx`'s
- * "Selesaikan Sesi & Bayar" button still calls. Chunk 3 (plan Phase 9, Task
- * 30) replaces this call site with a real cash/QRIS/credits chooser wired to
- * `checkoutBookingAction` directly — remove this shim then.
- */
-export async function completeBookingAction(bookingId: string) {
-  return checkoutBookingAction(bookingId, "cash");
 }

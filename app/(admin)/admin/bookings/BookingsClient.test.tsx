@@ -1,13 +1,12 @@
 /**
- * BookingsClient — renders DB-provided bookings + wires "Selesaikan Sesi & Bayar"
- * on an active walk-in to completeBookingAction (unit/RTL).
+ * BookingsClient (I-040, Phase 9) — real lifecycle counts + checkout payment
+ * chooser, replacing the transitional cash-only completeBookingAction shim.
  *
- * AC-ADM-BK-01: renders active booking card(s) in the "Booking Aktif" section
- * AC-ADM-BK-02: renders history rows in the table (COMPLETED/CANCELLED)
- * AC-ADM-BK-03: "Selesaikan Sesi & Bayar" calls completeBookingAction then refresh
- * AC-ADM-BK-04: pending/active count pills reflect the data
+ * AC-841: Pending/Confirmed/Active counts reflect the rows, and an ACTIVE
+ *         row's checkout action opens a cash/QRIS/credits settlement
+ *         affordance wired to checkoutBookingAction.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { BookingsClient } from "./BookingsClient";
 import type { AdminBookingView } from "./BookingsClient";
@@ -17,16 +16,17 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: mockRefresh }),
 }));
 
-const completeSpy = vi.fn().mockResolvedValue({});
+const checkoutSpy = vi.fn().mockResolvedValue({});
 vi.mock("@/app/(admin)/admin/bookings/actions", () => ({
-  completeBookingAction: (id: string) => completeSpy(id),
+  checkoutBookingAction: (id: string, method: string) => checkoutSpy(id, method),
 }));
 
 const bookings: AdminBookingView[] = [
   {
-    id: "bk_active",
+    id: "bk_active_walkin",
     facility: "Walk-in Coworking",
     facilityType: "WALKIN_COWORKING",
+    bookingMode: "WALKIN",
     start: new Date(Date.now() - 2 * 3_600_000).toISOString(),
     end: new Date(Date.now() - 2 * 3_600_000).toISOString(),
     durationHours: 0,
@@ -39,6 +39,7 @@ const bookings: AdminBookingView[] = [
     id: "bk_done",
     facility: "Meja A",
     facilityType: "COWORKING_SEAT",
+    bookingMode: "SCHEDULED",
     start: "2026-06-10T16:44:00+07:00",
     end: "2026-06-10T18:44:00+07:00",
     durationHours: 2,
@@ -47,29 +48,41 @@ const bookings: AdminBookingView[] = [
     amount: 40000,
     member: { name: "Sari Wijaya", email: "sari@x.test", tier: "GOLD" },
   },
+  {
+    id: "bk_confirmed",
+    facility: "Meeting Room A",
+    facilityType: "MEETING_ROOM",
+    bookingMode: "SCHEDULED",
+    start: "2026-06-11T09:00:00+07:00",
+    end: "2026-06-11T11:00:00+07:00",
+    durationHours: 2,
+    status: "CONFIRMED",
+    payment: "PAID_ONLINE",
+    amount: 300000,
+    member: { name: "Sari Wijaya", email: "sari@x.test", tier: "GOLD" },
+  },
+  {
+    id: "bk_pending",
+    facility: "Counter 1",
+    facilityType: "COWORKING_SEAT",
+    bookingMode: "SCHEDULED",
+    start: "2026-06-11T09:00:00+07:00",
+    end: "2026-06-11T11:00:00+07:00",
+    durationHours: 2,
+    status: "PENDING",
+    payment: "WAITING_CASHIER",
+    amount: 40000,
+    member: null,
+  },
 ];
 
-describe("BookingsClient", () => {
-  it("AC-ADM-BK-01: renders the active booking card with its facility + member", () => {
-    render(<BookingsClient bookings={bookings} />);
-    // Default filter is "active" → only the active card section renders.
-    // "Booking Aktif" appears both as the section heading and a filter option,
-    // so target the heading role specifically.
-    expect(
-      screen.getByRole("heading", { name: "Booking Aktif" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Walk-in Coworking")).toBeInTheDocument();
-    expect(screen.getByText("Budi Santoso")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Selesaikan Sesi & Bayar/i }),
-    ).toBeInTheDocument();
-  });
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
-  it("AC-ADM-BK-04: count pills reflect the data (1 pending, 1 active)", () => {
+describe("BookingsClient (AC-841)", () => {
+  it("AC-841: Pending/Confirmed/Active count pills reflect the data", () => {
     const { container } = render(<BookingsClient bookings={bookings} />);
-    // The count sits in a nested <span> inside each label span, so match on
-    // the three stats-pill spans directly (whitespace-stripped) rather than
-    // via getByText — JSX collapses the inter-tag space ambiguously.
     const pills = Array.from(
       container.querySelectorAll<HTMLSpanElement>(
         ".flex.items-center.gap-5 span.text-gray-700",
@@ -77,26 +90,34 @@ describe("BookingsClient", () => {
     );
     const texts = pills.map((p) => p.textContent?.replace(/\s+/g, ""));
     expect(texts).toEqual(
-      expect.arrayContaining(["1Pending", "1Active", "0Confirmed"]),
+      expect.arrayContaining(["1Pending", "1Confirmed", "1Active"]),
     );
   });
 
-  it("AC-ADM-BK-03: 'Selesaikan Sesi & Bayar' calls completeBookingAction then refresh", async () => {
+  it("renders the active booking card with its facility + member", () => {
     render(<BookingsClient bookings={bookings} />);
-    fireEvent.click(screen.getByRole("button", { name: /Selesaikan Sesi & Bayar/i }));
-    await waitFor(() => {
-      expect(completeSpy).toHaveBeenCalledWith("bk_active");
-    });
-    await waitFor(() => {
-      expect(mockRefresh).toHaveBeenCalled();
-    });
+    expect(screen.getByRole("heading", { name: "Booking Aktif" })).toBeInTheDocument();
+    expect(screen.getByText("Walk-in Coworking")).toBeInTheDocument();
+    expect(screen.getByText("Budi Santoso")).toBeInTheDocument();
   });
 
-  it("AC-ADM-BK-02: history table renders COMPLETED rows under the 'all' filter", () => {
+  it("AC-841: checkout opens a cash/QRIS/credits chooser and calls checkoutBookingAction with the chosen method", async () => {
+    render(<BookingsClient bookings={bookings} />);
+    fireEvent.click(screen.getByRole("button", { name: /Selesaikan Sesi & Bayar/i }));
+
+    // Chooser affordance appears with the three settlement methods.
+    const qrisBtn = await screen.findByRole("button", { name: /QRIS/i });
+    fireEvent.click(qrisBtn);
+
+    await waitFor(() => expect(checkoutSpy).toHaveBeenCalledWith("bk_active_walkin", "qris"));
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+  });
+
+  it("history table renders COMPLETED and CONFIRMED rows under the 'all' filter", () => {
     render(<BookingsClient bookings={bookings} />);
     const select = screen.getByDisplayValue("Booking Aktif") as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "all" } });
     expect(screen.getByText("Meja A")).toBeInTheDocument();
-    expect(screen.getByText("Sari Wijaya")).toBeInTheDocument();
+    expect(screen.getByText("Meeting Room A")).toBeInTheDocument();
   });
 });

@@ -470,6 +470,16 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
   if (!Number.isFinite(durationHours) || durationHours <= 0) {
     throw new Error("INVALID_DURATION");
   }
+  // [SEC] One-day constraint: the org-day advisory lock and the full-room
+  // day-window exclusivity (individualBookingExistsOnDay) are both keyed by
+  // a SINGLE calendarDayOf(startAt). A booking spanning two calendar days
+  // would only ever take/check the START day's lock+window, leaving its tail
+  // end on the next day unlocked and unchecked against that day's full-room
+  // exclusivity — a real race/exclusivity gap, not just a display quirk.
+  // Simplest safe fix: reject cross-midnight intervals outright.
+  if (calendarDayOf(startAt) !== calendarDayOf(endAt)) {
+    throw new Error("CROSS_MIDNIGHT_NOT_ALLOWED");
+  }
 
   // Resolve the facility row WITHIN this org — the DB row is the source of
   // truth for id/name/rate [SEC]; the client-supplied rate is never trusted.

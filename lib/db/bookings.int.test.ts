@@ -313,6 +313,23 @@ describe("lib/db/bookings", () => {
       expect(await bookingRowCount(orgAId)).toBe(before);
     });
 
+    it("[SEC] rejects a booking whose interval crosses a calendar-day boundary", async () => {
+      // The org-day advisory lock + full-room day-window logic are keyed by a
+      // SINGLE calendar day (calendarDayOf(startAt)) — a booking spanning two
+      // calendar days would escape that day's lock/exclusivity window for its
+      // tail end. Simplest safe fix: reject cross-midnight intervals outright.
+      const before = await bookingRowCount(orgAId);
+      await expect(
+        createBooking({
+          orgId: orgAId, userId: aUserId, tier: "REGULAR",
+          facilityType: "COWORKING_SEAT", facilityId: seatAId, facilityName: "Meja A",
+          startAt: new Date("2026-07-14T23:00:00Z"), endAt: new Date("2026-07-15T07:00:00Z"),
+          paymentMethod: "online",
+        }),
+      ).rejects.toThrow(/CROSS_MIDNIGHT_NOT_ALLOWED/);
+      expect(await bookingRowCount(orgAId)).toBe(before);
+    });
+
     it("[SEC] facility-type confusion: a desk id submitted as FULL_ROOM is rejected (no underpay)", async () => {
       // Exploit: client sends facilityId=<a COWORKING_SEAT row> but
       // facilityType="FULL_ROOM" — if the server trusted the client's type,

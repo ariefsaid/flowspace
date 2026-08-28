@@ -2,12 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CircleAlert, CircleCheck, MapPin, User, Phone, Clock } from "lucide-react";
+import { CircleAlert, CircleCheck, MapPin, User, Phone, Clock, Play } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/lib/cn";
 import { formatRupiah, formatDateID, formatDateRangeID } from "@/lib/format";
-import { approvePaymentAction } from "@/app/(admin)/admin/pending/actions";
+import { approvePaymentAction, approveAndStartWalkInAction } from "@/app/(admin)/admin/pending/actions";
+import type { BookingMode } from "@/lib/db/enums";
 
 // ---------------------------------------------------------------------------
 // View shape — DB Booking mapped for this component
@@ -16,6 +17,8 @@ import { approvePaymentAction } from "@/app/(admin)/admin/pending/actions";
 export interface PendingItem {
   id: string;
   facility: string;
+  /** I-040: splits the row's approval affordance (AC-840). */
+  bookingMode: BookingMode;
   start: string; // ISO
   end: string; // ISO
   durationHours: number;
@@ -28,6 +31,17 @@ export interface PendingClientProps {
 }
 
 // ---------------------------------------------------------------------------
+// Per-row approval action, resolved once here so both the row button AND the
+// bulk "Approve" button call the same function for a given item (AC-840).
+// ---------------------------------------------------------------------------
+
+function approveItem(item: PendingItem) {
+  return item.bookingMode === "WALKIN"
+    ? approveAndStartWalkInAction(item.id)
+    : approvePaymentAction(item.id);
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -35,6 +49,7 @@ export function PendingClient({ items }: PendingClientProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const allIds = items.map((p) => p.id);
   const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
@@ -56,16 +71,28 @@ export function PendingClient({ items }: PendingClientProps) {
     });
   }
 
-  async function handleApprove() {
-    // Approve each selected booking. The action is ADMIN-only (SoD) and
-    // org-scoped server-side; on any error we let router.refresh() re-render
-    // the true server state (already-approved rows leave the pending list).
-    const ids = [...selected];
+  async function handleApproveRow(item: PendingItem) {
+    setBusyId(item.id);
+    try {
+      await approveItem(item);
+    } catch {
+      // router.refresh() re-renders the true server state on failure.
+    } finally {
+      setBusyId(null);
+    }
+    startTransition(() => router.refresh());
+  }
+
+  async function handleBulkApprove() {
+    // Route each selected id through its OWN bookingMode action (AC-840) —
+    // approvePaymentAction for scheduled rows, approveAndStartWalkInAction
+    // for walk-ins. The action is ADMIN-only (SoD) and org-scoped
+    // server-side; on any error we let router.refresh() re-render the true
+    // server state (already-approved rows leave the pending list).
+    const toApprove = items.filter((i) => selected.has(i.id));
     setSelected(new Set());
-    await Promise.allSettled(ids.map((id) => approvePaymentAction(id)));
-    startTransition(() => {
-      router.refresh();
-    });
+    await Promise.allSettled(toApprove.map((item) => approveItem(item)));
+    startTransition(() => router.refresh());
   }
 
   return (
@@ -83,7 +110,7 @@ export function PendingClient({ items }: PendingClientProps) {
           <Button
             variant="primary"
             size="md"
-            onClick={handleApprove}
+            onClick={handleBulkApprove}
             disabled={selected.size === 0}
             className="gap-1.5"
           >
@@ -113,6 +140,8 @@ export function PendingClient({ items }: PendingClientProps) {
           <ul className="divide-y divide-slate-200">
             {items.map((item) => {
               const isChecked = selected.has(item.id);
+              const isWalkin = item.bookingMode === "WALKIN";
+              const isBusy = busyId === item.id;
               return (
                 <li
                   key={item.id}
@@ -141,6 +170,7 @@ export function PendingClient({ items }: PendingClientProps) {
                         {item.facility}
                       </span>
                       <Badge tone="pending">WAITING CASHIER</Badge>
+                      {isWalkin && <Badge tone="info">WALK-IN</Badge>}
                     </div>
 
                     {/* Member info row */}
@@ -156,25 +186,39 @@ export function PendingClient({ items }: PendingClientProps) {
                             {item.member.phone}
                           </span>
                         )}
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3.5 w-3.5 shrink-0" />
-                          {item.durationHours}h
-                        </span>
+                        {!isWalkin && (
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3.5 w-3.5 shrink-0" />
+                            {item.durationHours}h
+                          </span>
+                        )}
                       </div>
                     )}
 
                     {/* Date range */}
-                    <p className="text-xs text-gray-400">
-                      {formatDateRangeID(item.start, item.end)}
-                    </p>
+                    {!isWalkin && (
+                      <p className="text-xs text-gray-400">
+                        {formatDateRangeID(item.start, item.end)}
+                      </p>
+                    )}
                   </div>
 
-                  {/* Amount + created */}
-                  <div className="shrink-0 text-right">
+                  {/* Per-row approval affordance — split by bookingMode (AC-840) */}
+                  <div className="shrink-0 flex flex-col items-end gap-2">
                     <p className="text-sm font-bold text-teal-600">
                       {formatRupiah(item.amount)}
                     </p>
-                    <p className="mt-0.5 text-xs text-gray-400">
+                    <Button
+                      variant={isWalkin ? "accent" : "primary"}
+                      size="sm"
+                      className="gap-1.5"
+                      disabled={isBusy}
+                      onClick={() => handleApproveRow(item)}
+                    >
+                      {isWalkin ? <Play className="h-3.5 w-3.5" /> : <CircleCheck className="h-3.5 w-3.5" />}
+                      {isBusy ? "Memproses..." : isWalkin ? "Mulai Sesi (Walk-in)" : "Approve Pembayaran"}
+                    </Button>
+                    <p className="text-xs text-gray-400">
                       Created {formatDateID(item.start)}
                     </p>
                   </div>

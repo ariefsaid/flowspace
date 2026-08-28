@@ -51,6 +51,41 @@ describe("cartLineKey", () => {
     ]);
     expect(oneGroupWithAmpersandInOptionName).not.toBe(twoDistinctGroups);
   });
+
+  it("[MONEY] sorts option names containing quotes/backslashes/unicode without crashing, still order-independent", () => {
+    const opts1 = [
+      { variantName: 'Size "Large"', optionName: "Back\\slash" },
+      { variantName: "🍵 Tea", optionName: "無糖 (no sugar)" },
+    ];
+    const opts2 = [
+      { variantName: "🍵 Tea", optionName: "無糖 (no sugar)" },
+      { variantName: 'Size "Large"', optionName: "Back\\slash" },
+    ];
+    expect(cartLineKey("item", opts1)).toBe(cartLineKey("item", opts2));
+  });
+
+  it("[MONEY] a collation-equivalent-but-code-unit-distinct pair still merges when submitted in reversed order", () => {
+    // "café" precomposed (U+00E9 é) vs "café" decomposed (U+0065 U+0301,
+    // combining acute) render identically and are collation-equivalent
+    // (`"café".localeCompare("café") === 0`) but are DIFFERENT strings
+    // (different code units) — legally distinct variant group/option names.
+    // A localeCompare-based sort ties on this pair; Array.sort is STABLE, so
+    // a tie preserves INPUT order rather than a canonical order — the same
+    // logical selection set submitted in reversed order then produces a
+    // DIFFERENT key, and two identical carts fail to merge. The comparator
+    // must be a genuine total order (code-unit `<`/`>`), not localeCompare.
+    const precomposed = "café";
+    const decomposed = "café";
+    expect(precomposed).not.toBe(decomposed); // sanity: distinct strings
+    expect(precomposed.localeCompare(decomposed)).toBe(0); // sanity: the trap
+
+    const itemA = { variantName: precomposed, optionName: precomposed };
+    const itemB = { variantName: decomposed, optionName: decomposed };
+
+    const forward = cartLineKey("item", [itemA, itemB]);
+    const reversed = cartLineKey("item", [itemB, itemA]);
+    expect(forward).toBe(reversed);
+  });
 });
 
 describe("addCartLine (AC-704)", () => {

@@ -1118,7 +1118,22 @@ export async function runStatusSweep(orgId: string, now: Date): Promise<StatusSw
           eq(bookings.orgId, orgId),
           eq(bookings.status, "PENDING"),
           eq(bookings.paymentStatus, "WAITING_CASHIER"),
-          lt(bookings.createdAt, new Date(now.getTime() - STALE_PENDING_HOLD_MS)),
+          // [SEC][MONEY] Cancel only a hold that can no longer be honored —
+          // NEVER purely by age. A scheduled hold's own booked start_at is
+          // the real "can this still happen" signal: once it's passed
+          // unpaid, the slot is gone regardless of how recently it was
+          // created. A walk-in has no future slot to protect (its start_at
+          // is set at creation, not a scheduled time), so age (>24h,
+          // STALE_PENDING_HOLD_MS) is its only staleness signal. The old
+          // rule used createdAt>24h for EVERY hold, including a legitimately
+          // future-dated scheduled booking — real data loss.
+          or(
+            and(eq(bookings.bookingMode, "SCHEDULED"), lt(bookings.startAt, now)),
+            and(
+              eq(bookings.bookingMode, "WALKIN"),
+              lt(bookings.createdAt, new Date(now.getTime() - STALE_PENDING_HOLD_MS)),
+            ),
+          ),
         ),
       )
       .returning({ id: bookings.id });
@@ -1180,6 +1195,11 @@ export async function cancelBooking(
 // Pending payments  [SEC][SoD] — ADMIN-only at the action layer
 // ---------------------------------------------------------------------------
 
+/** [SEC] Hard ceiling on `listPendingBookings`'s limit — a caller-supplied
+ *  value above this is clamped, never honored as-is (pending-hold DoS,
+ *  defense-in-depth alongside the soft `limit = 200` default below). */
+const PENDING_BOOKINGS_HARD_LIMIT = 500;
+
 /**
  * Admin pending-payments surface: PENDING bookings still WAITING_CASHIER —
  * a fresh walk-in awaiting cashier start, or a scheduled cashier booking
@@ -1187,6 +1207,9 @@ export async function cancelBooking(
  * [SEC] Bounded (LIMIT) — a flood of unpaid PENDING holds must never make
  * this read set unbounded (pending-hold DoS, defense-in-depth alongside the
  * createBooking duration/horizon bound and the sweep's stale-hold cancel).
+ * The soft `limit` default is caller-adjustable but hard-clamped at
+ * `PENDING_BOOKINGS_HARD_LIMIT` — a caller can shrink the page, never grow
+ * it past the ceiling.
  */
 export function listPendingBookings(orgId: string, limit = 200): Promise<Booking[]> {
   return db
@@ -1200,5 +1223,5 @@ export function listPendingBookings(orgId: string, limit = 200): Promise<Booking
       ),
     )
     .orderBy(desc(bookings.createdAt))
-    .limit(limit);
+    .limit(Math.min(limit, PENDING_BOOKINGS_HARD_LIMIT));
 }

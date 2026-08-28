@@ -1362,20 +1362,23 @@ describe("lib/db/bookings", () => {
       expect(fresh.status).toBe("ACTIVE");
     });
 
-    it("[SEC] auto-cancels a stale (>24h) unpaid PENDING/WAITING_CASHIER hold — never approved, would otherwise pin inventory forever", async () => {
+    it("[SEC] auto-cancels a stale (>24h) unpaid walk-in hold — never approved, would otherwise pin inventory forever", async () => {
+      // Walk-in has no future-dated slot to honor (start_at is set to the
+      // moment of creation, not a scheduled time) — its only staleness
+      // signal is age, so the >24h created-at threshold applies here.
       const now = new Date("2026-08-23T12:00:00Z");
       const [stale] = await testDb.insert(bookings).values({
-        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatBId,
-        facilityName: "Meja B", startAt: new Date(now.getTime() + HOUR), endAt: new Date(now.getTime() + 2 * HOUR),
-        durationHours: 1, ratePerHourRupiah: 20000, amountRupiah: 20000, baseAmountRupiah: 20000, discountRupiah: 0,
-        status: "PENDING", paymentStatus: "WAITING_CASHIER", bookingMode: "SCHEDULED", paymentMethod: "cashier",
+        orgId: orgAId, userId: aUserId, facilityType: "WALKIN_COWORKING", facilityId: null,
+        facilityName: "Walk-in Coworking", startAt: new Date(now.getTime() - 25 * HOUR), endAt: null,
+        durationHours: null, ratePerHourRupiah: 15000, amountRupiah: 0, baseAmountRupiah: 0, discountRupiah: 0,
+        status: "PENDING", paymentStatus: "WAITING_CASHIER", bookingMode: "WALKIN", paymentMethod: "cashier",
         createdAt: new Date(now.getTime() - 25 * HOUR), // stale — held 25h, never approved
       }).returning();
       const [fresh] = await testDb.insert(bookings).values({
-        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatAId,
-        facilityName: "Meja A", startAt: new Date(now.getTime() + HOUR), endAt: new Date(now.getTime() + 2 * HOUR),
-        durationHours: 1, ratePerHourRupiah: 20000, amountRupiah: 20000, baseAmountRupiah: 20000, discountRupiah: 0,
-        status: "PENDING", paymentStatus: "WAITING_CASHIER", bookingMode: "SCHEDULED", paymentMethod: "cashier",
+        orgId: orgAId, userId: aUserId, facilityType: "WALKIN_COWORKING", facilityId: null,
+        facilityName: "Walk-in Coworking", startAt: new Date(now.getTime() - 1 * HOUR), endAt: null,
+        durationHours: null, ratePerHourRupiah: 15000, amountRupiah: 0, baseAmountRupiah: 0, discountRupiah: 0,
+        status: "PENDING", paymentStatus: "WAITING_CASHIER", bookingMode: "WALKIN", paymentMethod: "cashier",
         createdAt: new Date(now.getTime() - 1 * HOUR), // recent — untouched
       }).returning();
 
@@ -1386,6 +1389,45 @@ describe("lib/db/bookings", () => {
       expect(staleAfter.status).toBe("CANCELLED");
       const [freshAfter] = await testDb.select().from(bookings).where(eq(bookings.id, fresh.id));
       expect(freshAfter.status).toBe("PENDING"); // untouched — not yet stale
+    });
+
+    it("[SEC][MONEY] NEVER sweeps a future-dated scheduled cashier hold, even if it was created >24h ago (no data-loss on a legitimate future booking)", async () => {
+      // A member who books next week's meeting room and chooses to pay at
+      // the cashier holds a legitimately future-dated PENDING/WAITING_CASHIER
+      // row for however long is convenient — that row is NOT "stale" just
+      // because it has existed for >24h; it can still be honored right up
+      // to (and through) its own start time. The old sweep cancelled ANY
+      // PENDING/WAITING_CASHIER hold older than 24h purely by created_at,
+      // with no regard for whether its booked window was even in the past —
+      // real data loss on a legitimate future reservation.
+      const now = new Date("2026-08-24T12:00:00Z");
+      const [future] = await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatBId,
+        facilityName: "Meja B", startAt: new Date(now.getTime() + 7 * 24 * HOUR), endAt: new Date(now.getTime() + 7 * 24 * HOUR + HOUR),
+        durationHours: 1, ratePerHourRupiah: 20000, amountRupiah: 20000, baseAmountRupiah: 20000, discountRupiah: 0,
+        status: "PENDING", paymentStatus: "WAITING_CASHIER", bookingMode: "SCHEDULED", paymentMethod: "cashier",
+        createdAt: new Date(now.getTime() - 30 * HOUR), // created >24h ago — the OLD rule would have swept this
+      }).returning();
+
+      await runStatusSweep(orgAId, now);
+      const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, future.id));
+      expect(fresh.status).toBe("PENDING"); // must survive — legitimately future-dated, never cancelled
+    });
+
+    it("[SEC][MONEY] sweeps a scheduled cashier hold whose start_at has already passed unpaid, regardless of how recently it was created", async () => {
+      const now = new Date("2026-08-25T12:00:00Z");
+      const [pastStart] = await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatBId,
+        facilityName: "Meja B", startAt: new Date(now.getTime() - HOUR), endAt: now,
+        durationHours: 1, ratePerHourRupiah: 20000, amountRupiah: 20000, baseAmountRupiah: 20000, discountRupiah: 0,
+        status: "PENDING", paymentStatus: "WAITING_CASHIER", bookingMode: "SCHEDULED", paymentMethod: "cashier",
+        createdAt: new Date(now.getTime() - 30 * 60_000), // created only 30 minutes ago — no 24h wait needed
+      }).returning();
+
+      const result = await runStatusSweep(orgAId, now);
+      expect(result.staleCancelled).toBeGreaterThanOrEqual(1);
+      const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, pastStart.id));
+      expect(fresh.status).toBe("CANCELLED");
     });
 
     it("is org-scoped: sweeping org A never touches org B's rows", async () => {

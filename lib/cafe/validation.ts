@@ -5,6 +5,7 @@
 
 const MAX_NOTES_LENGTH = 500;
 const MAX_QTY_PER_LINE = 99;
+const MAX_LINES_PER_ORDER = 50;
 
 /**
  * Trims `value`, normalizes a blank/whitespace-only result to `null`, and
@@ -20,6 +21,20 @@ export function normalizeOrderNotes(value: unknown): string | null {
     throw new Error("INVALID_NOTES");
   }
   return trimmed;
+}
+
+/**
+ * Throws `TOO_MANY_LINES` when an order carries more than 50 distinct lines.
+ * A single legitimate order — even a large group tab — never approaches this;
+ * it caps a bot/script flooding thousands of qty:1 lines on any order path
+ * (member/guest/POS all share this guard via `createOrder`) before any DB
+ * work happens ([MONEY]/DoS). Does not reject an empty array — `EMPTY_ORDER`
+ * is a separate, earlier guard.
+ */
+export function assertOrderLineCount(lines: unknown[]): void {
+  if (lines.length > MAX_LINES_PER_ORDER) {
+    throw new Error("TOO_MANY_LINES");
+  }
 }
 
 /** Throws `INVALID_QUANTITY` unless `qty` is an integer in `1..99`. */

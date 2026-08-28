@@ -22,7 +22,11 @@ import { findProfilesByIds } from "@/lib/db/users";
 import { getActiveBooking } from "@/lib/db/bookings";
 import { getTierDiscounts } from "@/lib/db/tier-config";
 import { computeOrderTotals, priceOrderLines } from "@/lib/cafe/pricing";
-import { normalizeOrderNotes, assertOrderLineQuantity } from "@/lib/cafe/validation";
+import {
+  normalizeOrderNotes,
+  assertOrderLineQuantity,
+  assertOrderLineCount,
+} from "@/lib/cafe/validation";
 import { recordTransaction } from "@/lib/db/transactions";
 import { generateOrderCode, nextStatus } from "@/lib/cafe/status";
 import type { CafeOrderStatus, OrderLineInput } from "@/lib/cafe/types";
@@ -93,6 +97,12 @@ export async function createOrder(input: {
 
   // Guard: reject empty lines BEFORE any DB access
   if (!lines.length) throw new Error("EMPTY_ORDER");
+
+  // Guard: cap distinct lines BEFORE any DB access — a bot/script flooding
+  // thousands of qty:1 lines (bypassing the client's cart-merge UI entirely,
+  // since this is a server action) must be rejected up front, on every order
+  // path (member/guest/POS share this one boundary) ([MONEY]/DoS).
+  assertOrderLineCount(lines);
 
   // Guard: every line qty must be a positive integer within a sane bound. qty is
   // client-supplied and is multiplied into the server-computed total — a negative/

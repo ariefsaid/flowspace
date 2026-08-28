@@ -2,7 +2,11 @@
  * Unit tests for lib/cafe/validation.ts (I-044, FR-724, NFR-044-03).
  */
 import { describe, it, expect } from "vitest";
-import { normalizeOrderNotes, assertOrderLineQuantity } from "@/lib/cafe/validation";
+import {
+  normalizeOrderNotes,
+  assertOrderLineQuantity,
+  assertOrderLineCount,
+} from "@/lib/cafe/validation";
 
 describe("normalizeOrderNotes", () => {
   it("AC-712: undefined normalizes to null", () => {
@@ -53,5 +57,19 @@ describe("assertOrderLineQuantity", () => {
 
   it("AC-725: a non-number qty is rejected", () => {
     expect(() => assertOrderLineQuantity("5" as unknown as number)).toThrow(/INVALID_QUANTITY/);
+  });
+});
+
+describe("assertOrderLineCount [MONEY/DoS]", () => {
+  it("50 lines succeeds (no throw)", () => {
+    expect(() => assertOrderLineCount(new Array(50).fill(null))).not.toThrow();
+  });
+
+  it("51 lines is rejected (a bot flooding thousands of qty:1 lines is capped)", () => {
+    expect(() => assertOrderLineCount(new Array(51).fill(null))).toThrow(/TOO_MANY_LINES/);
+  });
+
+  it("an empty array does not throw here (EMPTY_ORDER is a separate, earlier guard)", () => {
+    expect(() => assertOrderLineCount([])).not.toThrow();
   });
 });

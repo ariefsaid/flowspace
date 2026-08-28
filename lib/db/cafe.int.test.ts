@@ -595,6 +595,27 @@ describe("lib/db/cafe", () => {
       expect(after).toBe(before);
     });
 
+    it("[MONEY/DoS]: an order exceeding the 50-distinct-line cap is rejected before any write", async () => {
+      const [{ count: before }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      const floodLines = Array.from({ length: 51 }, () => ({
+        menuItemId: latteAId,
+        qty: 1,
+      }));
+      await expect(
+        createOrder({
+          orgId: orgAId,
+          customerUserId: aUserId,
+          guestName: null,
+          lines: floodLines,
+          discountEligible: false,
+        }),
+      ).rejects.toThrow(/TOO_MANY_LINES/);
+      const [{ count: after }] = await testSql`
+        select count(*)::int as count from cafe_orders where org_id = ${orgAId}`;
+      expect(after).toBe(before);
+    });
+
     it("AC-112 / AC-727: createOrder rejects an unavailable or archived item (orderability enforced), no write", async () => {
       // Capture the seeded non-orderable item ids.
       const seeded = await testDb

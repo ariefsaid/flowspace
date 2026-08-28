@@ -4,7 +4,7 @@
  * createBooking rewrite, Phase 5).
  */
 import { describe, expect, it } from "vitest";
-import { computeBookingPrice, computeWalkinBilledHours } from "@/lib/booking/pricing";
+import { computeBookingPrice, computeWalkinBilledHours, resolveDiscountPct } from "@/lib/booking/pricing";
 
 describe("computeBookingPrice", () => {
   it("AC-814: discount applies to rate × hours and rounds with Math.round", () => {
@@ -48,5 +48,29 @@ describe("computeWalkinBilledHours", () => {
 
   it("bills exactly 1 hour at exactly 60 elapsed minutes (no over-round)", () => {
     expect(computeWalkinBilledHours(60 * 60_000, 4)).toBe(1);
+  });
+});
+
+describe("resolveDiscountPct", () => {
+  const discounts = { coworkingDiscountPct: 10, meetingDiscountPct: 15 };
+
+  it("AC-827: COWORKING_SEAT and WALKIN_COWORKING read coworkingDiscountPct", () => {
+    expect(resolveDiscountPct("COWORKING_SEAT", discounts)).toBe(10);
+    expect(resolveDiscountPct("WALKIN_COWORKING", discounts)).toBe(10);
+  });
+
+  it("AC-827: MEETING_ROOM and WALKIN_MEETING read meetingDiscountPct", () => {
+    expect(resolveDiscountPct("MEETING_ROOM", discounts)).toBe(15);
+    expect(resolveDiscountPct("WALKIN_MEETING", discounts)).toBe(15);
+  });
+
+  it("AC-827: FULL_ROOM (no owning dimension) fails safe to 0%", () => {
+    expect(resolveDiscountPct("FULL_ROOM", discounts)).toBe(0);
+  });
+
+  it("AC-827: a missing/zeroed tier config row grants 0% (fail-safe)", () => {
+    const zero = { coworkingDiscountPct: 0, meetingDiscountPct: 0 };
+    expect(resolveDiscountPct("COWORKING_SEAT", zero)).toBe(0);
+    expect(resolveDiscountPct("MEETING_ROOM", zero)).toBe(0);
   });
 });

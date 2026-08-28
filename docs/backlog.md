@@ -3,7 +3,8 @@
 One issue at a time (Director loop). Each issue: Intake → Spec → Plan → Build → Review → Accept → (design re-review) → Ship.
 Surfaces come from `docs/specs/0001-recon-app-surface.spec.md`.
 
-## CURRENT STATE (2026-06-21) — read this first
+## CURRENT STATE (2026-06-21; parity audit 2026-08-28) — read this first
+- **2026-08-28:** the original app's source was obtained + audited — see `docs/audit-verdict.md` + `docs/gap-analysis-original.md` (the new behavior oracle) and **Phase 4** below.
 - **Stack:** Supabase (Postgres+Auth+Realtime+Storage+RLS) + Drizzle, server-authoritative (ADR-0013/0014/0015). Prisma/Neon/NextAuth removed. Migrations `0000`–`0007`.
 - **The app is FUNCTIONALLY COMPLETE on `main` (CI green).** Every data surface is live on Supabase. Merged: I-005 (re-platform), I-022 cafe (PR #3, Realtime KDS), the **functional-app push** ([PR #4](https://github.com/ariefsaid/flowspace/pull/4): I-020 packages/top-up · I-021 booking · I-024 keycard QR · I-023 print · admin console · dashboard/history + a unified `transactions` ledger), and the **workflow-conformance harden** ([PR #5](https://github.com/ariefsaid/flowspace/pull/5): SDD spec 0004, print→Supabase Storage, full 4-reviewer battery). Tests on `main`: see `pnpm test` / CI (≈unit 188 / int 85 / e2e 8 as of 2026-06-21).
 - **Live (LIVE-DB):** landing(static)·login·signup(action)·guest-cafe·member dashboard/cafe/booking/print/keycard/topup/history·barista·admin dashboard/users/pending/bookings/pos/orders/**print-reports**. **Static (intentional):** `/`, `/signup` page, `/admin/settings` (config hub — simulated integrations).
@@ -90,6 +91,17 @@ Still open (lift sub-gaps further, non-blocking):
 - [ ] **I-035** Orders `/admin/orders`.
 - [ ] **I-036** Print reports `/admin/print-reports`.
 - [ ] **I-037** Settings `/admin/settings` (pricing/packages/discounts/tiers).
+
+## Phase 4 — Source-parity wave (2026-08-28)
+The original app's source was obtained and audited (verdict: `docs/audit-verdict.md`; detail:
+`docs/gap-analysis-original.md` — now the behavior oracle where recon guessed). FlowSpace is architecturally
+ahead; these close the functional gaps, in dependency order:
+- [ ] **I-040** Booking parity overhaul (flagship): overlap conflict check · time-credits as booking payment (90-day expiring lots, FIFO) · `PENDING→CONFIRMED→ACTIVE` lifecycle + payment methods · extend session · admin checkout/billing (cash/QRIS/credits) · seat-level facilities + floor plan (desks 25k / counters 20k / rooms 150k/120k / full-room 350k + day-exclusivity) · per-tier booking discounts · authenticated status sweep (also resolves the stale-walk-in OQ). Gap §2.1–2.2.
+- [ ] **I-041** Tier model correction: 4 discount dims (coworking/meeting/cafe/print), true values (0/0/0/0 · 10/10/5/5 · 15/15/10/10 — replaces our cafe-5%-flat + print-20% guesses), tier-CRUD-vs-enum ADR. Gap §2.3.
+- [ ] **I-042** Admin CRUD completion: users add/edit (soft-archive, not ORIG's cascade delete) · manual booking · facilities + cafe-menu CRUD · `/admin/reports` charts · bulk pending-approve. Gap §2.6.
+- [ ] **I-043** Print parity: colorMode×paperSize pricing matrix (A4/A3/F4) · printers CRUD · page-range · PROCESSING/FAILED statuses · page-package top-ups (10/10k · 50/45k · 100/80k) · print-agent pull API (API-key). Gap §2.4.
+- [ ] **I-044** Cafe nuances: priced variants (Cold +3k, sugar) · order notes · POS member lookup (tier-driven, NOT ORIG's hardcoded 15%) · menu-truth reconciliation w/ owner. Gap §2.5.
+- [ ] **I-045** Integrations (owner-gated, one ADR each): WiFi vouchers (controller cloud/local) · email notifications (welcome/booking/receipt behind a provider seam) · door `verify-access` **with the HMAC actually verified** (ORIG ignores it). Gap §2.7.
 
 ## Tech debt / enhancements
 - [ ] Changed-lines-precise coverage gate (PMO had a root-anchored script; dropped here — re-add root-aware version).

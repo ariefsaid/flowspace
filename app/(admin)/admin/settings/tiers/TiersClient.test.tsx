@@ -4,7 +4,7 @@
  * and surfaces a save error without a false "saved" state (each `it()` title
  * below names its own owning acceptance criterion).
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { TiersClient, type TierRow } from "./TiersClient";
 import { savePricingConfigAction } from "./actions";
@@ -19,6 +19,10 @@ const tiers: TierRow[] = [
 ];
 
 describe("TiersClient", () => {
+  beforeEach(() => {
+    vi.mocked(savePricingConfigAction).mockReset();
+  });
+
   it("AC-520: renders print base rates + four labelled discount inputs per tier, populated from seeded config", () => {
     render(
       <TiersClient
@@ -74,5 +78,34 @@ describe("TiersClient", () => {
     fireEvent.click(screen.getByRole("button", { name: /Simpan/i }));
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
     expect(screen.queryByText("Tersimpan")).not.toBeInTheDocument();
+  });
+
+  it("AC-521: editing all four inputs for one tier forwards the four distinct edited values for that tier on Save", async () => {
+    vi.mocked(savePricingConfigAction).mockResolvedValueOnce(undefined);
+    render(
+      <TiersClient
+        tiers={tiers}
+        printPricing={{ bwRatePerPageRupiah: 500, colorRatePerPageRupiah: 1500 }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Diskon coworking PREMIUM"), { target: { value: "21" } });
+    fireEvent.change(screen.getByLabelText("Diskon meeting PREMIUM"), { target: { value: "22" } });
+    fireEvent.change(screen.getByLabelText("Diskon cafe PREMIUM"), { target: { value: "23" } });
+    fireEvent.change(screen.getByLabelText("Diskon print PREMIUM"), { target: { value: "24" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /Simpan/i }));
+    await waitFor(() => expect(savePricingConfigAction).toHaveBeenCalledTimes(1));
+
+    const payload = vi.mocked(savePricingConfigAction).mock.calls[0][0];
+    const premium = payload.tiers.find((t) => t.tier === "PREMIUM");
+    expect(premium).toEqual({
+      tier: "PREMIUM",
+      coworkingDiscountPct: 21,
+      meetingDiscountPct: 22,
+      cafeDiscountPct: 23,
+      printDiscountPct: 24,
+    });
+    // The untouched tiers are unaffected.
+    expect(payload.tiers.find((t) => t.tier === "REGULAR")).toEqual(tiers[0]);
   });
 });

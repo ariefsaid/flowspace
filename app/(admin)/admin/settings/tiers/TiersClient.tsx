@@ -17,6 +17,16 @@ export type TierRow = {
   printDiscountPct: number;
 };
 
+type DiscountField = "coworkingDiscountPct" | "meetingDiscountPct" | "cafeDiscountPct" | "printDiscountPct";
+
+/** One table column per discount dimension — drives both the header and the row cells. */
+const DISCOUNT_DIMS: Array<{ field: DiscountField; label: string }> = [
+  { field: "coworkingDiscountPct", label: "Coworking" },
+  { field: "meetingDiscountPct", label: "Meeting" },
+  { field: "cafeDiscountPct", label: "Cafe" },
+  { field: "printDiscountPct", label: "Print" },
+];
+
 /** Sane upper bound for a per-page print rate (Rp). The server re-validates positivity. */
 const RATE_MAX = 1_000_000;
 
@@ -40,11 +50,7 @@ export function TiersClient({
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
-  function setTierField(
-    tier: MembershipTier,
-    field: "coworkingDiscountPct" | "meetingDiscountPct" | "cafeDiscountPct" | "printDiscountPct",
-    value: string,
-  ) {
+  function setTierField(tier: MembershipTier, field: DiscountField, value: string) {
     setStatus("idle");
     setTiers((prev) =>
       prev.map((t) => (t.tier === tier ? { ...t, [field]: toInt(value, 0, 100) } : t)),
@@ -83,7 +89,7 @@ export function TiersClient({
           Kategori Membership &amp; Harga Print
         </h1>
         <p className="mt-1 text-sm text-gray-500">
-          Atur diskon per tier (cafe &amp; print) dan harga dasar print per halaman.
+          Atur diskon per tier (coworking, meeting, cafe &amp; print) dan harga dasar print per halaman.
         </p>
       </div>
 
@@ -143,6 +149,9 @@ export function TiersClient({
         <p id="tier-discount-hint" className="mt-1 text-xs text-gray-500">
           Persentase diskon 0–100% per tier.
         </p>
+        <p className="mt-1 text-xs text-gray-500">
+          Diskon coworking &amp; meeting akan berlaku pada harga booking (segera hadir); kolomnya tetap bisa diatur dari sekarang.
+        </p>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -150,80 +159,34 @@ export function TiersClient({
                 <th className="py-2 pr-4 text-xs font-semibold uppercase tracking-wide text-gray-500">
                   Tier
                 </th>
-                <th className="py-2 pr-4 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Diskon Coworking (%)
-                </th>
-                <th className="py-2 pr-4 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Diskon Meeting (%)
-                </th>
-                <th className="py-2 pr-4 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Diskon Cafe (%)
-                </th>
-                <th className="py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Diskon Print (%)
-                </th>
+                {DISCOUNT_DIMS.map(({ field, label }) => (
+                  <th
+                    key={field}
+                    className="py-2 pr-4 text-xs font-semibold uppercase tracking-wide text-gray-500 last:pr-0"
+                  >
+                    Diskon {label} (%)
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {tiers.map((t) => (
                 <tr key={t.tier}>
                   <td className="py-3 pr-4 font-medium text-gray-900">{t.tier}</td>
-                  <td className="py-3 pr-4">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      aria-label={`Diskon coworking ${t.tier}`}
-                      aria-describedby="tier-discount-hint"
-                      className="max-w-[7rem]"
-                      value={t.coworkingDiscountPct}
-                      onChange={(e) =>
-                        setTierField(t.tier, "coworkingDiscountPct", e.target.value)
-                      }
-                    />
-                  </td>
-                  <td className="py-3 pr-4">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      aria-label={`Diskon meeting ${t.tier}`}
-                      aria-describedby="tier-discount-hint"
-                      className="max-w-[7rem]"
-                      value={t.meetingDiscountPct}
-                      onChange={(e) =>
-                        setTierField(t.tier, "meetingDiscountPct", e.target.value)
-                      }
-                    />
-                  </td>
-                  <td className="py-3 pr-4">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      aria-label={`Diskon cafe ${t.tier}`}
-                      aria-describedby="tier-discount-hint"
-                      className="max-w-[7rem]"
-                      value={t.cafeDiscountPct}
-                      onChange={(e) =>
-                        setTierField(t.tier, "cafeDiscountPct", e.target.value)
-                      }
-                    />
-                  </td>
-                  <td className="py-3">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      aria-label={`Diskon print ${t.tier}`}
-                      aria-describedby="tier-discount-hint"
-                      className="max-w-[7rem]"
-                      value={t.printDiscountPct}
-                      onChange={(e) =>
-                        setTierField(t.tier, "printDiscountPct", e.target.value)
-                      }
-                    />
-                  </td>
+                  {DISCOUNT_DIMS.map(({ field, label }) => (
+                    <td key={field} className="py-3 pr-4 last:pr-0">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        aria-label={`Diskon ${label.toLowerCase()} ${t.tier}`}
+                        aria-describedby="tier-discount-hint"
+                        className="max-w-[7rem]"
+                        value={t[field]}
+                        onChange={(e) => setTierField(t.tier, field, e.target.value)}
+                      />
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>

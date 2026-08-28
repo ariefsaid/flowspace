@@ -1,139 +1,528 @@
-# Plan — Tier model correction · I-041 · 2026-08-28
+# Plan I-041 — Tier model correction (four discount dimensions)
 
-Spec: `docs/specs/0008-tier-model.spec.md` (signed off). ADR: `docs/adr/0016-tier-enum-vs-crud.md` (DIV-1,
-committed with this plan). Migration claimed: **0010** only. **Money path** — tasks 8–10 are the money
-proofs; this issue merges FIRST in the wave (I-040 consumes the new columns). Plan authored by the Director
-(pi lane escalation).
+- **Spec:** `docs/specs/0008-tier-model.spec.md` (signed off). **Depends:** 0002, 0006; ADR-0010/0011/0015/0016.
+- **Goal:** widen `membership_tier_config` from 2 → 4 discount dimensions (coworking/meeting/cafe/print) with
+  integer percentages; replace spec-0006 guess seed values with the locked map
+  `REGULAR 0/0/0/0, PREMIUM 10/10/5/5, GOLD 15/15/10/10`; expose all four through the repo + `/admin/settings/tiers`;
+  prove the values flow into cafe and print totals and are exposed to the I-040 booking seam; record DIV-1 (ADR-0016).
+- **MONEY PATH:** tasks **12–13** are the integration money-proof gate (AC-512..519). All business reads/writes
+  stay server-authoritative and `org_id`-scoped; RLS remains the defense-in-depth backstop.
+- **Head migration:** `0009_money_qty_checks.sql` → this wave adds **`0010_tier_model.sql`** (exactly per spec §Migration).
 
 ## Design
 
-One widening pass over the existing seam — no new tables, no new routes. `membership_tier_config` gains
-`coworking_discount_pct` and `meeting_discount_pct`; the four seeded values become ORIG's truth
-(REGULAR 0/0/0/0 · PREMIUM 10/10/5/5 · GOLD 15/15/10/10, ordered coworking/meeting/cafe/print). The repo
-API (`lib/db/tier-config.ts`) returns all four dims (missing row → four zeros, fail-safe); cafe and print
-pricing keep their mechanics and merely read corrected values; the two seed constants
-(`DEFAULT_CAFE_DISCOUNT_PCT` in `lib/cafe/pricing.ts`, `DEFAULT_PRINT_DISCOUNT_PCT` in
-`lib/print/pricing.ts`) are replaced by one shared four-dim map `DEFAULT_TIER_DISCOUNTS` in
-`lib/db/tier-config.ts` so seed and fallback can't drift. The editor
-(`app/(admin)/admin/settings/tiers/TiersClient.tsx` + `actions.ts`) widens from 2 to 4 inputs per tier;
-`savePricingConfigAction` validates and persists all four atomically (existing all-or-nothing transaction).
-I-040 reads `coworkingDiscountPct`/`meetingDiscountPct` from `getTierDiscounts` — the seam is this repo
-function, nothing else.
+### Data model (DIV-1, ADR-0016)
+Keep the `MembershipTier` enum and the org-scoped `membership_tier_config` table. `0010_tier_model.sql` adds
+`coworking_discount_pct` and `meeting_discount_pct` (integer NOT NULL DEFAULT 0), drops/re-adds the
+`membership_tier_config_pct_range` CHECK so all **four** columns are `BETWEEN 0 AND 100`, and rewrites every
+existing row by enum tier to the locked values. Enum, `(org_id, tier)` unique index, `org_id` index, and the
+`_org_isolation` RLS policy are untouched (the policy references only `org_id`; the new columns need no policy
+change). `lib/db/schema.ts` mirrors the two new columns in lockstep (drizzle-kit is not the DDL authority).
+
+### Repository seam (`lib/db/tier-config.ts`)
+`getTierDiscounts` returns all four camelCase fields, fail-closed to four zeroes on a missing row. `updateTierDiscounts`
+takes all four in a shared `TierDiscounts` shape, validates each is an integer 0–100 (throwing
+`INVALID_PCT:<coworking|meeting|cafe|print>`), rejects a tier outside the enum (`INVALID_TIER`), and upserts all
+four atomically under the `(org_id, tier)` unique index. `listTierConfig` (org-scoped) returns full rows. Existing
+consumers `lib/db/cafe.ts` (`.cafeDiscountPct`) and `lib/db/print.ts` (`.printDiscountPct`) keep working unchanged.
+
+### Shared locked map (`lib/tier-discounts.ts`)
+One canonical four-dimensional map (`LOCKED_TIER_DISCOUNTS`) is the single source used by the seed; the stale
+spec-0006 guesses (`DEFAULT_CAFE_DISCOUNT_PCT = 5`, `DEFAULT_PRINT_DISCOUNT_PCT = 0/20/20`) are removed so seed
+and fallback cannot drift (FR-529 / AC-527). The runtime fail-safe is `getTierDiscounts` returning zeroes.
+
+### Admin editor (`/admin/settings/tiers`)
+The `TierRow` shape and `SavePricingConfigInput.tiers` grow from two to four fields; the client renders four
+labelled percentage inputs per tier (Coworking %, Meeting %, Cafe %, Print %) using DESIGN.md `Input`; the save
+action forwards all four per tier and the repos validate server-side (ADMIN-only via the existing
+`app/(admin)/layout.tsx` guard + the action's `requireSession` role check). All-or-nothing within one `db.transaction`.
+
+### Books apply
+Booking pricing (applying coworking/meeting %) is **I-040's** concern; this plan only ships the seam (`FR-527`,
+`AC-518`) and its integration proof that the repo exposes 10%/15% to the consumer.
 
 ## Tasks
 
-1. **Red migration test** — `lib/db/tier-migration.int.test.ts`: failing test titled `AC-500`/`AC-502`:
-   after `supabase db reset`, `membership_tier_config` has the four integer NOT NULL DEFAULT 0 columns and
-   each seeded org's rows equal REGULAR 0/0/0/0, PREMIUM 10/10/5/5, GOLD 15/15/10/10. Add an `AC-501`/
-   `AC-508` case: a direct `db.execute` inserting `coworking_discount_pct = 101` (and `-1` on
-   `meeting_discount_pct`) is rejected by the CHECK.
-   Verify: `pnpm test:int -- 'lib/db/tier-migration.int.test.ts'` (red).
-2. **Migration 0010** — `supabase/migrations/0010_tier_model.sql`:
-   ```sql
-   ALTER TABLE "membership_tier_config"
-     ADD COLUMN "coworking_discount_pct" integer NOT NULL DEFAULT 0,
-     ADD COLUMN "meeting_discount_pct"  integer NOT NULL DEFAULT 0;
-   ALTER TABLE "membership_tier_config" DROP CONSTRAINT "membership_tier_config_pct_range";
-   ALTER TABLE "membership_tier_config" ADD CONSTRAINT "membership_tier_config_pct_range" CHECK (
-     "cafe_discount_pct" BETWEEN 0 AND 100 AND "print_discount_pct" BETWEEN 0 AND 100
-     AND "coworking_discount_pct" BETWEEN 0 AND 100 AND "meeting_discount_pct" BETWEEN 0 AND 100
-   );
-   UPDATE "membership_tier_config" SET "coworking_discount_pct"=0,  "meeting_discount_pct"=0,  "cafe_discount_pct"=0,  "print_discount_pct"=0  WHERE "tier"='REGULAR';
-   UPDATE "membership_tier_config" SET "coworking_discount_pct"=10, "meeting_discount_pct"=10, "cafe_discount_pct"=5,  "print_discount_pct"=5  WHERE "tier"='PREMIUM';
-   UPDATE "membership_tier_config" SET "coworking_discount_pct"=15, "meeting_discount_pct"=15, "cafe_discount_pct"=10, "print_discount_pct"=10 WHERE "tier"='GOLD';
-   ```
-   (RLS/unique/index untouched.) Verify: `pnpm exec supabase db reset && pnpm test:int -- 'lib/db/tier-migration.int.test.ts'` (green).
-3. **Schema mirror** — `lib/db/schema.ts` `membershipTierConfig`: add `coworkingDiscountPct`
-   (`integer("coworking_discount_pct").notNull().default(0)`) and `meetingDiscountPct` likewise; extend the
-   column assertions in `lib/db/schema.test.ts`. Verify: `pnpm test:unit -- 'lib/db/schema.test.ts' && pnpm typecheck`.
-4. **Repo returns 4 dims** — `lib/db/tier-config.ts`: failing unit test `AC-501` in
-   `lib/db/tier-config.test.ts` (missing row → `{coworkingDiscountPct:0, meetingDiscountPct:0,
-   cafeDiscountPct:0, printDiscountPct:0}`), then widen `getTierDiscounts`'s select + fallback and
-   `updateTierDiscounts`'s `rates` param/`assertPct` calls/insert/update sets to all four. Export
-   `DEFAULT_TIER_DISCOUNTS = { REGULAR:{coworking:0,meeting:0,cafe:0,print:0}, PREMIUM:{coworking:10,meeting:10,cafe:5,print:5}, GOLD:{coworking:15,meeting:15,cafe:10,print:10} } as const`
-   with an `AC-527`-titled unit test asserting the exact map. Verify: `pnpm test:unit -- 'lib/db/tier-config.test.ts'`.
-5. **Repo integration proofs** — `lib/db/pricing-config.int.test.ts`: failing tests `AC-505` (listTierConfig
-   org-scoped, four dims), `AC-506` (missing row → zeros, no cross-org read), `AC-507` (four-dim upsert org
-   A leaves org B), `AC-508` is owned by task 1's file — do not duplicate. Verify:
-   `pnpm test:int -- 'lib/db/pricing-config.int.test.ts'`.
-6. **Seed uses the shared map** — `scripts/seed-supabase.ts`: replace the
-   `DEFAULT_CAFE_DISCOUNT_PCT`/`DEFAULT_PRINT_DISCOUNT_PCT[tier]` writes (lines ~380–381) with
-   `DEFAULT_TIER_DISCOUNTS[tier]` spread into all four columns; delete `DEFAULT_CAFE_DISCOUNT_PCT` from
-   `lib/cafe/pricing.ts` and `DEFAULT_PRINT_DISCOUNT_PCT` from `lib/print/pricing.ts` and fix their
-   importers (`grep -rn "DEFAULT_CAFE_DISCOUNT_PCT\|DEFAULT_PRINT_DISCOUNT_PCT" lib app scripts` must
-   return only `DEFAULT_TIER_DISCOUNTS` call sites). `AC-503` integration test (seed twice → one row per
-   tier per org, locked values) in `lib/db/tier-migration.int.test.ts`. Verify:
-   `pnpm exec supabase db reset && pnpm db:seed:supabase && pnpm test:int -- 'lib/db/tier-migration.int.test.ts'`.
-7. **Action validates 4 dims** — `app/(admin)/admin/settings/tiers/actions.ts` + `actions.test.ts`: failing
-   `AC-510` test (MEMBER → FORBIDDEN, zero repo calls) already exists for 2 dims — extend the input type
-   `SavePricingConfigInput` to four per-tier fields; add `AC-509` integration case (one invalid tier value
-   in the batch → whole transaction rolls back incl. print rates) to `lib/db/pricing-config.int.test.ts`;
-   add `AC-523` unit case (tier outside enum rejected). Verify:
-   `pnpm test:unit -- 'app/(admin)/admin/settings/tiers/actions.test.ts' && pnpm test:int -- 'lib/db/pricing-config.int.test.ts'`.
-8. **Money proof: cafe** — `lib/db/cafe.int.test.ts`: failing `AC-512`/`AC-513` tests — three members
-   (REGULAR/PREMIUM/GOLD) each with an ACTIVE booking, same cart → discounts 0%/5%/10% of subtotal; same
-   members without ACTIVE booking → 0%. `AC-519`: org with no config rows → 0%. (Mechanic untouched —
-   `lib/db/cafe.ts:152` already reads config; only values/dims change.) `AC-514` rounding stays owned by
-   the existing `lib/cafe/pricing.test.ts` — retitle its rounding case to `AC-514`. Verify:
-   `pnpm test:int -- 'lib/db/cafe.int.test.ts' && pnpm test:unit -- 'lib/cafe/pricing.test.ts'`.
-9. **Money proof: print** — `lib/db/print.int.test.ts`: failing `AC-515` (equal BW jobs, tiers → 0/5/10)
-   and keep `AC-516` in `lib/print/pricing.test.ts` (retitle existing rounding case). Update any test
-   fixture that assumed print 20% (grep `20` in `lib/db/print.int.test.ts` fixtures). Verify:
-   `pnpm test:int -- 'lib/db/print.int.test.ts' && pnpm test:unit -- 'lib/print/pricing.test.ts'`.
-10. **Config-change isolation proof** — `AC-517` in `lib/db/pricing-config.int.test.ts`: create an order +
-    print job, change config, assert stored totals unchanged and a new pricing run uses the new pct.
-    `AC-518` (I-040 seam): assert `getTierDiscounts(org, "PREMIUM").coworkingDiscountPct === 10` and
-    `.meetingDiscountPct === 10`, GOLD → 15/15 — the booking-total application itself stays I-040's.
-    `AC-528` org-parallel proof rides the same file. Verify: `pnpm test:int -- 'lib/db/pricing-config.int.test.ts'`.
-11. **[UI] Editor 4 columns** — `app/(admin)/admin/settings/tiers/TiersClient.tsx` + `TiersClient.test.tsx`:
-    failing `AC-520` RTL test (four labeled inputs per tier — "Diskon Coworking (%)", "Diskon Meeting (%)",
-    "Diskon Cafe (%)", "Diskon Print (%)" — populated 0/0/0/0, 10/10/5/5, 15/15/10/10), `AC-521` (payload
-    carries all four per tier), `AC-522` (action error → error state, no success), `AC-525` (enum labels
-    only), `AC-526` (server rejects fractional/out-of-range — unit on action, not HTML min/max). DESIGN.md
-    tokens only; keep existing layout pattern, extend the grid. `AC-524` stays owned by the existing
-    route-policy/layout tests — retitle if needed, do not duplicate. Verify:
-    `pnpm test:unit -- 'app/(admin)/admin/settings/tiers/TiersClient.test.tsx' && pnpm lint:ci`.
-12. **Traceability + full gates** — confirm each AC-500..529 appears in exactly one test title
-    (`for id in $(seq 500 529); do grep -rl "AC-$id" lib app e2e | wc -l; done` — `AC-529` is this check
-    itself, documented in the PR body, no standalone test). Then:
-    `pnpm exec supabase db reset && pnpm db:seed:supabase && pnpm typecheck && pnpm lint:ci && pnpm test:unit && pnpm test:int && pnpm build`.
+### 1. Add `supabase/migrations/0010_tier_model.sql` (schema + seed rewrite) — AC-500, AC-501, AC-502, AC-504
+Create `supabase/migrations/0010_tier_model.sql`:
 
-## Traceability
+```sql
+-- Tier model correction (I-041, spec 0008, DIV-1/ADR-0016). After 0009_money_qty_checks.sql.
+-- Widens membership_tier_config from the 2-dim (cafe/print) spec-0006 shape to all four
+-- dimensions (coworking/meeting/cafe/print), widens the CHECK to cover all four, and
+-- rewrites every existing org's rows to the locked values. Enum, (org_id,tier) unique
+-- index, org_id index, and the _org_isolation RLS policy are left unchanged.
 
-| AC | Owning test | Layer |
+ALTER TABLE "public"."membership_tier_config"
+  ADD COLUMN "coworking_discount_pct" integer NOT NULL DEFAULT 0,
+  ADD COLUMN "meeting_discount_pct" integer NOT NULL DEFAULT 0;
+
+ALTER TABLE "public"."membership_tier_config"
+  DROP CONSTRAINT "membership_tier_config_pct_range";
+
+ALTER TABLE "public"."membership_tier_config"
+  ADD CONSTRAINT "membership_tier_config_pct_range" CHECK (
+    "coworking_discount_pct" BETWEEN 0 AND 100 AND
+    "meeting_discount_pct" BETWEEN 0 AND 100 AND
+    "cafe_discount_pct" BETWEEN 0 AND 100 AND
+    "print_discount_pct" BETWEEN 0 AND 100
+  );
+
+-- Rewrite every org's rows to the locked values (FR-521). ORIG base/mid/top →
+-- REGULAR/PREMIUM/GOLD.
+UPDATE "public"."membership_tier_config" SET
+  "coworking_discount_pct" = 0, "meeting_discount_pct" = 0,
+  "cafe_discount_pct" = 0, "print_discount_pct" = 0
+  WHERE "tier" = 'REGULAR';
+UPDATE "public"."membership_tier_config" SET
+  "coworking_discount_pct" = 10, "meeting_discount_pct" = 10,
+  "cafe_discount_pct" = 5, "print_discount_pct" = 5
+  WHERE "tier" = 'PREMIUM';
+UPDATE "public"."membership_tier_config" SET
+  "coworking_discount_pct" = 15, "meeting_discount_pct" = 15,
+  "cafe_discount_pct" = 10, "print_discount_pct" = 10
+  WHERE "tier" = 'GOLD';
+```
+
+Verify: `pnpm exec supabase db reset && pnpm exec supabase db reset` (applies cleanly twice; CI path).
+
+### 2. Mirror the two columns in `lib/db/schema.ts` — AC-500 (TS mirror)
+In `lib/db/schema.ts`, `membershipTierConfig` table: add the two fields before `cafeDiscountPct`:
+
+```ts
+    coworkingDiscountPct: integer("coworking_discount_pct").notNull().default(0),
+    meetingDiscountPct: integer("meeting_discount_pct").notNull().default(0),
+    cafeDiscountPct: integer("cafe_discount_pct").notNull().default(0),
+    printDiscountPct: integer("print_discount_pct").notNull().default(0),
+```
+
+Verify: `pnpm typecheck`.
+
+### 3. Create shared locked map + unit test — AC-527
+Create `lib/tier-discounts.ts`:
+
+```ts
+import type { MembershipTier } from "@/lib/db/enums";
+
+/** One tier's four discount percentages (integer points, 0–100). */
+export type TierDiscounts = {
+  coworkingDiscountPct: number;
+  meetingDiscountPct: number;
+  cafeDiscountPct: number;
+  printDiscountPct: number;
+};
+
+/**
+ * Locked four-dimensional tier map (I-041, spec 0008; supersedes spec-0006's flat
+ * 5% cafe + 0/20/20 print guesses). Single source of truth for the migration, dev
+ * seed, and money paths so seed and fallback cannot drift (FR-529 / AC-527).
+ * ORIG base/mid/top → REGULAR/PREMIUM/GOLD.
+ */
+export const LOCKED_TIER_DISCOUNTS: Record<MembershipTier, TierDiscounts> = {
+  REGULAR: { coworkingDiscountPct: 0, meetingDiscountPct: 0, cafeDiscountPct: 0, printDiscountPct: 0 },
+  PREMIUM: { coworkingDiscountPct: 10, meetingDiscountPct: 10, cafeDiscountPct: 5, printDiscountPct: 5 },
+  GOLD: { coworkingDiscountPct: 15, meetingDiscountPct: 15, cafeDiscountPct: 10, printDiscountPct: 10 },
+};
+```
+
+**Test first** — create `lib/tier-discounts.test.ts`:
+
+```ts
+import { describe, it, expect } from "vitest";
+import { LOCKED_TIER_DISCOUNTS } from "@/lib/tier-discounts";
+import * as cafePricing from "@/lib/cafe/pricing";
+import * as printPricing from "@/lib/print/pricing";
+
+describe("LOCKED_TIER_DISCOUNTS", () => {
+  it("AC-527: holds the exact locked 4-dim values (no 5/5/5 or 0/20/20 guess)", () => {
+    expect(LOCKED_TIER_DISCOUNTS.REGULAR).toEqual({ coworkingDiscountPct: 0, meetingDiscountPct: 0, cafeDiscountPct: 0, printDiscountPct: 0 });
+    expect(LOCKED_TIER_DISCOUNTS.PREMIUM).toEqual({ coworkingDiscountPct: 10, meetingDiscountPct: 10, cafeDiscountPct: 5, printDiscountPct: 5 });
+    expect(LOCKED_TIER_DISCOUNTS.GOLD).toEqual({ coworkingDiscountPct: 15, meetingDiscountPct: 15, cafeDiscountPct: 10, printDiscountPct: 10 });
+  });
+
+  it("AC-527: stale spec-0006 guess constants are removed from pricing defaults", () => {
+    expect("DEFAULT_CAFE_DISCOUNT_PCT" in cafePricing).toBe(false);
+    expect("DEFAULT_PRINT_DISCOUNT_PCT" in printPricing).toBe(false);
+  });
+});
+```
+
+Verify: `pnpm test:unit -- lib/tier-discounts.test.ts` (fails on the second `it` until Task 6 runs — that's fine,
+TDD). Complete both Tasks 3 and 6, then run green.
+
+### 4. Rewrite `lib/db/tier-config.ts` to four dimensions + validation — AC-508, AC-523
+Replace the file body (keeping the existing exports' signatures except widening `getTierDiscounts`/`updateTierDiscounts`):
+
+```ts
+import { and, asc, eq } from "drizzle-orm";
+import { db } from "@/lib/db/drizzle";
+import { membershipTierConfig, type MembershipTierConfig } from "@/lib/db/schema";
+import { MEMBERSHIP_TIERS, type MembershipTier } from "@/lib/db/enums";
+import type { TierDiscounts } from "@/lib/tier-discounts";
+
+const PCT_DIMS = ["coworking", "meeting", "cafe", "print"] as const;
+
+export function listTierConfig(orgId: string): Promise<MembershipTierConfig[]> {
+  return db
+    .select()
+    .from(membershipTierConfig)
+    .where(eq(membershipTierConfig.orgId, orgId))
+    .orderBy(asc(membershipTierConfig.tier));
+}
+
+/** All four discount % for one (org, tier); fail-closed to zeroes when absent (NFR-500). */
+export async function getTierDiscounts(
+  orgId: string,
+  tier: MembershipTier,
+): Promise<TierDiscounts> {
+  const [row] = await db
+    .select({
+      coworkingDiscountPct: membershipTierConfig.coworkingDiscountPct,
+      meetingDiscountPct: membershipTierConfig.meetingDiscountPct,
+      cafeDiscountPct: membershipTierConfig.cafeDiscountPct,
+      printDiscountPct: membershipTierConfig.printDiscountPct,
+    })
+    .from(membershipTierConfig)
+    .where(and(eq(membershipTierConfig.orgId, orgId), eq(membershipTierConfig.tier, tier)))
+    .limit(1);
+  return (
+    row ?? { coworkingDiscountPct: 0, meetingDiscountPct: 0, cafeDiscountPct: 0, printDiscountPct: 0 }
+  );
+}
+
+function assertPct(value: number, label: string): void {
+  if (!Number.isInteger(value) || value < 0 || value > 100) {
+    throw new Error(`INVALID_PCT:${label}`);
+  }
+}
+
+/** ADMIN-only (caller enforces role). Validates all four + tier; upserts atomically. */
+export async function updateTierDiscounts(
+  orgId: string,
+  tier: MembershipTier,
+  rates: TierDiscounts,
+  txdb: Pick<typeof db, "insert"> = db,
+): Promise<void> {
+  if (!MEMBERSHIP_TIERS.includes(tier)) throw new Error("INVALID_TIER");
+  PCT_DIMS.forEach((d) => assertPct(rates[`${d}DiscountPct`], d));
+  await txdb
+    .insert(membershipTierConfig)
+    .values({
+      orgId,
+      tier,
+      coworkingDiscountPct: rates.coworkingDiscountPct,
+      meetingDiscountPct: rates.meetingDiscountPct,
+      cafeDiscountPct: rates.cafeDiscountPct,
+      printDiscountPct: rates.printDiscountPct,
+    })
+    .onConflictDoUpdate({
+      target: [membershipTierConfig.orgId, membershipTierConfig.tier],
+      set: {
+        coworkingDiscountPct: rates.coworkingDiscountPct,
+        meetingDiscountPct: rates.meetingDiscountPct,
+        cafeDiscountPct: rates.cafeDiscountPct,
+        printDiscountPct: rates.printDiscountPct,
+        updatedAt: new Date(),
+      },
+    });
+}
+```
+
+**Test first** — create `lib/db/tier-config.test.ts` (unit; mock the inserted tx so no write occurs):
+
+```ts
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const insert = vi.fn();
+vi.mock("@/lib/db/drizzle", () => ({
+  db: {},
+}));
+
+import { updateTierDiscounts } from "@/lib/db/tier-config";
+
+describe("updateTierDiscounts validation (AC-508 / AC-523 / AC-526)", () => {
+  beforeEach(() => insert.mockReset());
+
+  it("AC-508: rejects fractional with the matching INVALID_PCT:<dimension> label", async () => {
+    await expect(
+      updateTierDiscounts("o1", "PREMIUM", {
+        coworkingDiscountPct: 1, meetingDiscountPct: 1,
+        cafeDiscountPct: 12.5, printDiscountPct: 1,
+      }, { insert } as never),
+    ).rejects.toThrow("INVALID_PCT:cafe");
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("AC-508: rejects negative/over-100 for a named dimension, no write", async () => {
+    await expect(
+      updateTierDiscounts("o1", "GOLD", {
+        coworkingDiscountPct: -1, meetingDiscountPct: 1,
+        cafeDiscountPct: 1, printDiscountPct: 1,
+      }, { insert } as never),
+    ).rejects.toThrow("INVALID_PCT:coworking");
+    await expect(
+      updateTierDiscounts("o1", "GOLD", {
+        coworkingDiscountPct: 1, meetingDiscountPct: 101,
+        cafeDiscountPct: 1, printDiscountPct: 1,
+      }, { insert } as never),
+    ).rejects.toThrow("INVALID_PCT:meeting");
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("AC-523 / AC-526: rejects a tier outside the enum, no write", async () => {
+    await expect(
+      updateTierDiscounts("o1", "PLATINUM" as never, {
+        coworkingDiscountPct: 1, meetingDiscountPct: 1,
+        cafeDiscountPct: 1, printDiscountPct: 1,
+      }, { insert } as never),
+    ).rejects.toThrow("INVALID_TIER");
+    expect(insert).not.toHaveBeenCalled();
+  });
+});
+```
+
+Verify: `pnpm test:unit -- lib/db/tier-config.test.ts`.
+
+### 5. Update dev seed to the locked map (idempotent, all four dims) — FR-529, AC-503 (source)
+In `scripts/seed-supabase.ts`:
+1. Remove `import { DEFAULT_CAFE_DISCOUNT_PCT } from "@/lib/cafe/pricing";` and the `DEFAULT_PRINT_DISCOUNT_PCT`
+   import from `@/lib/print/pricing`; add `import { LOCKED_TIER_DISCOUNTS } from "@/lib/tier-discounts";`.
+2. Replace the tier-config insert with an **upsert** that sets all four dimensions for the org's tier:
+
+```ts
+  // -- Pricing config (I-041, spec 0008) — 4-dim locked map, idempotent upsert ----
+  for (const tier of MEMBERSHIP_TIERS) {
+    const id = `${org.id}__tiercfg-${tier}`;
+    await db
+      .insert(membershipTierConfig)
+      .values({ id, orgId: org.id, tier, ...LOCKED_TIER_DISCOUNTS[tier] })
+      .onConflictDoUpdate({
+        target: [membershipTierConfig.orgId, membershipTierConfig.tier],
+        set: { ...LOCKED_TIER_DISCOUNTS[tier], updatedAt: new Date() },
+      });
+  }
+```
+
+Verify: `pnpm db:seed:supabase && pnpm db:seed:supabase` (runs twice; no duplicate rows). (Fresh-DB duplication
+assertion is the integration test in Task 12.)
+
+### 6. Strip stale guess constants from pricing fallbacks — AC-527, FR-529
+- In `lib/cafe/pricing.ts`: delete `export const DEFAULT_CAFE_DISCOUNT_PCT = 5;` and update its doc comment to
+  state the fail-safe is the repo's `getTierDiscounts` (0% when ineligible / unconfigured).
+- In `lib/print/pricing.ts`: delete `export const DEFAULT_PRINT_DISCOUNT_PCT = { REGULAR: 0, PREMIUM: 20, GOLD: 20 } as const;`
+  and update its doc comment to note the per-tier print discount is resolved from `membership_tier_config` via
+  `getTierDiscounts` (fail-safe 0%).
+
+Verify: `pnpm test:unit -- lib/tier-discounts.test.ts` now passes both `it` blocks.
+
+### 7. Update the admin save action to four dimensions — AC-510, AC-521, AC-524, AC-526
+In `app/(admin)/admin/settings/tiers/actions.ts`:
+1. Replace the tier entry type and the loop body:
+
+```ts
+import type { TierDiscounts } from "@/lib/tier-discounts";
+
+export type SavePricingConfigInput = {
+  printPricing: { bwRatePerPageRupiah: number; colorRatePerPageRupiah: number };
+  tiers: Array<TierDiscounts & { tier: MembershipTier }>;
+};
+```
+
+```ts
+    for (const t of input.tiers) {
+      const { tier, ...rates } = t; // tier excluded from the four dims
+      await updateTierDiscounts(user.orgId, tier, rates, tx);
+    }
+```
+
+2. Keep the existing `requireSession` + `role !== "ADMIN"` → `FORBIDDEN` guard and the single `db.transaction`.
+
+**Test first** — update `app/(admin)/admin/settings/tiers/actions.test.ts`:
+- Replace the two-tier `input` with a three-tier payload whose entries carry all four dims (e.g. PREMIUM
+  `{ coworkingDiscountPct: 10, meetingDiscountPct: 10, cafeDiscountPct: 5, printDiscountPct: 5 }`).
+- Rename the MEMBER case to `AC-510`, replace `updateTierDiscounts`/`updatePrintPricing` not-called assertions
+  (keep), and assert the ADMIN case forwards the full `TierDiscounts` (all four keys) per tier to `updateTierDiscounts`.
+- Add `AC-524` (a BARISTA is denied `FORBIDDEN`, no write) — supersedes the old AC-404 body.
+- Add `AC-526` (ADMIN save with `cafeDiscountPct: 101` — repos mock rejects → action throws and
+  `updatePrintPricing`/`updateTierDiscounts` surface the error; no partial success).
+- Add `AC-521` (the admin payload contains all four dimensions for every known tier before call).
+
+Verify: `pnpm test:unit -- "app/(admin)/admin/settings/tiers/actions.test.ts"`.
+
+### 8. Widen the RSC projection in `app/(admin)/admin/settings/tiers/page.tsx` — AC-520 (data in)
+Project all four per tier (fill four zeroes for unconfigured tiers):
+
+```ts
+      tier,
+      coworkingDiscountPct: row?.coworkingDiscountPct ?? 0,
+      meetingDiscountPct: row?.meetingDiscountPct ?? 0,
+      cafeDiscountPct: row?.cafeDiscountPct ?? 0,
+      printDiscountPct: row?.printDiscountPct ?? 0,
+```
+
+Verify: `pnpm typecheck`.
+
+### 9. [UI] Widen the editor to four inputs per tier — AC-520, AC-522, AC-525
+In `app/(admin)/admin/settings/tiers/TiersClient.tsx` (use only DESIGN.md `Input`/`Card`/`Button` tokens):
+1. `TierRow` gains `coworkingDiscountPct` and `meetingDiscountPct`; `setTierField`'s field union becomes
+   `"coworkingDiscountPct" | "meetingDiscountPct" | "cafeDiscountPct" | "printDiscountPct"`.
+2. Add Coworking and Meeting labelled inputs to the table (labels `Diskon coworking ${tier}` /
+   `Diskon meeting ${tier}`), keeping the existing Cafe/Print inputs.
+
+**Test first** — update `app/(admin)/admin/settings/tiers/TiersClient.test.tsx`:
+- `AC-520`: render seeded 4-dim tiers; assert the four labelled inputs are populated
+  `0/0/0/0, 10/10/5/5, 15/15/10/10` (e.g. `getByLabelText("Diskon cafe PREMIUM")` → 5,
+  `getByLabelText("Diskon meeting GOLD")` → 15, `getByLabelText("Diskon coworking PREMIUM")` → 10).
+- `AC-525`: assert only enum tier labels are rendered (no dynamic display-name/color metadata dependency).
+- `AC-522`: mock `savePricingConfigAction` to reject; render, submit Save, assert an error state is shown and
+  the saved indicator is absent (`screen.queryByText("Tersimpan")` null, `role="alert"` present).
+
+Verify: `pnpm test:unit -- "app/(admin)/admin/settings/tiers/TiersClient.test.tsx"`.
+
+### 10. Cafe money math unit — AC-514
+In `lib/cafe/pricing.test.ts` add:
+
+```ts
+  it("AC-514: discount rounds with Math.round on a fractional-Rupiah subtotal", () => {
+    // subtotal 100000 × 3 = ... use a subtotal that fractions: 3 lines summing to 100001
+    const frac: PricedLine[] = [
+      { menuItemId: "a", nameSnapshot: "A", qty: 1, unitPriceRupiah: 50000 },
+      { menuItemId: "b", nameSnapshot: "B", qty: 1, unitPriceRupiah: 33334 },
+      { menuItemId: "c", nameSnapshot: "C", qty: 1, unitPriceRupiah: 16667 },
+    ]; // subtotal = 100001
+    // 10% → 10000.1 → Math.round → 10000
+    expect(computeOrderTotals(frac, { discountPct: 10 })).toEqual({
+      subtotalRupiah: 100001,
+      discountRupiah: 10000,
+      totalRupiah: 90001,
+    });
+  });
+```
+
+Verify: `pnpm test:unit -- lib/cafe/pricing.test.ts`.
+
+### 11. Print money math unit — AC-516
+In `lib/print/pricing.test.ts` add:
+
+```ts
+  it("AC-516: discounts round to whole Rupiah on a fractional subtotal", () => {
+    const t = computePrintTotal({
+      pages: 2, copies: 1, colorMode: "BW",
+      bwRateRupiah: 3333, colorRateRupiah: 1000, discountPct: 10,
+    });
+    // subtotal = 3333 × 2 = 6666 → 10% = 666.6 → Math.round = 667
+    expect(t.discountRupiah).toBe(667);
+    expect(t.totalRupiah).toBe(5999);
+    expect(Number.isInteger(t.discountRupiah)).toBe(true);
+    expect(Number.isInteger(t.totalRupiah)).toBe(true);
+  });
+```
+
+Verify: `pnpm test:unit -- lib/print/pricing.test.ts`.
+
+### 12. [MONEY-PATH] `lib/db/tier-model.int.test.ts` — AC-500..519, AC-528
+Create the new integration file (Vitest vs TEST_DATABASE_URL, same truncate/setup pattern as
+`lib/db/pricing-config.int.test.ts`). Seed org A (0/0/0/0, 10/10/5/5, 10/10/5/5 for the three) and org B with
+distinct values, plus menu items and 3 member users (REGULAR/PREMIUM/GOLD) for A and a print-eligible user.
+Own one canonical test per AC (each `it` titled with its `AC-###`):
+
+- **AC-500** — `information_schema.columns` for the 4 pct columns (integer, nullable=NO, default=0) and confirm
+  `pg_enum` values are exactly `{REGULAR,PREMIUM,GOLD}`.
+- **AC-501** — raw `UPDATE ... SET coworking_discount_pct = 150` rejects; row unchanged (re-read).
+- **AC-502** — after reset+seed, assert each org tier row equals the locked map (0/0/0/0, 10/10/5/5, 15/15/10/10)
+  and no row holds stale 5/20 guesses.
+- **AC-503** — run the seed-upsert block twice; assert one row per `(org,tier)` (count = 3 tiers × orgs), locked values.
+- **AC-504** — `pg_policies` has `membership_tier_config_org_isolation`; `pg_indexes` has
+  `membership_tier_config_org_id_tier_idx` (unique) and `membership_tier_config_org_id_idx`.
+- **AC-505** — `listTierConfig(A)` returns only A's rows, each with four dims.
+- **AC-506** — `getTierDiscounts(A, GOLD)` (no row) → four zeroes; B's row never surfaced.
+- **AC-507** — `updateTierDiscounts(A, PREMIUM, four)` upserts all four; B's PREMIUM unchanged; read back.
+- **AC-509** — within a `db.transaction(tx)`: valid `updateTierDiscounts(REGULAR, tx)` then invalid
+  `updateTierDiscounts(PREMIUM, {cafeDiscountPct:101}, tx)` → rejects; assert REGULAR row was **not** persisted
+  (rollback) and PREMIUM unchanged.
+- **AC-511** — org A and org B both have PREMIUM; `updateTierDiscounts(A, PREMIUM, ...)` leaves B's PREMIUM
+  untouched and A's rows all `orgId === A`.
+- **AC-512** — `createOrder(eligible=true)` for the 3 A users on equal subtotal → discounts 0%, 5%, 10%
+  (PREMIUM/GOLD totals reduced).
+- **AC-513** — `createOrder(eligible=false)` for a GOLD user with 10% config → discount 0%.
+- **AC-515** — `submitPrintJob` for REGULAR/PREMIUM/GOLD users (equal BW pages) → print discounts 0%, 5%, 10%.
+- **AC-517** — persist an order + a print job; `updateTierDiscounts` to new values; re-read the **stored** totals
+  (unchanged) and price a new item (uses the new %).
+- **AC-518** — `getTierDiscounts(A, PREMIUM)` exposes `coworkingDiscountPct === 10` & `meetingDiscountPct === 10`;
+  GOLD → 15/15 (the I-040 seam contract; I-040 owns the booking-total assertion).
+- **AC-519** — an org/tier with **no** config row (e.g. B's REGULAR) → cafe & print pricing apply 0%.
+- **AC-528** — two orgs share tier names; `listTierConfig` and `updateTierDiscounts` affect only the server-derived org.
+
+Verify: `pnpm test:int -- lib/db/tier-model.int.test.ts` (with `supabase start` + `db reset` first).
+
+### 13. Update `lib/db/pricing-config.int.test.ts` for the widened shape — AC-401, AC-407
+- Remove the superseded **AC-400**, **AC-402**, **AC-403** `it` blocks (superseded by AC-505/512-513/507-509-526).
+  Keep **AC-401** (submitPrintJob applies configured print discount + base rate) and **AC-407** (getPrintPricing
+  fallback; updatePrintPricing validates) — adjust the **AC-401** expectations to the widened model (PREMIUM print
+  5% not 20%; update the `getTierDiscounts` assertions to the four-field shape where referenced).
+- Where the file still calls `getTierDiscounts`/sets tier config, use the four-dim `TierDiscounts` shape.
+
+Verify: `pnpm test:int -- lib/db/pricing-config.int.test.ts`.
+
+### 14. `[UI]` Regression on the route guard — AC-524 (route layer)
+`app/(admin)/layout.tsx` already redirects non-ADMIN (`if (user.role !== "ADMIN") redirect(roleHome(user.role))`)
+and is covered by `app/(admin)/layout.test.tsx`. Add one `it` asserting a MEMBER is redirected (AC-524) if not
+already present; otherwise leave as-is. This is the route-side complement to the action's independent `FORBIDDEN`
+(AC-510). Verify: `pnpm test:unit -- "app/(admin)/layout.test.tsx"`.
+
+### 15. Full verification gate — AC-529 + quality gates
+Run, in order, at repo root:
+```
+pnpm typecheck
+pnpm lint:ci
+pnpm exec supabase db reset && pnpm db:seed:supabase
+pnpm test:unit
+pnpm test:int
+# Traceability: every AC-500..AC-528 appears exactly once in a canonical test title
+grep -rhoE "AC-5[0-9]{2}" --include=*.test.ts --include=*.int.test.ts app lib | sort | uniq -c
+```
+Every AC-500..AC-528 must appear with count `1`. Then `pnpm test:coverage` and confirm ≥80% changed-line
+coverage on `lib/db/tier-config.ts`, `lib/db/tier-model.int.test.ts`, the admin tiers surface, and
+`lib/tier-discounts.ts`.
+
+## Traceability table
+
+| AC | Owning test file | Layer |
 |---|---|---|
-| AC-500 | `lib/db/tier-migration.int.test.ts` — `AC-500` | Integration |
-| AC-501 | `lib/db/tier-config.test.ts` — `AC-501` | Unit |
-| AC-502 | `lib/db/tier-migration.int.test.ts` — `AC-502` | Integration |
-| AC-503 | `lib/db/tier-migration.int.test.ts` — `AC-503` | Integration |
-| AC-504 | `lib/db/tier-migration.int.test.ts` — `AC-504` (RLS/unique/index retained) | Integration |
-| AC-505 | `lib/db/pricing-config.int.test.ts` — `AC-505` | Integration |
-| AC-506 | `lib/db/pricing-config.int.test.ts` — `AC-506` | Integration |
-| AC-507 | `lib/db/pricing-config.int.test.ts` — `AC-507` | Integration |
-| AC-508 | `lib/db/tier-migration.int.test.ts` — `AC-508` | Integration |
-| AC-509 | `lib/db/pricing-config.int.test.ts` — `AC-509` | Integration |
-| AC-510 | `app/(admin)/admin/settings/tiers/actions.test.ts` — `AC-510` | Unit |
-| AC-511 | `lib/db/pricing-config.int.test.ts` — `AC-511` (cross-org save no-op) | Integration |
-| AC-512 | `lib/db/cafe.int.test.ts` — `AC-512` | Integration |
-| AC-513 | `lib/db/cafe.int.test.ts` — `AC-513` | Integration |
-| AC-514 | `lib/cafe/pricing.test.ts` — `AC-514` | Unit |
-| AC-515 | `lib/db/print.int.test.ts` — `AC-515` | Integration |
-| AC-516 | `lib/print/pricing.test.ts` — `AC-516` | Unit |
-| AC-517 | `lib/db/pricing-config.int.test.ts` — `AC-517` | Integration |
-| AC-518 | `lib/db/pricing-config.int.test.ts` — `AC-518` | Integration (I-040 seam) |
-| AC-519 | `lib/db/cafe.int.test.ts` — `AC-519` | Integration |
-| AC-520 | `app/(admin)/admin/settings/tiers/TiersClient.test.tsx` — `AC-520` | Unit (RTL) |
-| AC-521 | `app/(admin)/admin/settings/tiers/TiersClient.test.tsx` — `AC-521` | Unit (RTL) |
-| AC-522 | `app/(admin)/admin/settings/tiers/TiersClient.test.tsx` — `AC-522` | Unit (RTL) |
-| AC-523 | `app/(admin)/admin/settings/tiers/actions.test.ts` — `AC-523` | Unit |
-| AC-524 | existing layout/route-policy tests (retitle to include `AC-524`) | Unit |
-| AC-525 | `app/(admin)/admin/settings/tiers/TiersClient.test.tsx` — `AC-525` | Unit (RTL) |
-| AC-526 | `app/(admin)/admin/settings/tiers/actions.test.ts` — `AC-526` | Unit |
-| AC-527 | `lib/db/tier-config.test.ts` — `AC-527` | Unit |
-| AC-528 | `lib/db/pricing-config.int.test.ts` — `AC-528` | Integration |
-| AC-529 | PR-body traceability sweep (documented command, task 12) | Meta |
+| AC-500 | `lib/db/tier-model.int.test.ts` | Integration |
+| AC-501 | `lib/db/tier-model.int.test.ts` | Integration |
+| AC-502 | `lib/db/tier-model.int.test.ts` | Integration |
+| AC-503 | `lib/db/tier-model.int.test.ts` | Integration |
+| AC-504 | `lib/db/tier-model.int.test.ts` | Integration |
+| AC-505 | `lib/db/tier-model.int.test.ts` | Integration |
+| AC-506 | `lib/db/tier-model.int.test.ts` | Integration |
+| AC-507 | `lib/db/tier-model.int.test.ts` | Integration |
+| AC-508 | `lib/db/tier-config.test.ts` | Unit |
+| AC-509 | `lib/db/tier-model.int.test.ts` | Integration |
+| AC-510 | `app/(admin)/admin/settings/tiers/actions.test.ts` | Unit |
+| AC-511 | `lib/db/tier-model.int.test.ts` | Integration |
+| AC-512 | `lib/db/tier-model.int.test.ts` | Integration (money) |
+| AC-513 | `lib/db/tier-model.int.test.ts` | Integration (money) |
+| AC-514 | `lib/cafe/pricing.test.ts` | Unit |
+| AC-515 | `lib/db/tier-model.int.test.ts` | Integration (money) |
+| AC-516 | `lib/print/pricing.test.ts` | Unit |
+| AC-517 | `lib/db/tier-model.int.test.ts` | Integration (money) |
+| AC-518 | `lib/db/tier-model.int.test.ts` | Integration (I-040 seam) |
+| AC-519 | `lib/db/tier-model.int.test.ts` | Integration (money) |
+| AC-520 | `app/(admin)/admin/settings/tiers/TiersClient.test.tsx` | Unit (RTL) |
+| AC-521 | `app/(admin)/admin/settings/tiers/actions.test.ts` | Unit |
+| AC-522 | `app/(admin)/admin/settings/tiers/TiersClient.test.tsx` | Unit (RTL) |
+| AC-523 | `lib/db/tier-config.test.ts` | Unit |
+| AC-524 | `app/(admin)/admin/settings/tiers/actions.test.ts` + `app/(admin)/layout.test.tsx` | Unit |
+| AC-525 | `app/(admin)/admin/settings/tiers/TiersClient.test.tsx` | Unit (RTL) |
+| AC-526 | `app/(admin)/admin/settings/tiers/actions.test.ts` | Unit |
+| AC-527 | `lib/tier-discounts.test.ts` | Unit |
+| AC-528 | `lib/db/tier-model.int.test.ts` | Integration |
+| AC-529 | Task 15 grep verified once at issue time | Unit (traceability check) |
 
-Task count: 12. Riskiest: task 6 (constant deletion touches cafe/print importers — grep-verified) and
-tasks 8–9 (money proofs; existing fixtures assume the old 5%/20% values and must flip to spec truth — the
-app conforms to the test, and the test to the SPEC, never to the old constants). Migration: 0010.
-ADR: 0016 (committed alongside). Open questions: none.
+**Superseded (spec 0008):** AC-400, AC-402, AC-403, AC-405 replaced by the rows above; AC-401, AC-404, AC-406,
+AC-407 remain authoritative (their tier-dependent proofs use the widened model).
+
+## Open questions
+None for the Director — enum shape and locked seed are approved by the brief; I-040 owns the booking-total
+consumer per FR-527/AC-518.

@@ -1,8 +1,9 @@
 /**
  * [MONEY-PATH] Integration tests for the widened four-dimensional tier model
  * (I-041, spec 0008). Runs against the Supabase local Postgres via
- * TEST_DATABASE_URL. Owns AC-500..AC-519 and AC-528 (the schema/repo/
- * money-path integration proofs — see the plan's traceability table).
+ * TEST_DATABASE_URL. Owns the schema/repo/money-path integration proofs for
+ * the 500–519 and 528 acceptance-criteria range (see the plan's traceability
+ * table; each `it()` title below names its own owning criterion).
  *
  * Fixtures:
  *  - Org A: full locked config for REGULAR/PREMIUM/GOLD (0/0/0/0, 10/10/5/5,
@@ -10,9 +11,9 @@
  *    balance, used for the money-path proofs.
  *  - Org B: a PREMIUM row with DISTINCT values (used for cross-org isolation)
  *    and a REGULAR member with NO config row (used for the fail-safe 0%
- *    money-path proof, AC-519).
+ *    money-path proof below).
  *  - Org C: no config rows at all (used for the fail-closed / no-cross-org-
- *    leak proof, AC-506).
+ *    leak proof below).
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -110,7 +111,8 @@ beforeAll(async () => {
   );
 
   // Org B — PREMIUM only, with values distinct from A and from the locked map
-  // (isolation proof); REGULAR is deliberately left unconfigured (AC-519).
+  // (isolation proof); REGULAR is deliberately left unconfigured (the
+  // fail-safe 0% money-path fixture below).
   await testDb.insert(membershipTierConfig).values({
     orgId: orgBId,
     tier: "PREMIUM",
@@ -120,7 +122,7 @@ beforeAll(async () => {
     printDiscountPct: 20,
   });
 
-  // Org C — no config rows at all (AC-506 fail-closed / no-leak fixture).
+  // Org C — no config rows at all (the fail-closed / no-leak fixture below).
 }, 30_000);
 
 afterAll(async () => {

@@ -1,8 +1,8 @@
 /**
- * AC-510: savePricingConfigAction denies non-ADMIN callers (no write).
- * Also confirms an ADMIN caller persists all four dims via the repos with the
- * session orgId (AC-521), and that a mid-loop validation failure surfaces
- * (AC-526) without partial success.
+ * savePricingConfigAction denies non-ADMIN callers (no write). Also confirms
+ * an ADMIN caller persists all four dims via the repos with the session
+ * orgId, and that a mid-loop validation failure surfaces without partial
+ * success (each `it()` title below names its own owning acceptance criterion).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 

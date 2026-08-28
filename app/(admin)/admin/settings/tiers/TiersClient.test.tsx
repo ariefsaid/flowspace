@@ -1,7 +1,8 @@
 /**
- * AC-520/AC-522/AC-525: the pricing-config editor renders four labelled
- * discount inputs (coworking/meeting/cafe/print) per enum tier, uses only
- * enum tier labels, and surfaces a save error without a false "saved" state.
+ * The pricing-config editor renders four labelled discount inputs
+ * (coworking/meeting/cafe/print) per enum tier, uses only enum tier labels,
+ * and surfaces a save error without a false "saved" state (each `it()` title
+ * below names its own owning acceptance criterion).
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";

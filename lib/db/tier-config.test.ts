@@ -7,7 +7,7 @@ vi.mock("@/lib/db/drizzle", () => ({
 
 import { updateTierDiscounts } from "@/lib/db/tier-config";
 
-describe("updateTierDiscounts validation (AC-508 / AC-523 / AC-526)", () => {
+describe("updateTierDiscounts validation (money-path pct/tier guards)", () => {
   beforeEach(() => insert.mockReset());
 
   it("AC-508: rejects fractional with the matching INVALID_PCT:<dimension> label", async () => {
@@ -36,7 +36,7 @@ describe("updateTierDiscounts validation (AC-508 / AC-523 / AC-526)", () => {
     expect(insert).not.toHaveBeenCalled();
   });
 
-  it("AC-523 / AC-526: rejects a tier outside the enum, no write", async () => {
+  it("AC-523: rejects a tier outside the enum, no write", async () => {
     await expect(
       updateTierDiscounts("o1", "PLATINUM" as never, {
         coworkingDiscountPct: 1, meetingDiscountPct: 1,

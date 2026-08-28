@@ -3,9 +3,8 @@
  * Runs against the Supabase local Postgres via TEST_DATABASE_URL.
  *
  * AC-400, AC-402, AC-403 are superseded by the widened four-dimensional tier
- * model (I-041, spec 0008) — see lib/db/tier-model.int.test.ts for
- * AC-505/507/509/512/513/519/526 (their replacements per the spec's
- * "Supersedes from spec 0006" table).
+ * model (I-041, spec 0008) — see lib/db/tier-model.int.test.ts for their
+ * replacements (per the spec's "Supersedes from spec 0006" table).
  *
  * AC-401: submitPrintJob applies the configured per-tier print discount (now
  *   resolved from the widened four-dim model — PREMIUM print is 5%, not the

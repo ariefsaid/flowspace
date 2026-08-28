@@ -22,13 +22,20 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
 
+vi.mock("./actions", () => ({
+  extendBookingAction: vi.fn().mockResolvedValue({}),
+}));
+
 const wifi: WifiView = { ssid: "FlowSpace-Guest", voucher: "6070-2020-85" };
 
 const activeSession: ActiveSessionView = {
-  table: "Meja F",
-  tarifPerHour: 15000,
+  bookingId: "bk_active",
+  facilityName: "Meja F",
+  bookingMode: "WALKIN",
+  startAt: new Date(Date.now() - 65 * 60_000).toISOString(),
+  endAt: null,
+  ratePerHourRupiah: 15000,
   maxHours: 4,
-  startedAt: "2026-06-21T16:43:00+07:00",
 };
 
 const recentBookings: BookingPreviewView[] = [

@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Clock,
   Printer,
@@ -11,32 +13,27 @@ import {
   TrendingUp,
   MapPin,
   Utensils,
+  AlertCircle,
 } from "lucide-react";
 import type { BookingStatus } from "@/lib/db/enums";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { ActiveSessionCard } from "@/components/member/ActiveSessionCard";
+import { SessionPanel, type SessionView } from "@/components/member/SessionPanel";
 import { QrAccessCard } from "@/components/member/QrAccessCard";
 import { WifiCard } from "@/components/member/WifiCard";
 import { formatDateID } from "@/lib/format";
 import { brand } from "@/brand.config";
+import { extendBookingAction } from "./actions";
 import type { MembershipTier } from "@/lib/db/enums";
 
 // ---------------------------------------------------------------------------
 // View shapes — structurally compatible with the shared leaf components'
-// prop types (ActiveSessionCard, WifiCard); declared locally, no shared mock module.
+// prop types (SessionPanel, WifiCard); declared locally, no shared mock module.
 // ---------------------------------------------------------------------------
 
-export type ActiveSessionView = {
-  /** Facility label, e.g. "Meja F". */
-  table: string;
-  /** Hourly rate in Rupiah (server-stored on the booking row). */
-  tarifPerHour: number;
-  /** Max billable hours (walk-in cap = 4). */
-  maxHours: number;
-  /** ISO timestamp when the walk-in session started. */
-  startedAt: string;
-};
+/** The member's active-session view — covers BOTH walk-in and scheduled
+ *  ACTIVE bookings (I-040, widened from the walk-in-only ActiveSessionView). */
+export type ActiveSessionView = SessionView;
 
 export type BookingPreviewView = {
   id: string;
@@ -151,6 +148,20 @@ export function DashboardClient({
   wifi,
 }: DashboardClientProps) {
   const MENU_ITEMS = buildMenuItems({ printBalance });
+  const router = useRouter();
+  const [extendError, setExtendError] = useState<string | null>(null);
+
+  async function handleExtend(bookingId: string, extraHours: number) {
+    setExtendError(null);
+    try {
+      await extendBookingAction(bookingId, extraHours);
+      router.refresh();
+    } catch (err) {
+      setExtendError(
+        err instanceof Error ? err.message : "Gagal memperpanjang sesi.",
+      );
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -166,10 +177,24 @@ export function DashboardClient({
         </p>
       </div>
 
+      {/* Extension failure (money-path defect surface) */}
+      {extendError && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+          <span>{extendError}</span>
+        </div>
+      )}
+
       {/* ── Active Session hero + QR / Akses Cepat / WiFi ────── */}
       <div className="overflow-hidden rounded-xl border-2 border-teal-500 bg-white shadow-md">
         {hasSession && activeSession && (
-          <ActiveSessionCard session={activeSession} />
+          <SessionPanel
+            session={activeSession}
+            onExtend={(extraHours) => handleExtend(activeSession.bookingId, extraHours)}
+          />
         )}
 
         <div className="grid grid-cols-1 gap-6 p-6 lg:grid-cols-2">

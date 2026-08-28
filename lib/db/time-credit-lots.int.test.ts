@@ -165,6 +165,47 @@ describe("lib/db/time-credit-lots — spendTimeCredits [SEC][MONEY]", () => {
     });
   });
 
+  describe("[SEC] expiry re-evaluated AFTER the row lock — a lock-waiter can't spend a lot that expired DURING its wait", () => {
+    it("a spend that blocks on FOR UPDATE and only proceeds AFTER the lot's expiresAt has passed treats it as expired, not spendable", async () => {
+      await testSql`TRUNCATE TABLE "time_credit_lots" RESTART IDENTITY CASCADE`;
+      const soonExpiry = new Date(Date.now() + 250);
+      const [lot] = await testDb
+        .insert(timeCreditLots)
+        .values({ orgId: orgAId, userId: userAId, totalHours: 5, remainingHours: 5, expiresAt: soonExpiry })
+        .returning();
+
+      // A separate raw transaction takes the SAME row lock first and holds
+      // it open past the lot's expiry — proving the eventual spend only
+      // gets to look at the row AFTER expiresAt has genuinely passed.
+      let releaseHolder!: () => void;
+      const released = new Promise<void>((resolve) => { releaseHolder = resolve; });
+      const holderAcquired = new Promise<void>((resolve) => {
+        void testSql.begin(async (holder) => {
+          await holder`SELECT id FROM time_credit_lots WHERE id = ${lot.id} FOR UPDATE`;
+          resolve();
+          await released;
+        });
+      });
+      await holderAcquired;
+
+      const spendPromise = spend(orgAId, userAId, 3); // blocks on the row lock the holder took
+
+      // Wait until well past expiresAt, THEN release — the spend's own
+      // FOR UPDATE can only proceed from this point on.
+      await new Promise((r) => setTimeout(r, 400));
+      expect(Date.now()).toBeGreaterThan(soonExpiry.getTime());
+      releaseHolder();
+
+      await expect(spendPromise).rejects.toThrow(/INSUFFICIENT_CREDITS/);
+      // The whole caller transaction (including the expiry-prune write)
+      // rolls back on INSUFFICIENT_CREDITS — the money-safety property this
+      // test proves is simply that the debit was REJECTED, not applied
+      // against a lot that had, in real time, already expired.
+      const [lotAfter] = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.id, lot.id));
+      expect(lotAfter.remainingHours).toBe(5); // unchanged — never debited
+    });
+  });
+
   describe("AC-846: cross-org isolation — read AND write", () => {
     it("listLots never returns another org's lots", async () => {
       await testSql`TRUNCATE TABLE "time_credit_lots" RESTART IDENTITY CASCADE`;

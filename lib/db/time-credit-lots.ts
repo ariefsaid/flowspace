@@ -74,7 +74,6 @@ export async function spendTimeCredits(opts: {
   tx: Pick<typeof db, "select" | "update">;
 }): Promise<void> {
   const { orgId, userId, hours, tx } = opts;
-  const now = new Date();
 
   // Row-lock every non-empty lot for this member (AC-825 — serializes
   // concurrent spends). Ordered soonest-expiry-first, matching the FIFO
@@ -95,6 +94,14 @@ export async function spendTimeCredits(opts: {
     )
     .orderBy(asc(timeCreditLots.expiresAt))
     .for("update");
+
+  // [SEC] `now` is captured AFTER the row lock is acquired, not before —
+  // `.for("update")` can BLOCK (a concurrent spend/checkout holding the same
+  // row locks). A `now` captured before that wait would still look "not yet
+  // expired" for a lot whose expiresAt passed WHILE this call was waiting on
+  // the lock, letting a queued spend debit a lot that has, in real time,
+  // already expired by the moment it actually gets to look at the row.
+  const now = new Date();
 
   // Prune expired-but-nonzero lots (data hygiene: their remainingHours no
   // longer represents spendable balance). Selection below only ever

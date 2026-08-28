@@ -698,8 +698,12 @@ describe("lib/db/bookings", () => {
       const [lot] = await testDb.select().from(schema.timeCreditLots).where(eq(schema.timeCreditLots.userId, aUserId));
       expect(lot.remainingHours).toBe(7); // 10 - 3
 
+      // The ledger row was already COMPLETED before checkout (the create-time
+      // settlement) — settleCheckoutTransactions only touches still-PENDING
+      // rows (finding #5: independent-settlement fix), so this pre-completed
+      // row's paymentMethod is left exactly as it was, not overwritten.
       const [txn] = await testDb.select().from(transactions).where(eq(transactions.bookingId, active.id));
-      expect(txn.paymentMethod).toBe("time_credits");
+      expect(txn.paymentMethod).toBeNull();
       expect(txn.status).toBe("COMPLETED");
     });
 
@@ -743,6 +747,34 @@ describe("lib/db/bookings", () => {
       await expect(checkoutBooking(orgAId, pending.id, "cash")).rejects.toThrow(/INVALID_TRANSITION/);
       const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, pending.id));
       expect(fresh.status).toBe("PENDING");
+    });
+
+    it("[SEC][MONEY] checkout settles the base AND a pending extension INDEPENDENTLY — ledger sums correctly, never double-counted", async () => {
+      const start = new Date("2026-08-18T09:00:00Z");
+      const [active] = await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatAId,
+        facilityName: "Meja A", startAt: start, endAt: new Date(start.getTime() + 2 * HOUR),
+        durationHours: 2, ratePerHourRupiah: 20000, amountRupiah: 40000, baseAmountRupiah: 40000, discountRupiah: 0,
+        status: "ACTIVE", paymentStatus: "PAID_ONLINE", bookingMode: "SCHEDULED", paymentMethod: "online",
+      }).returning();
+      // Base ledger row — already settled at create (the AC-808 online path).
+      await testDb.insert(transactions).values({
+        orgId: orgAId, userId: aUserId, type: "BOOKING", description: "Booking Meja A",
+        amountRupiah: 40000, status: "COMPLETED", bookingId: active.id, paymentMethod: "online",
+      });
+
+      const extended = await extendBooking(orgAId, active.id, 1); // +20000, PENDING extension row
+      expect(extended.amountRupiah).toBe(60000);
+
+      const completed = await checkoutBooking(orgAId, active.id, "cash");
+      expect(completed.status).toBe("COMPLETED");
+
+      const txns = await testDb.select().from(transactions).where(eq(transactions.bookingId, active.id));
+      expect(txns.every((t) => t.status === "COMPLETED")).toBe(true); // both rows settled
+      const total = txns.reduce((sum, t) => sum + t.amountRupiah, 0);
+      expect(total).toBe(60000); // 40000 base + 20000 extension — NOT 120000
+      // Each row keeps its OWN amount — never overwritten to the recomputed total.
+      expect(txns.map((t) => t.amountRupiah).sort((a, b) => a - b)).toEqual([20000, 40000]);
     });
 
     it("[SEC] checkout is genuinely serialized against an in-flight extension on the same booking (deterministic lock barrier)", async () => {

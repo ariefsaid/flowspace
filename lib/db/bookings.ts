@@ -42,6 +42,7 @@ import { appUsers, bookings, facilities, type Booking, type Facility } from "@/l
 import {
   recordTransaction,
   updateBookingTransaction,
+  settleCheckoutTransactions,
 } from "@/lib/db/transactions";
 import { spendTimeCredits } from "@/lib/db/time-credit-lots";
 import { getTierDiscounts } from "@/lib/db/tier-config";
@@ -783,10 +784,17 @@ export async function checkoutBooking(
       await spendTimeCredits({ orgId, userId: booking.userId, hours: price.billedHours, tx });
     }
 
-    await updateBookingTransaction(
+    // [SEC][MONEY] Settle by TRANSACTION ID, preserving each PENDING row's
+    // own amount — the base row (if still pending) and any pending
+    // extension row settle INDEPENDENTLY, never collapsed into one
+    // recomputed total (that was the double-count bug: updateBookingTransaction
+    // used to bulk-overwrite every BOOKING row for the booking with the same
+    // total). A walk-in's single row is priced only now (amount 0 at
+    // create) — its amount IS meant to be set here.
+    await settleCheckoutTransactions(
       orgId,
       id,
-      { status: "COMPLETED", amountRupiah: price.amountRupiah, paymentMethod },
+      { paymentMethod, walkinAmountRupiah: walkin ? price.amountRupiah : undefined },
       tx,
     );
 

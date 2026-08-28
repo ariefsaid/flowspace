@@ -90,7 +90,7 @@ export function VariantPickerModal({ item, onClose, onConfirm }: VariantPickerMo
             <p className="text-sm font-medium text-gray-800 mb-2">
               {group.name}
               {group.required && (
-                <span className="ml-1.5 text-xs font-normal text-orange-500">(wajib)</span>
+                <span className="ml-1.5 text-xs font-normal text-orange-700">(wajib)</span>
               )}
             </p>
             <div className="flex gap-2 flex-wrap">
@@ -114,7 +114,7 @@ export function VariantPickerModal({ item, onClose, onConfirm }: VariantPickerMo
                   >
                     {option.name}
                     {option.priceAdjustment > 0 && (
-                      <span className="block text-xs font-normal text-gray-400">
+                      <span className="block text-xs font-normal text-teal-700">
                         +{formatRupiah(option.priceAdjustment)}
                       </span>
                     )}

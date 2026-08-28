@@ -84,4 +84,20 @@ describe("VariantPickerModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /tutup/i }));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("A1 (WCAG-AA contrast): the '(wajib)' required marker uses text-orange-700 (4.78:1), not orange-500 (2.80:1, fails AA)", () => {
+    render(<VariantPickerModal item={ITEM} onClose={vi.fn()} onConfirm={vi.fn()} />);
+    const marks = screen.getAllByText(/wajib/i);
+    for (const mark of marks) {
+      expect(mark).toHaveClass("text-orange-700");
+      expect(mark).not.toHaveClass("text-orange-500");
+    }
+  });
+
+  it("A2 (WCAG-AA contrast): the per-option +Rp price adjustment uses text-teal-700 (5.47:1), not gray-400 (2.54:1, fails AA)", () => {
+    render(<VariantPickerModal item={ITEM} onClose={vi.fn()} onConfirm={vi.fn()} />);
+    const priceAdjustment = screen.getByText("+Rp 3.000");
+    expect(priceAdjustment).toHaveClass("text-teal-700");
+    expect(priceAdjustment).not.toHaveClass("text-gray-400");
+  });
 });

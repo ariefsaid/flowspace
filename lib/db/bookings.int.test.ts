@@ -524,6 +524,24 @@ describe("lib/db/bookings", () => {
       });
       expect(booking.ratePerHourRupiah).toBe(120000);
     });
+
+    it("[SEC][HIGH] rejects a walk-in create for a userId that does not belong to orgId, before any write (cross-org tenancy)", async () => {
+      // The scheduled branch already resolves the user row inside orgId and
+      // rejects a mismatch (USER_NOT_FOUND, tested above). The walk-in
+      // branch had no such check — a caller could open an org-A walk-in
+      // booking for an org-B user (facility_id stays null, so there's no
+      // facility-org anchor either; only user_id, no composite org_id+
+      // user_id FK).
+      const before = await bookingRowCount(orgAId);
+      await expect(
+        createBooking({
+          orgId: orgAId, userId: bUserId, tier: "REGULAR", // bUserId belongs to org B
+          facilityType: "WALKIN_COWORKING", facilityName: "Walk-in Coworking",
+          paymentMethod: "cashier",
+        }),
+      ).rejects.toThrow(/USER_NOT_FOUND/);
+      expect(await bookingRowCount(orgAId)).toBe(before);
+    });
   });
 
   // -------------------------------------------------------------------------

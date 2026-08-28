@@ -471,6 +471,18 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
   if (walkin) {
     const rate = WALKIN_RATES[facilityType as "WALKIN_COWORKING" | "WALKIN_MEETING"];
     return db.transaction(async (tx) => {
+      // [SEC] Same identity/tenancy guard as the scheduled branch below: a
+      // walk-in has no facility row to anchor org membership through (its
+      // facility_id stays null), so userId is the ONLY org signal — resolve
+      // it INSIDE the tx and require it actually belongs to orgId before any
+      // write. A cross-org userId (or one that doesn't exist) is rejected.
+      const [user] = await tx
+        .select({ id: appUsers.id })
+        .from(appUsers)
+        .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))
+        .limit(1);
+      if (!user) throw new Error("USER_NOT_FOUND");
+
       const [booking] = await tx
         .insert(bookings)
         .values({

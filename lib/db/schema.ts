@@ -299,7 +299,7 @@ export const bookings = pgTable(
     durationHours: integer("duration_hours"),
     ratePerHourRupiah: integer("rate_per_hour_rupiah").notNull(),
     amountRupiah: integer("amount_rupiah").notNull().default(0),
-    status: bookingStatusEnum("status").notNull().default("ACTIVE"),
+    status: bookingStatusEnum("status").notNull().default("PENDING"),
     paymentStatus: bookingPaymentStatusEnum("payment_status").notNull().default("WAITING_CASHIER"),
     // I-040 (migration 0015): scheduling mode + server-computed price snapshot
     // + payment method (OBS-813..816).

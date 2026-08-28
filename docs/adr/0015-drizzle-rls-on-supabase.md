@@ -71,3 +71,15 @@ server is authoritative. Both are settled here so the rest of I-005 has no open 
   pyramid (many unit, few integration, ~few e2e) and one-owning-layer rule is unchanged.
 - Portability retained: Drizzle emits standard Postgres SQL; the app schema can move off Supabase. Supabase-only
   coupling is confined to `supabase/migrations/*` (RLS/Storage/Realtime) and the auth linkage.
+
+### Addendum (I-046, 2026-08-28) — write-grant convention
+Migration 0011 revoked `INSERT, UPDATE, DELETE` on `authenticated` for all 12 business tables — every table had
+kept the write GRANT alongside its RLS policy, which meant a member's own Supabase session (anon key + Data API,
+shipped to every browser) could write its own org's rows directly, bypassing the server's ADMIN gate (e.g.
+self-upgrade `membership_tier`, or a member setting `membership_tier_config.cafe_discount_pct` to 100). RLS's
+`org_id = current_org()` policy only *scopes* a write to the caller's own org — it never *authorizes* a role to
+write at all; the GRANT is the on/off switch, and it was left on.
+**Convention going forward: every new business table ships `GRANT SELECT ... TO authenticated` only — never
+`INSERT`/`UPDATE`/`DELETE`.** Keep the `org_id` RLS policy as the read backstop (§3 above); all writes route
+through the service-role connection, which is not subject to these grants. New-table migrations (the I-040/I-043/
+I-044 wave) must adopt this at review/rebase.

@@ -1,29 +1,17 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronLeft, MapPin, AlertCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronLeft, MapPin, AlertCircle, Loader2 } from "lucide-react";
 import { Stepper } from "@/components/ui/Stepper";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
 import { Step1Type, type BookingType } from "@/components/member/booking/Step1Type";
 import { Step2Time, type TimeSelection } from "@/components/member/booking/Step2Time";
-import { Step3Place, type PlaceSelection } from "@/components/member/booking/Step3Place";
-import { Step4Confirm } from "@/components/member/booking/Step4Confirm";
-import { createBookingAction } from "./actions";
-import type { FacilityType } from "@/lib/db/enums";
-
-// ---------------------------------------------------------------------------
-// Facility view (server-read listFacilities → passed down as props)
-// ---------------------------------------------------------------------------
-
-export type FacilityView = {
-  id: string;
-  name: string;
-  type: FacilityType;
-  ratePerHourRupiah: number;
-  available: boolean;
-};
+import { FloorPlan, type FacilitySeat } from "@/components/member/booking/FloorPlan";
+import { Step4Confirm, type CreatedBookingResult } from "@/components/member/booking/Step4Confirm";
+import { createBookingAction, getFloorPlanAction } from "./actions";
+import type { BookingPaymentChoice } from "@/lib/db/bookings";
 
 // ---------------------------------------------------------------------------
 // Wizard step metadata
@@ -45,18 +33,56 @@ function defaultTime(): TimeSelection {
   return { date: todayStr(), startTime: "09:00", durationHours: 2 };
 }
 
+export interface BookingClientProps {
+  /** The member's real tier-discount percentages (server-resolved — never client-supplied). */
+  discounts: { coworkingDiscountPct: number; meetingDiscountPct: number };
+  /** The member's current time-credit balance (informational, for the payment picker). */
+  timeCredits: number;
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
-export function BookingClient({ facilities }: { facilities: FacilityView[] }) {
+export function BookingClient({ discounts, timeCredits }: BookingClientProps) {
   const [step, setStep] = useState(0);
   const [bookingType, setBookingType] = useState<BookingType | null>(null);
   const [time, setTime] = useState<TimeSelection>(defaultTime());
-  const [place, setPlace] = useState<PlaceSelection | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [place, setPlace] = useState<FacilitySeat | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<BookingPaymentChoice>("cashier");
+  const [policyAccepted, setPolicyAccepted] = useState(false);
+  const [result, setResult] = useState<CreatedBookingResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Server-driven floor plan (OBS-836 fix) — loaded when the wizard reaches
+  // step 2 (Pilih Tempat), re-fetched whenever the type/time selection changes.
+  const [seats, setSeats] = useState<FacilitySeat[] | null>(null);
+  const [seatsLoading, setSeatsLoading] = useState(false);
+  const [seatsError, setSeatsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (step !== 2 || !bookingType) return;
+    let cancelled = false;
+    setSeatsLoading(true);
+    setSeatsError(null);
+    getFloorPlanAction({ bookingType, time })
+      .then((rows) => {
+        if (!cancelled) setSeats(rows);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setSeatsError(err instanceof Error ? err.message : "Gagal memuat denah tempat.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSeatsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, bookingType, time.date, time.startTime, time.durationHours]);
 
   // Selecting a type on step 0 auto-advances to step 1
   function handleSelectType(type: BookingType) {
@@ -64,8 +90,11 @@ export function BookingClient({ facilities }: { facilities: FacilityView[] }) {
     // Reset downstream selections when type changes
     setTime(defaultTime());
     setPlace(null);
-    setConfirmed(false);
+    setSeats(null);
+    setResult(null);
     setError(null);
+    setPaymentMethod("cashier");
+    setPolicyAccepted(false);
     // Small delay so the selection animation is visible before advancing
     setTimeout(() => setStep(1), 180);
   }
@@ -73,9 +102,7 @@ export function BookingClient({ facilities }: { facilities: FacilityView[] }) {
   function canAdvance(): boolean {
     if (step === 1) {
       if (!time.date) return false;
-      const isWalkin =
-        bookingType === "walkin-coworking" ||
-        bookingType === "walkin-meeting";
+      const isWalkin = bookingType === "walkin-coworking" || bookingType === "walkin-meeting";
       if (!isWalkin && !time.startTime) return false;
       return time.durationHours > 0;
     }
@@ -95,44 +122,15 @@ export function BookingClient({ facilities }: { facilities: FacilityView[] }) {
     }
   }
 
-  // ponytail: client-side bookability guard against the server-read facilities —
-  // catches an unavailable/archived seat before the round-trip. The server action
-  // remains the authority (it re-resolves the facility within the org).
-  function isPlaceBookable(): boolean {
-    if (!place) return false;
-    if (bookingType === "scheduled-fullroom") return true; // contact request
-    const expectedType: FacilityType =
-      bookingType === "scheduled-coworking" ? "COWORKING_SEAT" : "MEETING_ROOM";
-    return facilities.some(
-      (f) => f.type === expectedType && f.name === place.label && f.available,
-    );
-  }
-
   async function handleConfirm() {
-    if (!bookingType || !place) return;
+    if (!bookingType || !place || !policyAccepted) return;
     setError(null);
-
-    // Full Room has no online booking — the UI keeps this as a contact request.
-    if (bookingType === "scheduled-fullroom") {
-      setConfirmed(true);
-      return;
-    }
-
-    if (!isPlaceBookable()) {
-      setError("Tempat yang dipilih tidak tersedia. Silakan pilih tempat lain.");
-      return;
-    }
-
     setSubmitting(true);
     try {
-      await createBookingAction({ bookingType, time, place });
-      setConfirmed(true);
+      const created = await createBookingAction({ bookingType, time, place, paymentMethod });
+      setResult(created);
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Gagal membuat booking. Silakan coba lagi.",
-      );
+      setError(err instanceof Error ? err.message : "Gagal membuat booking. Silakan coba lagi.");
     } finally {
       setSubmitting(false);
     }
@@ -183,25 +181,46 @@ export function BookingClient({ facilities }: { facilities: FacilityView[] }) {
             />
           )}
           {step === 2 && bookingType && (
-            <Step3Place
-              bookingType={bookingType}
-              selected={place}
-              onSelect={setPlace}
-            />
+            <div className="space-y-4">
+              {seatsLoading && (
+                <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 py-10 text-sm text-gray-500">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  Memuat denah tempat...
+                </div>
+              )}
+              {!seatsLoading && seatsError && (
+                <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {seatsError}
+                </div>
+              )}
+              {!seatsLoading && !seatsError && seats && (
+                <FloorPlan
+                  seats={seats}
+                  selectedId={place?.id ?? null}
+                  onSelect={(seat) => setPlace(seat)}
+                />
+              )}
+            </div>
           )}
           {step === 3 && bookingType && place && (
             <Step4Confirm
               bookingType={bookingType}
               time={time}
               place={place}
+              discounts={discounts}
+              paymentMethod={paymentMethod}
+              onPaymentMethodChange={setPaymentMethod}
+              policyAccepted={policyAccepted}
+              onPolicyAcceptedChange={setPolicyAccepted}
               onConfirm={handleConfirm}
-              confirmed={confirmed}
+              submitting={submitting}
+              result={result}
             />
           )}
         </div>
       </Card>
 
-      {/* Inline server-action error (money-path defect surface, AC-style). */}
+      {/* Inline server-action error (money-path defect surface, AC-842). */}
       {error && (
         <div
           role="alert"
@@ -213,7 +232,7 @@ export function BookingClient({ facilities }: { facilities: FacilityView[] }) {
       )}
 
       {/* Navigation buttons — hidden on step 0 (auto-advance on selection) and after confirmation */}
-      {step > 0 && !confirmed && (
+      {step > 0 && !result && (
         <div className="flex items-center justify-between">
           <Button
             variant="ghost"
@@ -238,7 +257,7 @@ export function BookingClient({ facilities }: { facilities: FacilityView[] }) {
       )}
 
       {/* Restart after confirmation */}
-      {confirmed && (
+      {result && (
         <div className="flex justify-center">
           <Button
             variant="outline"
@@ -247,13 +266,22 @@ export function BookingClient({ facilities }: { facilities: FacilityView[] }) {
               setBookingType(null);
               setTime(defaultTime());
               setPlace(null);
-              setConfirmed(false);
+              setSeats(null);
+              setResult(null);
               setError(null);
+              setPaymentMethod("cashier");
+              setPolicyAccepted(false);
             }}
           >
             Buat Booking Baru
           </Button>
         </div>
+      )}
+
+      {timeCredits > 0 && step === 3 && !result && (
+        <p className="text-center text-xs text-gray-400">
+          Saldo Time Credits Anda: {timeCredits.toFixed(1)} jam
+        </p>
       )}
     </div>
   );

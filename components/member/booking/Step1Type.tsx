@@ -162,8 +162,8 @@ export function Step1Type({ selected, onSelect }: Step1TypeProps) {
             icon={<Building2 className="h-5 w-5 text-purple-500" />}
             iconBg="bg-purple-50"
             title="Full Room Event"
-            description="Sewa seluruh ruangan coworking untuk acara."
-            badge="Hubungi untuk harga"
+            description="Sewa seluruh ruangan coworking untuk acara. Bisa dipesan online."
+            badge="Rp350.000/jam"
             badgeClass="text-purple-500"
             selected={selected === "scheduled-fullroom"}
             onClick={() => onSelect("scheduled-fullroom")}

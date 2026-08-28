@@ -135,6 +135,48 @@ describe("PosClient (AC-101)", () => {
     expect(call).not.toHaveProperty("userId");
   });
 
+  it("A3 (WCAG-AA contrast): the active-session subline uses text-teal-700 (5.25:1), not teal-600 (3.59:1, fails AA)", async () => {
+    vi.mocked(lookupPosMemberAction).mockResolvedValue({
+      id: "member-1",
+      name: "Gold Member",
+      email: "gold@x.test",
+      hasActiveBooking: true,
+      cafeDiscountPct: 10,
+    });
+
+    render(<PosClient menu={sampleMenu} />);
+    fireEvent.change(screen.getByPlaceholderText(/enter email/i), {
+      target: { value: "gold@x.test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /search customer/i }));
+
+    const subline = await screen.findByText(/diskon 10%/i);
+    expect(subline).toHaveClass("text-teal-700");
+    expect(subline).not.toHaveClass("text-teal-600");
+  });
+
+  it("A4 (WCAG-AA contrast): the 'Mencari member…' loading status uses text-gray-500 (4.83:1), not gray-400 (2.54:1, fails AA)", async () => {
+    let resolveLookup!: (v: unknown) => void;
+    vi.mocked(lookupPosMemberAction).mockReturnValue(
+      new Promise((resolve) => {
+        resolveLookup = resolve;
+      }) as never,
+    );
+
+    render(<PosClient menu={sampleMenu} />);
+    fireEvent.change(screen.getByPlaceholderText(/enter email/i), {
+      target: { value: "gold@x.test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /search customer/i }));
+
+    const loading = await screen.findByText(/mencari member/i);
+    expect(loading).toHaveClass("text-gray-500");
+    expect(loading).not.toHaveClass("text-gray-400");
+
+    resolveLookup(null);
+    await screen.findByText(/no member found/i);
+  });
+
   it("no member found shows a not-found message", async () => {
     vi.mocked(lookupPosMemberAction).mockResolvedValue(null);
     render(<PosClient menu={sampleMenu} />);

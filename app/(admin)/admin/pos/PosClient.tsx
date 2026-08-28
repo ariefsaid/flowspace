@@ -368,7 +368,7 @@ export function PosClient({ menu }: PosClientProps) {
 
             {/* Lookup result */}
             {lookupPending && (
-              <p className="mt-3 text-xs text-gray-400">Mencari member…</p>
+              <p className="mt-3 text-xs text-gray-500">Mencari member…</p>
             )}
             {!lookupPending && lookupDone && (
               <div className="mt-3">
@@ -377,7 +377,7 @@ export function PosClient({ menu }: PosClientProps) {
                 ) : lookupResult ? (
                   <div className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2">
                     <p className="text-xs font-semibold text-teal-700">{lookupResult.name}</p>
-                    <p className="text-xs text-teal-600">
+                    <p className="text-xs text-teal-700">
                       {lookupResult.hasActiveBooking
                         ? `Sesi aktif — diskon ${lookupResult.cafeDiscountPct}%`
                         : "Tidak ada sesi aktif — tanpa diskon"}

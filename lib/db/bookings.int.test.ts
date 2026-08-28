@@ -180,6 +180,11 @@ function facilityLockKeyExpr(orgId: string, facilityId: string): string {
   return `hashtextextended('${orgId}' || ':' || '${facilityId}', 850)`;
 }
 
+/** The exact org-day-lock key expression `acquireOrgDayLock` computes (salt 851). */
+function orgDayLockKeyExpr(orgId: string, calendarDay: string): string {
+  return `hashtextextended('${orgId}' || ':' || '${calendarDay}', 851)`;
+}
+
 async function bookingRowCount(orgId: string): Promise<number> {
   const [{ count }] = await testSql`select count(*)::int as count from bookings where org_id = ${orgId}`;
   return count as number;
@@ -525,7 +530,7 @@ describe("lib/db/bookings", () => {
   // AC-815/AC-816 — genuine concurrent-create race proofs
   // -------------------------------------------------------------------------
   describe("createBooking — concurrency (AC-815/AC-816)", () => {
-    it("AC-815: two concurrent creates for the same facility+window — at most one succeeds", async () => {
+    it("AC-815: two concurrent creates for the same facility+window — at most one succeeds (deterministic lock barrier)", async () => {
       const startAt = new Date("2026-07-20T09:00:00Z");
       const endAt = new Date("2026-07-20T10:00:00Z");
       const attempt = () =>
@@ -535,7 +540,10 @@ describe("lib/db/bookings", () => {
           startAt, endAt, paymentMethod: "online",
         });
 
-      const results = await Promise.allSettled([attempt(), attempt()]);
+      // Both attempts take the SAME facility lock first — the barrier
+      // proves both are genuinely blocked on it simultaneously (not merely
+      // "probably concurrent" via a bare Promise.all) before releasing.
+      const results = await runWithLockBarrier(facilityLockKeyExpr(orgAId, seatAId), 2, [attempt, attempt]);
       const fulfilled = results.filter((r) => r.status === "fulfilled");
       const rejected = results.filter((r) => r.status === "rejected");
       expect(fulfilled).toHaveLength(1);
@@ -549,7 +557,7 @@ describe("lib/db/bookings", () => {
       expect(rows).toHaveLength(1); // no lost/duplicate write
     });
 
-    it("AC-816: a full-room create and an overlapping individual-seat create on the same day — at most one exclusivity class succeeds", async () => {
+    it("AC-816: a full-room create and an overlapping individual-seat create on the same day — at most one exclusivity class succeeds (deterministic lock barrier)", async () => {
       const day = "2026-07-21";
       const frStart = new Date(`${day}T10:00:00Z`);
       const frEnd = new Date(`${day}T12:00:00Z`);
@@ -569,7 +577,10 @@ describe("lib/db/bookings", () => {
           startAt: seatStart, endAt: seatEnd, paymentMethod: "online",
         });
 
-      const results = await Promise.allSettled([fullRoomAttempt(), seatAttempt()]);
+      // Both classes take the SAME org-day lock FIRST (fixed day-then-
+      // facility order, matching different facility ids) — the barrier
+      // holds THAT shared key so both are genuinely queued on it together.
+      const results = await runWithLockBarrier(orgDayLockKeyExpr(orgAId, day), 2, [fullRoomAttempt, seatAttempt]);
       const fulfilled = results.filter((r) => r.status === "fulfilled");
       const rejected = results.filter((r) => r.status === "rejected");
       expect(fulfilled).toHaveLength(1);

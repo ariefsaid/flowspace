@@ -30,6 +30,43 @@ function spend(orgId: string, userId: string, hours: number) {
   return db.transaction((tx) => spendTimeCredits({ orgId, userId, hours, tx }));
 }
 
+// ---------------------------------------------------------------------------
+// Deterministic row-lock barrier (Luna cross-family review: bare
+// Promise.allSettled doesn't GUARANTEE two spends actually overlap). This
+// holds the SAME row(s) via `FOR UPDATE` first, starts the racing ops, and
+// polls `pg_locks` until the expected number of backends are genuinely
+// BLOCKED waiting on that row — only then releases, proving real overlap
+// instead of trusting timing. A row-lock waiter shows up as EITHER
+// locktype='transactionid' (waiting on the current holder's XID) or
+// locktype='tuple' (waiting on the specific row version directly, observed
+// once a second waiter queues behind an update in flight) — count both.
+// ---------------------------------------------------------------------------
+async function runWithRowLockBarrier<T>(
+  holderSql: string,
+  waiters: number,
+  ops: Array<() => Promise<T>>,
+): Promise<PromiseSettledResult<T>[]> {
+  let racePromise!: Promise<PromiseSettledResult<T>[]>;
+  await testSql.begin(async (holder) => {
+    await holder.unsafe(holderSql);
+    racePromise = Promise.allSettled(ops.map((op) => op()));
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      const rows = await holder.unsafe<{ n: number }[]>(
+        `select count(*)::int as n from pg_locks where locktype IN ('transactionid', 'tuple') and not granted`,
+      );
+      if (Number(rows[0]?.n ?? 0) >= waiters) break;
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for ${waiters} row-lock waiter(s)`);
+      }
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    // Returning here ends the holder's transaction (COMMIT), releasing the
+    // row lock and letting every genuinely-waiting spend proceed for real.
+  });
+  return racePromise;
+}
+
 let orgAId: string;
 let orgBId: string;
 let userAId: string;
@@ -144,14 +181,18 @@ describe("lib/db/time-credit-lots — spendTimeCredits [SEC][MONEY]", () => {
   });
 
   describe("AC-825: concurrent spend never overspends", () => {
-    it("two concurrent spends whose combined demand exceeds supply — at most one succeeds, balance never negative", async () => {
+    it("two concurrent spends whose combined demand exceeds supply — at most one succeeds, balance never negative (deterministic row-lock barrier)", async () => {
       await testSql`TRUNCATE TABLE "time_credit_lots" RESTART IDENTITY CASCADE`;
       const lot = await seedLot({ orgId: orgAId, userId: userAId, totalHours: 5, remainingHours: 5, expiresInDays: 30 });
 
-      const results = await Promise.allSettled([
-        spend(orgAId, userAId, 3),
-        spend(orgAId, userAId, 3),
-      ]);
+      // Both spends take a FOR UPDATE lock on the SAME lot row first — the
+      // barrier proves both are genuinely blocked on it simultaneously
+      // before releasing (not merely "probably concurrent").
+      const results = await runWithRowLockBarrier(
+        `SELECT id FROM time_credit_lots WHERE id = '${lot.id}' FOR UPDATE`,
+        2,
+        [() => spend(orgAId, userAId, 3), () => spend(orgAId, userAId, 3)],
+      );
 
       const fulfilled = results.filter((r) => r.status === "fulfilled");
       const rejected = results.filter((r) => r.status === "rejected");

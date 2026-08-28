@@ -1,11 +1,11 @@
 /**
  * Unit tests for lib/print/pricing.ts (I-043, spec 0009).
  *
- * : the six-cell resolver returns exactly the six OBS-605 rates and
+ * AC-600: the six-cell resolver returns exactly the six OBS-605 rates and
  *         rejects missing/inactive cells (no fallback).
- * : 3 COLOR A3 pages × 2 copies at 5% → gross 24000, discount 1200,
+ * AC-602: 3 COLOR A3 pages × 2 copies at 5% → gross 24000, discount 1200,
  *         net 22800.
- * : duplex never changes effective sheets or price.
+ * AC-636: duplex never changes effective sheets or price.
  * Older tags (AC-023x/AC-406) re-anchored to the matrix-based API.
  */
 import { describe, it, expect } from "vitest";
@@ -38,7 +38,7 @@ describe("resolvePrintPrice", () => {
     expect(resolvePrintPrice(rows, "COLOR", "F4")).toBe(2500);
   });
 
-  it(": a missing or inactive cell rejects with INVALID_PRINT_PRICING (no fallback)", () => {
+  it("AC-600: a missing or inactive cell rejects with INVALID_PRINT_PRICING (no fallback)", () => {
     const rows = sixRows().filter((r) => !(r.colorMode === "COLOR" && r.paperSize === "F4"));
     expect(() => resolvePrintPrice(rows, "COLOR", "F4")).toThrow(/INVALID_PRINT_PRICING/);
 

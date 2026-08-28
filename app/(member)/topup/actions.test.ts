@@ -8,7 +8,7 @@ import { topUpPrintAction, purchasePackageAction } from "./actions";
 
 describe("topup actions", () => {
   beforeEach(() => { requireSession.mockReset(); purchasePrintTopup.mockReset(); purchasePackage.mockReset(); });
-  it(": sends only packageId plus server session scope to print purchase", async () => {
+  it("sends only packageId plus server session scope to print purchase", async () => {
     requireSession.mockResolvedValue({ id: "member", orgId: "org-1", role: "MEMBER" });
     await topUpPrintAction("pkg-10");
     expect(purchasePrintTopup).toHaveBeenCalledWith({ orgId: "org-1", userId: "member", packageId: "pkg-10" });

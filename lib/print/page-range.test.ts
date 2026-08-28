@@ -22,7 +22,7 @@ describe("parsePageRange", () => {
     expect(computeEffectiveSheets(r.pageCount, 2)).toBe(18);
   });
 
-  it(": single pages and mixed tokens parse; normalized output is canonical", () => {
+  it("single pages and mixed tokens parse; normalized output is canonical", () => {
     expect(parsePageRange("3", 12)).toEqual({ pageCount: 1, normalized: "3" });
     expect(parsePageRange("1-5,8,10-12", 12).normalized).toBe("1-5,8,10-12");
     // Unsorted input normalizes to ascending collapsed runs.
@@ -39,19 +39,19 @@ describe("parsePageRange", () => {
     }
   });
 
-  it(": overlapping and duplicate pages are rejected", () => {
+  it("AC-605: overlapping and duplicate pages are rejected", () => {
     for (const bad of ["1-5,3", "1-5,4-6", "3,3", "1-5,1-5", "1,1-2"]) {
       expect(() => parsePageRange(bad, 12)).toThrow(/INVALID_PAGE_RANGE/);
     }
   });
 
-  it(": zero and malformed tokens are rejected", () => {
+  it("AC-605: zero and malformed tokens are rejected", () => {
     for (const bad of ["0", "0-3", "1-0", "a", "1-a", "-5", "1-", "1;2", "1..3", "", "  ", ",", "1,,2", "1.5", "+3", "0x1", "1 - 5"]) {
       expect(() => parsePageRange(bad, 12)).toThrow(/INVALID_PAGE_RANGE/);
     }
   });
 
-  it(": out-of-bounds ranges are rejected against the document page count", () => {
+  it("AC-605: out-of-bounds ranges are rejected against the document page count", () => {
     expect(() => parsePageRange("1-13", 12)).toThrow(/INVALID_PAGE_RANGE/);
     expect(() => parsePageRange("12,14", 12)).toThrow(/INVALID_PAGE_RANGE/);
     expect(parsePageRange("all", 12).pageCount).toBe(12);
@@ -66,7 +66,7 @@ describe("parsePageRange", () => {
     }
   });
 
-  it(": non-integer or non-positive copies reject before any work", () => {
+  it("non-integer or non-positive copies reject before any work", () => {
     for (const bad of [0, -1, 1.5, NaN, Infinity]) {
       expect(() => computeEffectiveSheets(3, bad)).toThrow(/INVALID_COPIES/);
     }

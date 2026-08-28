@@ -313,6 +313,23 @@ describe("lib/db/bookings", () => {
       expect(await bookingRowCount(orgAId)).toBe(before);
     });
 
+    it("[SEC] facility-type confusion: a desk id submitted as FULL_ROOM is rejected (no underpay)", async () => {
+      // Exploit: client sends facilityId=<a COWORKING_SEAT row> but
+      // facilityType="FULL_ROOM" — if the server trusted the client's type,
+      // the booking would be recorded as FULL_ROOM (occupying the whole day/
+      // every seat) but priced at the desk's cheap per-seat rate.
+      const before = await bookingRowCount(orgAId);
+      await expect(
+        createBooking({
+          orgId: orgAId, userId: aUserId, tier: "REGULAR",
+          facilityType: "FULL_ROOM", facilityId: seatAId, facilityName: "Meja A",
+          startAt: new Date("2026-07-13T13:00:00Z"), endAt: new Date("2026-07-13T14:00:00Z"),
+          paymentMethod: "online",
+        }),
+      ).rejects.toThrow(/FACILITY_TYPE_MISMATCH/);
+      expect(await bookingRowCount(orgAId)).toBe(before);
+    });
+
     it("AC-845: overlapping the same facility+window is rejected before any write (no lock race — single request)", async () => {
       const startAt = new Date("2026-07-13T09:00:00Z");
       const endAt = new Date("2026-07-13T10:00:00Z");

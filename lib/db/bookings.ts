@@ -486,6 +486,13 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
     .where(and(idCond, eq(facilities.available, true), isNull(facilities.archivedAt)))
     .limit(1);
   if (!facility) throw new Error("INVALID_FACILITY");
+  // [SEC][MONEY] The facility ROW is the source of truth for its type — a
+  // client-supplied facilityType that disagrees with the resolved row (e.g.
+  // a desk id submitted as "FULL_ROOM") is rejected before any write, never
+  // silently honored. This also prevents the booking's stored facilityType
+  // (which drives full-room/individual-seat exclusivity) from disagreeing
+  // with the rate actually charged.
+  if (facility.type !== facilityType) throw new Error("FACILITY_TYPE_MISMATCH");
 
   const discounts = await getTierDiscounts(orgId, tier);
   const discountPct = resolveDiscountPct(facilityType, discounts);
@@ -527,7 +534,7 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
       .values({
         orgId,
         userId,
-        facilityType,
+        facilityType: facility.type, // [SEC] derived from the resolved row, never the client request
         facilityId: facility.id,
         facilityName: facility.name,
         startAt,

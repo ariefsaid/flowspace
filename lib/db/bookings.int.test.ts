@@ -811,6 +811,35 @@ describe("lib/db/bookings", () => {
       expect(txns).toHaveLength(0); // no extension ledger row written
     });
 
+    it("[SEC] a later booking starting BEFORE the proposed end (genuine overlap) blocks the extension", async () => {
+      // Current booking ends 11:00; another booking on the SAME facility
+      // starts at 11:30 (before the 60-min-gap window even begins at 12:00).
+      // The old guard only checked "does a booking START within [proposedEnd,
+      // proposedEnd+60min)" — it never checked whether the extended interval
+      // [currentEnd, proposedEnd) itself overlaps an existing booking, so a
+      // booking starting at 11:30 (which the 1h extension to 12:00 would
+      // directly collide with) slipped through uncaught.
+      const start = new Date("2026-08-16T09:00:00Z");
+      const [active] = await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatAId,
+        facilityName: "Meja A", startAt: start, endAt: new Date(start.getTime() + 2 * HOUR), // ends 11:00
+        durationHours: 2, ratePerHourRupiah: 20000, amountRupiah: 40000, baseAmountRupiah: 40000, discountRupiah: 0,
+        status: "ACTIVE", paymentStatus: "PAID_ONLINE", bookingMode: "SCHEDULED", paymentMethod: "online",
+      }).returning();
+      await testDb.insert(bookings).values({
+        orgId: orgAId, userId: aUserId, facilityType: "COWORKING_SEAT", facilityId: seatAId,
+        facilityName: "Meja A", startAt: new Date(start.getTime() + 2.5 * HOUR), endAt: new Date(start.getTime() + 3.5 * HOUR), // 11:30-12:30
+        durationHours: 1, ratePerHourRupiah: 20000, amountRupiah: 20000, baseAmountRupiah: 20000, discountRupiah: 0,
+        status: "CONFIRMED", paymentStatus: "PAID_ONLINE", bookingMode: "SCHEDULED", paymentMethod: "online",
+      });
+
+      await expect(extendBooking(orgAId, active.id, 1)).rejects.toThrow(/EXTENSION_BLOCKED_BY_NEXT_BOOKING/);
+      const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, active.id));
+      expect(fresh.durationHours).toBe(2); // unchanged
+      const txns = await testDb.select().from(transactions).where(eq(transactions.bookingId, active.id));
+      expect(txns).toHaveLength(0); // no extension ledger row written
+    });
+
     it("a later booking starting ≥60 minutes after the proposed end does NOT block the extension", async () => {
       const start = new Date("2026-08-15T09:00:00Z");
       const [active] = await testDb.insert(bookings).values({

@@ -827,6 +827,17 @@ export async function extendBooking(orgId: string, id: string, extraHours: numbe
     const proposedEnd = new Date(fresh.startAt.getTime() + cappedTotalHours * HOUR_MS);
     if (proposedEnd.getTime() <= fresh.endAt.getTime()) throw new Error("EXTENSION_LIMIT_REACHED");
 
+    // [SEC] The extended interval [fresh.endAt, proposedEnd) must not itself
+    // overlap another active-like booking on the SAME facility (or a
+    // FULL_ROOM booking, via the shared oracle) — the old code only checked
+    // whether a booking STARTED within the 60-min gap AFTER proposedEnd,
+    // missing a booking that starts strictly BEFORE proposedEnd (a genuine
+    // overlap with the newly-claimed time, not merely a close-gap booking).
+    const overlapsExtension = await facilityHasActiveOverlap(
+      tx, orgId, fresh.facilityId, fresh.endAt, proposedEnd, fresh.id,
+    );
+    if (overlapsExtension) throw new Error("EXTENSION_BLOCKED_BY_NEXT_BOOKING");
+
     const gapEnd = new Date(proposedEnd.getTime() + EXTENSION_GAP_MS);
     const blocked = await hasBookingStartingWithinGap(tx, orgId, fresh.facilityId, proposedEnd, gapEnd, fresh.id);
     if (blocked) throw new Error("EXTENSION_BLOCKED_BY_NEXT_BOOKING");

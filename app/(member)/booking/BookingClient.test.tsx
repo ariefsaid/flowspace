@@ -148,4 +148,14 @@ describe("BookingClient (AC-801/842)", () => {
     await waitFor(() => expect(createBookingAction).toHaveBeenCalledTimes(1));
     expect(vi.mocked(createBookingAction).mock.calls[0][0].paymentMethod).toBe("cashier");
   });
+
+  it("design-review: the real time-credit balance is wired through to the payment decision point, not shown separately below", async () => {
+    await advanceToConfirm();
+
+    // Balance now lives inside the payment picker (Step4Confirm), adjacent
+    // to the "Time Credits" option — not a standalone line below the wizard.
+    const timeCreditsRadio = screen.getByRole("radio", { name: /Time Credits/ });
+    expect(timeCreditsRadio.closest("label")).toHaveTextContent("10.0 jam");
+    expect(screen.queryByText(/Saldo Time Credits Anda/)).toBeNull();
+  });
 });

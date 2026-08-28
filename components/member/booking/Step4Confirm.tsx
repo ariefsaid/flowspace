@@ -102,6 +102,9 @@ interface Step4ConfirmProps {
   onConfirm: () => void;
   submitting: boolean;
   result: CreatedBookingResult | null;
+  /** The member's real time-credit balance (server-resolved, display-only —
+   *  surfaced here so it is visible at the payment decision point). */
+  timeCredits: number;
 }
 
 export function Step4Confirm({
@@ -116,6 +119,7 @@ export function Step4Confirm({
   onConfirm,
   submitting,
   result,
+  timeCredits,
 }: Step4ConfirmProps) {
   const meta = TYPE_LABEL[bookingType];
   const isWalkin = isWalkinBookingType(bookingType);
@@ -228,27 +232,39 @@ export function Step4Confirm({
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium text-gray-700 mb-1">Metode Pembayaran</legend>
           <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Metode Pembayaran">
-            {PAYMENT_OPTIONS.map((opt) => (
-              <label
-                key={opt.value}
-                className={`flex cursor-pointer flex-col items-center gap-1 rounded-xl border-2 px-3 py-2.5 text-xs font-medium transition-colors ${
-                  paymentMethod === opt.value
-                    ? "border-teal-500 bg-teal-50 text-teal-700"
-                    : "border-slate-200 bg-white text-gray-600 hover:border-teal-300"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="paymentMethod"
-                  value={opt.value}
-                  checked={paymentMethod === opt.value}
-                  onChange={() => onPaymentMethodChange(opt.value)}
-                  className="sr-only"
-                />
-                {opt.icon}
-                {opt.label}
-              </label>
-            ))}
+            {PAYMENT_OPTIONS.map((opt) => {
+              const isTimeCredits = opt.value === "time_credits";
+              const noBalance = isTimeCredits && timeCredits <= 0;
+              return (
+                <label
+                  key={opt.value}
+                  className={`flex flex-col items-center gap-1 rounded-xl border-2 px-3 py-2.5 text-xs font-medium transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-teal-500 has-[:focus-visible]:ring-offset-2 ${
+                    noBalance
+                      ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400"
+                      : paymentMethod === opt.value
+                        ? "cursor-pointer border-teal-500 bg-teal-50 text-teal-700"
+                        : "cursor-pointer border-slate-200 bg-white text-gray-600 hover:border-teal-300"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="paymentMethod"
+                    value={opt.value}
+                    checked={paymentMethod === opt.value}
+                    disabled={noBalance}
+                    onChange={() => onPaymentMethodChange(opt.value)}
+                    className="sr-only"
+                  />
+                  {opt.icon}
+                  {opt.label}
+                  {isTimeCredits && (
+                    <span className={noBalance ? "text-slate-400" : "text-gray-500"}>
+                      {noBalance ? "Saldo habis" : `${timeCredits.toFixed(1)} jam`}
+                    </span>
+                  )}
+                </label>
+              );
+            })}
           </div>
         </fieldset>
       )}

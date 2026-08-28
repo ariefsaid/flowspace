@@ -221,6 +221,7 @@ export function BookingClient({ discounts, timeCredits }: BookingClientProps) {
               onConfirm={handleConfirm}
               submitting={submitting}
               result={result}
+              timeCredits={timeCredits}
             />
           )}
         </div>
@@ -282,12 +283,6 @@ export function BookingClient({ discounts, timeCredits }: BookingClientProps) {
             Buat Booking Baru
           </Button>
         </div>
-      )}
-
-      {timeCredits > 0 && step === 3 && !result && (
-        <p className="text-center text-xs text-gray-400">
-          Saldo Time Credits Anda: {timeCredits.toFixed(1)} jam
-        </p>
       )}
     </div>
   );

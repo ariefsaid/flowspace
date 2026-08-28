@@ -1199,6 +1199,25 @@ export async function cancelBooking(
  *  value above this is clamped, never honored as-is (pending-hold DoS,
  *  defense-in-depth alongside the soft `limit = 200` default below). */
 const PENDING_BOOKINGS_HARD_LIMIT = 500;
+/** Fallback used when the caller-supplied limit fails normalization (see
+ *  `normalizePendingBookingsLimit`) — the same value as the function's own
+ *  default parameter, kept as a named constant so both stay in sync. */
+const PENDING_BOOKINGS_DEFAULT_LIMIT = 200;
+
+/**
+ * [SEC] Coerces a caller-supplied `limit` to a finite positive integer
+ * within `PENDING_BOOKINGS_HARD_LIMIT` — `Math.min(limit, 500)` ALONE does
+ * not validate its input: `Math.min(-1, 500) === -1` and
+ * `Math.min(NaN, 500) === NaN`, and Drizzle OMITS the SQL `LIMIT` clause
+ * entirely for a negative or non-finite value, bypassing the cap outright
+ * (an unbounded query — exactly the DoS the cap exists to prevent). Any
+ * limit that isn't a finite number > 0 falls back to the safe default,
+ * BEFORE the 500 clamp is ever applied.
+ */
+function normalizePendingBookingsLimit(limit: number): number {
+  if (!Number.isFinite(limit) || limit <= 0) return PENDING_BOOKINGS_DEFAULT_LIMIT;
+  return Math.min(Math.floor(limit), PENDING_BOOKINGS_HARD_LIMIT);
+}
 
 /**
  * Admin pending-payments surface: PENDING bookings still WAITING_CASHIER —
@@ -1207,11 +1226,15 @@ const PENDING_BOOKINGS_HARD_LIMIT = 500;
  * [SEC] Bounded (LIMIT) — a flood of unpaid PENDING holds must never make
  * this read set unbounded (pending-hold DoS, defense-in-depth alongside the
  * createBooking duration/horizon bound and the sweep's stale-hold cancel).
- * The soft `limit` default is caller-adjustable but hard-clamped at
- * `PENDING_BOOKINGS_HARD_LIMIT` — a caller can shrink the page, never grow
- * it past the ceiling.
+ * The soft `limit` default is caller-adjustable but normalized+hard-clamped
+ * at `PENDING_BOOKINGS_HARD_LIMIT` (see `normalizePendingBookingsLimit`) — a
+ * caller can shrink the page, never grow it past the ceiling, and an
+ * invalid value (negative/zero/NaN) can never omit the LIMIT clause outright.
  */
-export function listPendingBookings(orgId: string, limit = 200): Promise<Booking[]> {
+export function listPendingBookings(
+  orgId: string,
+  limit: number = PENDING_BOOKINGS_DEFAULT_LIMIT,
+): Promise<Booking[]> {
   return db
     .select()
     .from(bookings)
@@ -1223,5 +1246,5 @@ export function listPendingBookings(orgId: string, limit = 200): Promise<Booking
       ),
     )
     .orderBy(desc(bookings.createdAt))
-    .limit(Math.min(limit, PENDING_BOOKINGS_HARD_LIMIT));
+    .limit(normalizePendingBookingsLimit(limit));
 }

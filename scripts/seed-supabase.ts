@@ -25,7 +25,6 @@ import {
   cafeMenuItems,
   timeCreditPackages,
   facilities,
-  membershipTierConfig,
   orgPrintPricing,
 } from "@/lib/db/schema";
 import {
@@ -37,6 +36,7 @@ import {
 } from "@/lib/db/enums";
 import { PRINT_RATE_BW, PRINT_RATE_COLOR } from "@/lib/print/pricing";
 import { LOCKED_TIER_DISCOUNTS } from "@/lib/tier-discounts";
+import { updateTierDiscounts } from "@/lib/db/tier-config";
 import { createId } from "@paralleldrive/cuid2";
 
 // ---------------------------------------------------------------------------
@@ -361,15 +361,13 @@ async function main() {
   console.log(`Seeded ${FACILITIES.length} facilities.`);
 
   // -- Pricing config (I-041, spec 0008) — 4-dim locked map, idempotent upsert ----
+  // Surprising but intentional: re-running the seed RESETS every org's tier
+  // config back to the locked map, including any values an admin has since
+  // edited via /admin/settings/tiers. The seed is a dev-reset tool, not a
+  // one-time bootstrap — don't run it against a DB you want to keep admin
+  // edits on.
   for (const tier of MEMBERSHIP_TIERS) {
-    const id = `${org.id}__tiercfg-${tier}`;
-    await db
-      .insert(membershipTierConfig)
-      .values({ id, orgId: org.id, tier, ...LOCKED_TIER_DISCOUNTS[tier] })
-      .onConflictDoUpdate({
-        target: [membershipTierConfig.orgId, membershipTierConfig.tier],
-        set: { ...LOCKED_TIER_DISCOUNTS[tier], updatedAt: new Date() },
-      });
+    await updateTierDiscounts(org.id, tier, LOCKED_TIER_DISCOUNTS[tier], db);
   }
   const [existingPrintPricing] = await db
     .select()

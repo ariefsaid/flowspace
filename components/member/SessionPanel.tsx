@@ -16,9 +16,26 @@ import { computeWalkinBilledHours } from "@/lib/booking/pricing";
 // ---------------------------------------------------------------------------
 
 const EXTENSION_WARNING_MS = 15 * 60_000;
-/** Extra hours proposed by the single "Perpanjang Sesi" affordance — the
- *  server (extendBooking) is the authority on the 4h cap + 60-min gap guard. */
-const EXTENSION_STEP_HOURS = 1;
+/** Extension choices offered — mirrors the original's [1, 2] jam options. */
+const EXTENSION_CHOICES_HOURS = [1, 2] as const;
+/** Client-side UX mirror of the server's EXTENSION_CAP_HOURS (lib/db/bookings.ts) —
+ *  disables choices that would exceed it up front. The server re-checks and is
+ *  the sole authority; this only avoids a round-trip to learn the obvious. */
+const EXTENSION_CAP_HOURS = 4;
+/** Friendly copy for both server rejection codes that mean "can't extend
+ *  right now" — a following booking on the facility, or the 4h cap already
+ *  reached server-side (a race the client-side disable above didn't catch). */
+const EXTENSION_BLOCKED_MESSAGE = "Ada booking setelah ini - tidak bisa diperpanjang";
+const EXTENSION_BLOCKED_CODES = new Set([
+  "EXTENSION_BLOCKED_BY_NEXT_BOOKING",
+  "EXTENSION_LIMIT_REACHED",
+]);
+
+function extensionErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : "";
+  if (EXTENSION_BLOCKED_CODES.has(message)) return EXTENSION_BLOCKED_MESSAGE;
+  return message || "Gagal memperpanjang sesi.";
+}
 
 export type SessionView = {
   bookingId: string;
@@ -121,18 +138,23 @@ function ScheduledPanel({ session, onExtend }: { session: SessionView; onExtend:
   // its own action's failure — render the error inline here regardless of
   // whether the caller's onExtend also handles it upstream.
   const [extendError, setExtendError] = useState<string | null>(null);
+  const startMs = new Date(session.startAt).getTime();
   const endMs = session.endAt ? new Date(session.endAt).getTime() : 0;
   const remainingMs = endMs - now;
   const overtime = remainingMs <= 0;
   const nearEnd = !overtime && remainingMs <= EXTENSION_WARNING_MS;
 
-  async function handleExtend() {
+  // Booked duration (fixed, independent of the ticking `now`) — the basis for
+  // client-side-disabling extension choices that would exceed the 4h cap.
+  const bookedHours = (endMs - startMs) / 3_600_000;
+
+  async function handleExtend(extraHours: number) {
     setExtending(true);
     setExtendError(null);
     try {
-      await onExtend(EXTENSION_STEP_HOURS);
+      await onExtend(extraHours);
     } catch (err) {
-      setExtendError(err instanceof Error ? err.message : "Gagal memperpanjang sesi.");
+      setExtendError(extensionErrorMessage(err));
     } finally {
       setExtending(false);
     }
@@ -178,19 +200,29 @@ function ScheduledPanel({ session, onExtend }: { session: SessionView; onExtend:
       {nearEnd && (
         <>
           <div className="my-4 border-t border-white/30" />
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-white">
               Sesi Anda akan berakhir dalam {Math.max(1, Math.ceil(remainingMs / 60_000))} menit — tersisa
               waktu untuk memperpanjang.
             </p>
-            <button
-              type="button"
-              onClick={handleExtend}
-              disabled={extending}
-              className="shrink-0 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-teal-700 shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-            >
-              {extending ? "Memproses..." : "Perpanjang Sesi"}
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="text-sm text-white">Perpanjang:</span>
+              {EXTENSION_CHOICES_HOURS.map((hours) => {
+                const exceedsCap = bookedHours + hours > EXTENSION_CAP_HOURS + 1e-6;
+                return (
+                  <button
+                    key={hours}
+                    type="button"
+                    onClick={() => handleExtend(hours)}
+                    disabled={extending || exceedsCap}
+                    aria-label={`Perpanjang ${hours} jam`}
+                    className="rounded-xl bg-white px-3 py-2 text-sm font-semibold text-teal-700 shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                  >
+                    {extending ? "..." : `${hours} jam`}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           {extendError && (
             <p role="alert" className="mt-2 text-right text-xs font-medium text-red-100">

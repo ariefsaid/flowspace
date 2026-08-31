@@ -888,6 +888,25 @@ describe("lib/db/bookings", () => {
       await expect(activateConfirmedBooking(orgAId, created.id)).rejects.toThrow(/INVALID_TRANSITION/);
     });
 
+    it("[SEC][MONEY][I-047 minor] refuses to activate a CONFIRMED row that is NOT actually paid (payment_status still WAITING_CASHIER) — matches the sweep's own invariant", async () => {
+      // The normal create/approvePayment flow never produces this combo —
+      // CONFIRMED always implies PAID_ONLINE or PAID_CASHIER. This directly
+      // constructs the otherwise-unreachable state to prove the function
+      // defends its OWN invariant rather than merely trusting `status`.
+      const created = await createBooking({
+        orgId: orgAId, userId: aUserId, tier: "REGULAR",
+        facilityType: "COWORKING_SEAT", facilityId: seatAId, facilityName: "Meja A",
+        startAt: new Date("2026-08-06T09:00:00Z"), endAt: new Date("2026-08-06T10:00:00Z"),
+        paymentMethod: "cashier", // PENDING/WAITING_CASHIER
+      });
+      await testDb.update(bookings).set({ status: "CONFIRMED" }).where(eq(bookings.id, created.id)); // force CONFIRMED, payment_status stays WAITING_CASHIER
+
+      await expect(activateConfirmedBooking(orgAId, created.id)).rejects.toThrow(/INVALID_TRANSITION/);
+      const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, created.id));
+      expect(fresh.status).toBe("CONFIRMED"); // unchanged — never activated
+      expect(fresh.startAt.getTime()).toBe(created.startAt.getTime()); // never touched either
+    });
+
     it("[SEC] a cross-org booking id resolves to NOT_FOUND, no write", async () => {
       const created = await createBooking({
         orgId: orgBId, userId: bUserId, tier: "REGULAR",

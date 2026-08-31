@@ -861,16 +861,24 @@ export async function approvePayment(orgId: string, id: string): Promise<Booking
 // activateConfirmedBooking [SEC][SoD] — admin "Aktifkan Sekarang" (I-047)
 // ---------------------------------------------------------------------------
 
+/** The payment statuses `runStatusSweep` itself requires before auto-activating a CONFIRMED row — reused here so the manual fallback can never activate a row the sweep itself would refuse. */
+const ACTIVATABLE_PAYMENT_STATUSES: BookingPaymentStatus[] = ["PAID_ONLINE", "PAID_CASHIER"];
+
 /**
  * Admin manual activation of a paid, scheduled CONFIRMED booking — the
  * fallback for when `runStatusSweep` (the cron sweep that normally flips
  * CONFIRMED→ACTIVE at its scheduled start) misfires or hasn't run yet.
- * Compare-and-set on `status='CONFIRMED'` (a concurrent cancel/sweep/
- * checkout is rejected, not silently overwritten) — org-scoped: a cross-org
- * id resolves to NOT_FOUND before any write. `startAt` is only ever set to
- * now if it was somehow still unset; the normal case (startAt already holds
- * the member's actual scheduled start, chosen at create) is left untouched
- * — activating early/late never rewrites the booked start time.
+ * Compare-and-set on `status='CONFIRMED'` AND `payment_status` ∈
+ * {PAID_ONLINE, PAID_CASHIER} — matching `runStatusSweep`'s own invariant
+ * [SEC][MONEY]: an unpaid WAITING_CASHIER row is CONFIRMED-shaped only in a
+ * state the normal create/approvePayment flow never actually produces, but
+ * this function must not trust `status` alone to imply payment — a
+ * concurrent cancel/sweep/checkout is also rejected, not silently
+ * overwritten. Org-scoped: a cross-org id resolves to NOT_FOUND before any
+ * write. `startAt` is only ever set to now if it was somehow still unset;
+ * the normal case (startAt already holds the member's actual scheduled
+ * start, chosen at create) is left untouched — activating early/late never
+ * rewrites the booked start time.
  */
 export async function activateConfirmedBooking(orgId: string, id: string): Promise<Booking> {
   return db.transaction(async (tx) => {
@@ -883,6 +891,7 @@ export async function activateConfirmedBooking(orgId: string, id: string): Promi
           eq(bookings.orgId, orgId),
           eq(bookings.status, "CONFIRMED"),
           eq(bookings.bookingMode, "SCHEDULED"),
+          inArray(bookings.paymentStatus, ACTIVATABLE_PAYMENT_STATUSES),
         ),
       )
       .for("update")
@@ -901,7 +910,14 @@ export async function activateConfirmedBooking(orgId: string, id: string): Promi
     const [updated] = await tx
       .update(bookings)
       .set({ status: "ACTIVE", startAt: current.startAt ?? now, updatedAt: now })
-      .where(and(eq(bookings.id, id), eq(bookings.orgId, orgId), eq(bookings.status, "CONFIRMED")))
+      .where(
+        and(
+          eq(bookings.id, id),
+          eq(bookings.orgId, orgId),
+          eq(bookings.status, "CONFIRMED"),
+          inArray(bookings.paymentStatus, ACTIVATABLE_PAYMENT_STATUSES),
+        ),
+      )
       .returning();
     if (!updated) throw new Error("INVALID_TRANSITION");
     return updated;

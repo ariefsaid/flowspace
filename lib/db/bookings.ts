@@ -658,6 +658,39 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
     await acquireOrgDayLock(tx, orgId, calendarDay);
     await acquireFacilityLock(tx, orgId, facility.id);
 
+    // [SEC][MONEY][I-047 fix round 2] Canonical FIRST row lock: resolve the
+    // user row + its CURRENT tier INSIDE the tx from the DB — never the
+    // caller-supplied `tier` — and require the user actually belongs to
+    // `orgId` and is not archived, holding a FOR NO KEY UPDATE row lock on
+    // this member's app_users row from here on. Round 1 of this fix
+    // deliberately DEFERRED this lock to after the optional credit spend
+    // ("lots before app_users") — but the cross-family re-verify showed the
+    // booking INSERT below takes an implicit, weak `FOR KEY SHARE` on this
+    // same app_users row at insert time, BEFORE any explicit lock; two
+    // creates for the same member could each hold KEY SHARE and then
+    // mutually deadlock upgrading to a strong lock inside
+    // recomputeCreditCache (40P01, proven by the barrier tests in
+    // lib/db/credit-lock-order.int.test.ts). The canonical order is now
+    // app_users(strong) FIRST — before this tx's FK inserts and before any
+    // lot lock — subsuming the implicit KEY SHARE. The strong lock also
+    // doubles as the archived-user TOCTOU close (fix-1, see the removed
+    // trailing re-check further down): a concurrent archiveUser either
+    // committed BEFORE this lock (we see archivedAt and reject) or blocks on
+    // this row until this tx commits — it can never land inside our
+    // transaction anymore. A cross-org or nonexistent userId is rejected
+    // before any write. (The advisory locks above are a separate lock space,
+    // taken in the same day→facility order by create/extend/checkout alike;
+    // the facility ROW lock below is taken after app_users in every path
+    // that co-locks both — only this one — so no cross-object pair
+    // inverts.)
+    const [user] = await tx
+      .select({ membershipTier: appUsers.membershipTier })
+      .from(appUsers)
+      .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
+      .for("no key update")
+      .limit(1);
+    if (!user) throw new Error("USER_NOT_FOUND");
+
     // [SEC][MONEY][I-047 fix-2] Facility TOCTOU close: `facility` above was
     // read BEFORE this transaction (and before its advisory lock) — a
     // concurrent admin archive/availability-toggle/type-change/rate-change
@@ -680,26 +713,6 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
       throw new Error("FACILITY_UNAVAILABLE");
     }
     if (freshFacility.type !== facilityType) throw new Error("FACILITY_TYPE_MISMATCH");
-
-    // [SEC] Identity/tier seam: resolve the user row + its CURRENT tier
-    // INSIDE the tx from the DB — never the caller-supplied `tier` — and
-    // require the user actually belongs to `orgId` and is not archived. This
-    // is a fast, UNLOCKED fail-fast (tier resolution + the common case); the
-    // genuine TOCTOU-closing re-check (below, `FOR UPDATE`) is deliberately
-    // deferred until AFTER any time-credit spend so the lock order stays
-    // time_credit_lots-before-app_users across every credit-touching path
-    // (matches spendTimeCredits/recomputeCreditCache and adjustCredits —
-    // see time-credit-lots.ts/users.ts) — locking app_users here, before
-    // spendTimeCredits locks the lots rows, would reverse that order for a
-    // time_credits payment and reintroduce the lock-order deadlock finding 4
-    // fixes elsewhere. A cross-org or archived userId (or one that doesn't
-    // exist) is rejected before any write.
-    const [user] = await tx
-      .select({ membershipTier: appUsers.membershipTier })
-      .from(appUsers)
-      .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
-      .limit(1);
-    if (!user) throw new Error("USER_NOT_FOUND");
 
     if (isFullRoom) {
       const { dayStart, dayEnd } = dayBounds(calendarDay);
@@ -738,25 +751,22 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
 
     if (paymentMethod === "time_credits") {
       // Throws INSUFFICIENT_CREDITS before any debit when short — the whole
-      // tx (including the insert above) rolls back (AC-823).
+      // tx (including the insert above) rolls back (AC-823). Its first
+      // statement re-locks the member's app_users row (a no-op — this tx
+      // already holds it, taken at the top of the transaction).
       await spendTimeCredits({ orgId, userId, hours: durationHours, tx });
     }
 
-    // [SEC][I-047 fix-1] Archived-user TOCTOU close: re-verify, holding a
-    // REAL row lock, as the LAST app_users touch in this transaction —
-    // placed intentionally AFTER the optional time-credit spend above (see
-    // the lock-order comment on the unlocked read further up). Either this
-    // select blocks on a concurrent archiveUser's still-in-flight UPDATE and
-    // then observes its committed result, or archiveUser blocks on THIS
-    // lock and only proceeds after this transaction finishes — no interleave
-    // can let an archived user's booking commit.
-    const [stillActive] = await tx
-      .select({ id: appUsers.id })
-      .from(appUsers)
-      .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
-      .for("update")
-      .limit(1);
-    if (!stillActive) throw new Error("USER_NOT_FOUND");
+    // [SEC][I-047 fix-1 → round 2] The dedicated trailing archived-user
+    // re-check is GONE — subsumed, not weakened: the FOR NO KEY UPDATE lock
+    // taken on this member's app_users row at the TOP of this transaction
+    // (before the booking INSERT and the credit spend) already spans the
+    // whole tx, so a concurrent archiveUser can either commit before this
+    // tx's lock (the locked resolve sees archivedAt and rejects) or block on
+    // this row until this tx commits — no interleave can let an archived
+    // user's booking commit, and the round-1 placement (AFTER the spend) is
+    // precisely what let the implicit FK KEY SHARE → strong-lock upgrade
+    // deadlock of finding 4 materialize.
 
     await recordTransaction(
       {

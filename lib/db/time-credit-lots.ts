@@ -129,6 +129,17 @@ export async function spendTimeCredits(opts: {
 }): Promise<void> {
   const { orgId, userId, hours, tx } = opts;
 
+  // [SEC][MONEY][I-047 fix round 2] Canonical FIRST lock: the member's
+  // app_users row, FOR NO KEY UPDATE — BEFORE any lot lock and before the
+  // CALLER's booking/checkout row inserts their implicit FOR KEY SHARE on
+  // this row (createBooking/checkoutBooking insert those rows earlier in
+  // the same transaction). Locking app_users first means a concurrent
+  // credit path for the same member queues here — holding nothing — so the
+  // KEY SHARE → FOR UPDATE upgrade deadlock is structurally impossible
+  // (lib/db/credit-lock-order.int.test.ts). The caller's earlier FK insert
+  // already subsumed into this stronger lock is a no-op re-lock.
+  await lockUserRowForCreditWrite(tx, orgId, userId);
+
   // Row-lock every non-empty lot for this member (AC-825 — serializes
   // concurrent spends). Ordered soonest-expiry-first, matching the FIFO
   // selection below.
@@ -193,32 +204,44 @@ export async function spendTimeCredits(opts: {
 // ---------------------------------------------------------------------------
 
 /**
- * [SEC][MONEY][I-047 fix-5] Locks the member's own `app_users` row `FOR
- * UPDATE` — the serialization point that closes the credit-cache recompute
- * race (see `recomputeCreditCache` below). Exported as its own step (not
- * folded silently into `recomputeCreditCache`'s body) because
- * `adjustTimeCreditsForAdmin`'s GRANT branch must take THIS SAME lock BEFORE
- * inserting a new lot row, never after: inserting a row that references
- * `userId` via FK implicitly takes a weaker `FOR KEY SHARE` lock on this
- * same `app_users` row for the referential-integrity check — that lock mode
- * is compatible with ANOTHER transaction's concurrent `FOR KEY SHARE`
- * (i.e. two concurrent grants can both insert their own lot uncontested),
- * but is NOT compatible with either side later trying to upgrade to `FOR
- * UPDATE`. Two transactions each holding `FOR KEY SHARE` and each wanting to
- * upgrade to `FOR UPDATE` is itself a lock-order deadlock — acquiring the
- * strong lock FIRST, before either side's insert can take the weak one,
- * avoids ever entering that state.
+ * [SEC][MONEY][I-047 fix round 2 — THE canonical first lock] Takes a strong
+ * `FOR NO KEY UPDATE` lock on the member's `app_users` row and returns it
+ * (null if no in-org, live row matches — the caller turns that into its own
+ * NOT_FOUND/USER_NOT_FOUND error).
+ *
+ * EVERY path that will insert an app_users-FK-referencing row (booking,
+ * ledger row, time_credit_lot) AND/OR lock lots or app_users MUST call this
+ * FIRST — before any FK-inserting statement or lot lock. Canonical order:
+ *
+ *   app_users(strong) → time_credit_lots → FK inserts
+ *
+ * Why FIRST: any INSERT referencing app_users implicitly takes a weak `FOR
+ * KEY SHARE` on this same row at insert time — before the code's explicit
+ * locks. A path that inserts first and strong-locks later can hold KEY
+ * SHARE while waiting to upgrade to FOR UPDATE; two such transactions
+ * mutually deadlock (40P01 — proven by the barrier tests in
+ * lib/db/credit-lock-order.int.test.ts). A strong lock up front subsumes
+ * the later implicit KEY SHARE (re-locking a held row is a no-op) and makes
+ * app_users-first the single canonical order everywhere.
+ *
+ * Why FOR NO KEY UPDATE (not FOR UPDATE): it still serializes every credit
+ * path for the member (NO KEY UPDATE conflicts with itself and with FOR
+ * UPDATE), but stays compatible with the implicit FOR KEY SHARE of
+ * unrelated single-statement FK inserts (e.g. a ledger row written by a
+ * non-credit path) — those neither block on us nor deadlock us.
  */
 async function lockUserRowForCreditWrite(
   tx: Pick<typeof db, "select">,
   orgId: string,
   userId: string,
-): Promise<void> {
-  await tx
+): Promise<{ id: string } | null> {
+  const [row] = await tx
     .select({ id: appUsers.id })
     .from(appUsers)
     .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))
-    .for("update");
+    .for("no key update")
+    .limit(1);
+  return row ?? null;
 }
 
 /** Sets app_users.timeCredits = SUM(remainingHours) of non-expired lots; returns the value. */
@@ -241,12 +264,12 @@ export async function recomputeCreditCache(opts: {
   // second concurrent recompute to wait for the first to fully COMMIT (so
   // its lot write is visible), then re-sum against the now-complete data —
   // proven by a forced-overlap barrier test
-  // (lib/db/credit-lock-order.int.test.ts). This is intentionally the FIRST
-  // lock this function takes and the LAST resource any credit-writing path
-  // locks (see the lock-order note on `adjustCredits`, users.ts). Re-locking
-  // a row THIS transaction already holds (e.g. the GRANT branch below, which
-  // locks it even earlier) is a harmless no-op — Postgres never blocks a
-  // transaction on its own already-held lock.
+  // (lib/db/credit-lock-order.int.test.ts). Under the canonical order this
+  // is a re-lock of a row the caller (spendTimeCredits /
+  // adjustTimeCreditsForAdmin / purchasePackage) already holds — a harmless
+  // no-op; it only REALLY locks when recomputeCreditCache is the entry
+  // point itself. Postgres never blocks a transaction on its own
+  // already-held lock.
   await lockUserRowForCreditWrite(tx, orgId, userId);
 
   const [row] = await tx
@@ -319,11 +342,14 @@ export async function adjustTimeCreditsForAdmin(opts: {
   // never trust a caller-supplied (orgId, userId) pair to actually be
   // related without checking here too. A cross-org userId (or one that
   // doesn't exist) is rejected before any lot/cache write.
-  const [target] = await tx
-    .select({ id: appUsers.id })
-    .from(appUsers)
-    .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))
-    .limit(1);
+  //
+  // [SEC][MONEY][I-047 fix round 2] This is ALSO the canonical FIRST lock:
+  // the guard select takes the member's app_users row FOR NO KEY UPDATE, so
+  // both branches below (the GRANT branch's lot INSERT with its implicit FK
+  // KEY SHARE, and the DEBIT branch's lot row locks) are preceded by the
+  // strong lock — concurrent credit paths for the same member serialize
+  // here, holding nothing (see lockUserRowForCreditWrite).
+  const target = await lockUserRowForCreditWrite(tx, orgId, userId);
   if (!target) throw new Error("NOT_FOUND");
 
   if (deltaHours === 0) {
@@ -339,14 +365,15 @@ export async function adjustTimeCreditsForAdmin(opts: {
   assertValidCreditDelta(deltaHours);
 
   if (deltaHours > 0) {
-    // [SEC][MONEY][I-047 fix-5] Lock app_users BEFORE inserting the new lot
-    // — see lockUserRowForCreditWrite's doc comment: inserting a lot row
-    // FIRST would take only a weak, cross-transaction-compatible FK lock on
-    // this row, letting two concurrent grants both proceed past their
-    // insert and then deadlock trying to each upgrade to FOR UPDATE inside
-    // recomputeCreditCache. Locking strong up front instead makes a
-    // concurrent grant for the same user simply queue behind this one.
-    await lockUserRowForCreditWrite(tx, orgId, userId);
+    // [SEC][MONEY][I-047 fix round 2] The app_users strong lock is already
+    // held (taken by the guard select at the top of this function) — BEFORE
+    // this INSERT's implicit FK KEY SHARE, exactly the canonical order.
+    // Inserting a lot row FIRST would take only a weak,
+    // cross-transaction-compatible FK lock on this row, letting two
+    // concurrent grants both proceed past their insert and then deadlock
+    // trying to each upgrade inside recomputeCreditCache. Locking strong up
+    // front instead makes a concurrent grant for the same user simply queue
+    // behind this one.
     const purchasedAt = new Date();
     await tx.insert(timeCreditLots).values({
       orgId,

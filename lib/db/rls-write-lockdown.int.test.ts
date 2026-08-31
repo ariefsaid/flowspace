@@ -62,6 +62,7 @@ const BUSINESS_TABLES = [
   "print_agent_rate_limit_events",
   "time_credit_lots",
   "print_topup_packages",
+  "org_settings",
 ] as const;
 
 let orgAId: string;
@@ -261,6 +262,32 @@ describe("RLS write lockdown — scoped authenticated role cannot write", () => 
     expect(caught, `expected scoped SELECT on "time_credit_lots" to be denied`).toBeDefined();
     expect(caught?.code).toBe("42501");
     expect(caught?.message).toMatch(/permission denied for table time_credit_lots/i);
+  });
+
+  it("[SEC] org_settings rejects scoped SELECT too (server-only, no Data-API grant — leaks UniFi apiKey/password otherwise)", async () => {
+    // org_settings (I-042 migration 0020) previously carried a SELECT grant
+    // to `authenticated` (I-046/ADR-0015's default convention for new
+    // tables) — but org_settings stores the UniFi controller's
+    // siteManagerApiKey/password in its jsonb `settings` blob, and the RLS
+    // policy is org-scoped only. Any authenticated member's Data-API session
+    // could `select settings from org_settings` and read those secrets
+    // directly. org_settings is read ONLY server-side (RSC -> getOrgSettings
+    // on the service-role connection), so the client never legitimately
+    // needs Data-API access — lock it down like print_agent_configs.
+    let caught: PgError | undefined;
+    const claims = JSON.stringify({ org_id: orgAId }).replace(/'/g, "''");
+    try {
+      await rootSql.begin(async (tx) => {
+        await tx.unsafe(`SET LOCAL ROLE authenticated`);
+        await tx.unsafe(`SET LOCAL "request.jwt.claims" = '${claims}'`);
+        return tx.unsafe(`SELECT settings FROM "org_settings"`);
+      });
+    } catch (err) {
+      caught = err as PgError;
+    }
+    expect(caught, `expected scoped SELECT on "org_settings" to be denied`).toBeDefined();
+    expect(caught?.code).toBe("42501");
+    expect(caught?.message).toMatch(/permission denied for table org_settings/i);
   });
 
   it("AC-1003: scoped SELECT still works, and excludes cross-org rows", async () => {

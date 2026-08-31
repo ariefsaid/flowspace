@@ -536,6 +536,27 @@ export const printTopupPackages = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Org settings (I-042): org-scoped jsonb config store for the non-CRUD admin
+// settings categories (site/analytics/email/unifi). DDL authority =
+// supabase/migrations/0020_org_settings.sql. TS mirror.
+// ---------------------------------------------------------------------------
+export const orgSettings = pgTable(
+  "org_settings",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    category: text("category").notNull(),
+    settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { precision: 3, mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("org_settings_org_id_category_key").on(t.orgId, t.category),
+    index("org_settings_org_id_idx").on(t.orgId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Time-credit lots (I-040, spec 0007): expiring FIFO credit balance. DDL
 // authority = supabase/migrations/0015_booking_parity_core.sql. TS mirror.
 // `app_users.timeCredits` becomes a derived cache of the non-expired
@@ -576,4 +597,5 @@ export type Printer = InferSelectModel<typeof printers>;
 export type PrintAgentConfig = InferSelectModel<typeof printAgentConfigs>;
 export type PrintAgentRateLimitEvent = InferSelectModel<typeof printAgentRateLimitEvents>;
 export type PrintTopupPackage = InferSelectModel<typeof printTopupPackages>;
+export type OrgSettingsRow = InferSelectModel<typeof orgSettings>;
 export type TimeCreditLot = InferSelectModel<typeof timeCreditLots>;

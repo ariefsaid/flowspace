@@ -35,7 +35,19 @@ export interface RecentOrderView {
   placedAt: string;
   totalRupiah: number;
   items: { nameSnapshot: string; qty: number; variant?: string }[];
+  /** DB CafeOrderStatus (NEW/PREPARING/READY/COMPLETED/CANCELLED). Optional —
+   *  falls back to the "Selesai" badge when omitted (I-049 widening). */
+  status?: string;
 }
+
+/** Member-facing (Indonesian) label + Badge tone per CafeOrderStatus. */
+const ORDER_STATUS_DISPLAY: Record<string, { label: string; tone: "completed" | "pending" | "active" | "cancelled" | "info" }> = {
+  NEW: { label: "Baru", tone: "info" },
+  PREPARING: { label: "Diproses", tone: "pending" },
+  READY: { label: "Siap", tone: "active" },
+  COMPLETED: { label: "Selesai", tone: "completed" },
+  CANCELLED: { label: "Dibatalkan", tone: "cancelled" },
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -360,7 +372,16 @@ export function CafeClient({ menu, recentOrder, discountPct }: CafeClientProps) 
                     {formatDateOnlyID(recentOrder.placedAt)}
                   </p>
                 </div>
-                <Badge tone="completed">Selesai</Badge>
+                {(() => {
+                  const statusDisplay = recentOrder.status
+                    ? ORDER_STATUS_DISPLAY[recentOrder.status]
+                    : undefined;
+                  return (
+                    <Badge tone={statusDisplay?.tone ?? "completed"}>
+                      {statusDisplay?.label ?? "Selesai"}
+                    </Badge>
+                  );
+                })()}
               </div>
 
               <div className="space-y-2">

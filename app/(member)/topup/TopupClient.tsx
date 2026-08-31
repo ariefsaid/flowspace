@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, Printer, Star } from "lucide-react";
+import { Clock, Printer, Star, CreditCard, CheckCircle, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
 import { formatRupiah } from "@/lib/format";
 import { purchasePackageAction, topUpPrintAction } from "@/app/(member)/topup/actions";
@@ -33,7 +34,23 @@ export interface PrintPackageView {
 // Tab type
 // ---------------------------------------------------------------------------
 
-type TabKey = "time" | "print";
+export type TabKey = "time" | "print";
+
+/** Purchase-confirm dialog recap — a display-only snapshot of the clicked
+ *  card, not sent back to the server (the action still takes only the id). */
+interface SelectedPurchase {
+  kind: "time" | "print";
+  id: string;
+  label: string;
+  sub: string;
+  priceRupiah: number;
+}
+
+/** ~2s mock processing delay (matches the captured original's payment-gateway
+ *  simulation) before the (unchanged) server action is called. */
+const PROCESSING_DELAY_MS = 1800;
+/** How long the success dialog stays up before auto-closing. */
+const SUCCESS_AUTOCLOSE_MS = 1500;
 
 // ---------------------------------------------------------------------------
 // Props
@@ -44,6 +61,8 @@ export interface TopupClientProps {
   printPackages?: PrintPackageView[];
   timeCredits: number;
   printBalance: number;
+  /** Deep-link initial tab (?tab=print, or the original's ?tab=papercut). */
+  initialTab?: TabKey;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,48 +86,58 @@ export function TopupClient({
   printPackages = [],
   timeCredits,
   printBalance,
+  initialTab = "time",
 }: TopupClientProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
-  const [activeTab, setActiveTab] = useState<TabKey>("time");
-  // ponytail: the card click IS the purchase (no confirm button in the existing
-  // markup; click-to-buy is the minimal wire). Add a confirm step if misclick
-  // protection is wanted — that is a deliberate UX change, out of scope here.
-  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
   const [error, setError] = useState<string | null>(null);
 
-  async function handlePurchaseTime(packageId: string) {
-    if (pendingId) return;
+  // Confirm-dialog flow (AC-i049-7): card click opens a recap dialog, never
+  // purchases directly. `selected` is the display-only recap; `processing`
+  // and `success` are the dialog's sub-states.
+  const [selected, setSelected] = useState<SelectedPurchase | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  function openConfirm(purchase: SelectedPurchase) {
+    if (selected) return; // a purchase is already in flight/open
     setError(null);
-    setPendingId(packageId);
-    try {
-      await purchasePackageAction(packageId);
-    } catch (err) {
-      setError(toErrorMessage(err));
-      setPendingId(null);
-      return;
-    }
-    setPendingId(null);
-    startTransition(() => {
-      router.refresh();
-    });
+    setSelected(purchase);
   }
 
-  async function handlePurchasePrint(packageId: string) {
-    if (pendingId) return;
-    setError(null);
-    setPendingId(packageId);
+  function closeDialog() {
+    setSelected(null);
+    setProcessing(false);
+    setSuccess(false);
+  }
+
+  async function handleConfirm() {
+    if (!selected || processing) return;
+    setProcessing(true);
+
+    // Mock payment-gateway delay, same as the original, before the (real,
+    // unchanged) server action fires.
+    await new Promise((resolve) => setTimeout(resolve, PROCESSING_DELAY_MS));
+
     try {
-      await topUpPrintAction(packageId);
+      if (selected.kind === "time") {
+        await purchasePackageAction(selected.id);
+      } else {
+        await topUpPrintAction(selected.id);
+      }
     } catch (err) {
       setError(toErrorMessage(err));
-      setPendingId(null);
+      closeDialog();
       return;
     }
-    setPendingId(null);
+
+    setProcessing(false);
+    setSuccess(true);
     startTransition(() => {
       router.refresh();
     });
+    setTimeout(closeDialog, SUCCESS_AUTOCLOSE_MS);
   }
 
   return (
@@ -200,16 +229,24 @@ export function TopupClient({
         {activeTab === "time" ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {packages.map((pkg) => {
-              const isPending = pendingId === pkg.id;
+              const isSelected = selected?.kind === "time" && selected.id === pkg.id;
               return (
                 <button
                   key={pkg.id}
                   type="button"
-                  disabled={pendingId !== null}
-                  onClick={() => handlePurchaseTime(pkg.id)}
+                  disabled={selected !== null}
+                  onClick={() =>
+                    openConfirm({
+                      kind: "time",
+                      id: pkg.id,
+                      label: `${pkg.hours} Hours`,
+                      sub: `${pkg.hours} hours of workspace access`,
+                      priceRupiah: pkg.priceRupiah,
+                    })
+                  }
                   className={cn(
                     "relative rounded-xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40",
-                    isPending
+                    isSelected
                       ? "border-2 border-teal-500 bg-white shadow-md"
                       : "border border-slate-200 bg-white shadow-sm hover:border-teal-300",
                   )}
@@ -241,17 +278,25 @@ export function TopupClient({
         ) : (
           printPackages.length === 0 ? <p className="py-10 text-center text-sm text-gray-400">Belum ada paket print tersedia.</p> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {printPackages.map((pkg) => {
-              const isPending = pendingId === pkg.id;
+              const isSelected = selected?.kind === "print" && selected.id === pkg.id;
               const pricePerPage = Math.round(pkg.priceRupiah / pkg.pages);
               return (
                 <button
                   key={pkg.id}
                   type="button"
-                  disabled={pendingId !== null}
-                  onClick={() => handlePurchasePrint(pkg.id)}
+                  disabled={selected !== null}
+                  onClick={() =>
+                    openConfirm({
+                      kind: "print",
+                      id: pkg.id,
+                      label: `${pkg.pages} Pages`,
+                      sub: `${pkg.pages} pages of print balance`,
+                      priceRupiah: pkg.priceRupiah,
+                    })
+                  }
                   className={cn(
                     "relative rounded-xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/40",
-                    isPending
+                    isSelected
                       ? "border-2 border-purple-500 bg-white shadow-md"
                       : "border border-slate-200 bg-white shadow-sm hover:border-purple-300",
                   )}
@@ -274,6 +319,75 @@ export function TopupClient({
           </div>
         )}
       </Card>
+
+      {/* Purchase confirm dialog — recap + payment method → processing → success (AC-i049-7) */}
+      {selected && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={success ? "Pembelian Berhasil" : processing ? "Memproses Pembayaran" : "Konfirmasi Pembelian"}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        >
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={processing ? undefined : closeDialog}
+          />
+          <div className="relative w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-md">
+            {success ? (
+              <div className="text-center">
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+                  <CheckCircle className="h-8 w-8 text-green-600" aria-hidden="true" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900">Pembelian Berhasil!</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  {selected.label} telah ditambahkan ke akun Anda.
+                </p>
+              </div>
+            ) : processing ? (
+              <div className="text-center py-2">
+                <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-teal-600" aria-hidden="true" />
+                <h3 className="text-lg font-semibold text-gray-900">Memproses...</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Mohon tunggu, kami sedang memproses pembayaran Anda.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900">Konfirmasi Pembelian</h3>
+
+                <div className="rounded-lg bg-slate-50 p-4">
+                  <p className="text-sm text-gray-500">Paket</p>
+                  <p className="font-semibold text-gray-900">{selected.label}</p>
+                  <p className="text-sm text-gray-500">{selected.sub}</p>
+                  <p className="mt-2 text-2xl font-bold text-gray-900">
+                    {formatRupiah(selected.priceRupiah)}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 p-4">
+                  <p className="mb-2 text-sm font-medium text-gray-700">Metode Pembayaran</p>
+                  <div className="flex items-center gap-3">
+                    <CreditCard className="h-8 w-8 text-teal-600" aria-hidden="true" />
+                    <div>
+                      <p className="font-medium text-gray-900">Mock Payment Gateway</p>
+                      <p className="text-sm text-gray-500">QRIS / Virtual Account</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <Button variant="outline" className="flex-1" onClick={closeDialog}>
+                    Batal
+                  </Button>
+                  <Button className="flex-1" onClick={handleConfirm}>
+                    Konfirmasi
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,11 +9,17 @@ import { requireSession } from "@/lib/auth/session";
 import { listPackages } from "@/lib/db/packages";
 import { listPrintTopupPackages } from "@/lib/db/print-packages";
 import { findById } from "@/lib/db/users";
+import { resolveInitialTab } from "@/lib/topup/resolveTab";
 import { TopupClient } from "./TopupClient";
 import type { PackageView, PrintPackageView } from "./TopupClient";
 
-export default async function TopUpPage() {
+export default async function TopUpPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string | string[] }>;
+}) {
   const user = await requireSession();
+  const initialTab = resolveInitialTab((await searchParams).tab);
   const [packages, printPackages, profile] = await Promise.all([
     listPackages(user.orgId),
     listPrintTopupPackages(user.orgId),
@@ -42,6 +48,7 @@ export default async function TopUpPage() {
       printPackages={printPackageViews}
       timeCredits={profile?.timeCredits ?? 0}
       printBalance={profile?.printBalance ?? 0}
+      initialTab={initialTab}
     />
   );
 }

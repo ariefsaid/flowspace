@@ -167,6 +167,7 @@ export async function createMember(input: {
   authUserId: string;
   email: string;
   name: string;
+  phone?: string | null;
 }): Promise<AppUser> {
   const [u] = await db
     .insert(appUsers)
@@ -175,6 +176,7 @@ export async function createMember(input: {
       authUserId: input.authUserId,
       email: input.email.trim().toLowerCase(),
       name: input.name,
+      phone: input.phone?.trim() || null,
       role: "MEMBER",
     })
     .returning();

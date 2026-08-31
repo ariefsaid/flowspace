@@ -222,6 +222,30 @@ describe("TopupClient (I-020)", () => {
     DIALOG_TIMEOUT + 2000,
   );
 
+  it(
+    "surfaces a friendly Indonesian message when the simulated payment declines",
+    async () => {
+      vi.mocked(purchasePackageAction).mockRejectedValue(
+        new Error("PAYMENT_DECLINED"),
+      );
+
+      render(
+        <TopupClient
+          packages={samplePackages}
+          timeCredits={0}
+          printBalance={0}
+        />,
+      );
+
+      purchaseViaDialog("5 Hours");
+
+      const alert = await screen.findByRole("alert", {}, { timeout: DIALOG_TIMEOUT });
+      expect(alert).toHaveTextContent(/pembayaran ditolak/i);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    },
+    DIALOG_TIMEOUT + 2000,
+  );
+
   it("AC-i049-8: initialTab prop pre-selects the print tab (deep-link)", () => {
     render(
       <TopupClient

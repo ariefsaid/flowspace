@@ -419,6 +419,27 @@ export async function getOrder(
 }
 
 /**
+ * Org + user scoped recent orders (member "Pesanan Terakhir" card), newest
+ * first, capped at `limit`. Never another member's or another org's orders
+ * ([SEC] — both orgId and customerUserId are part of the WHERE, and both are
+ * always server-derived, never client-supplied).
+ */
+export async function listRecentOrdersByUser(
+  orgId: string,
+  userId: string,
+  limit = 5,
+): Promise<CafeOrderWithRelations[]> {
+  const rows = await db
+    .select()
+    .from(cafeOrders)
+    .where(and(eq(cafeOrders.orgId, orgId), eq(cafeOrders.customerUserId, userId)))
+    .orderBy(desc(cafeOrders.createdAt))
+    .limit(limit);
+
+  return attachRelations(orgId, rows);
+}
+
+/**
  * Admin free-set: update an order to any CafeOrderStatus (not forward-only).
  * Throws NOT_FOUND for cross-org ids.
  *

@@ -11,6 +11,7 @@ import {
   ShoppingCart,
   ClipboardList,
   Printer,
+  BarChart3,
   Settings,
   LogOut,
   type LucideIcon,
@@ -34,6 +35,7 @@ const navItems: NavItem[] = [
   { href: "/admin/pos", label: "POS", icon: ShoppingCart },
   { href: "/admin/orders", label: "Pesanan", icon: ClipboardList },
   { href: "/admin/print-reports", label: "Print", icon: Printer },
+  { href: "/admin/reports", label: "Laporan", icon: BarChart3 },
   { href: "/admin/settings", label: "Pengaturan", icon: Settings },
 ];
 

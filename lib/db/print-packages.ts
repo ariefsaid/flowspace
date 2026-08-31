@@ -3,6 +3,10 @@ import { db } from "@/lib/db/drizzle";
 import { appUsers, printTopupPackages, type PrintTopupPackage } from "@/lib/db/schema";
 import { recordTransaction } from "@/lib/db/transactions";
 import { lockUserRowForCreditWrite, int4ClampedAdd } from "@/lib/db/time-credit-lots";
+import {
+  simulatePaymentOutcome,
+  type PaymentDecision,
+} from "@/lib/topup/mockPaymentGateway";
 
 export type PrintTopupPackageView = Pick<PrintTopupPackage, "id" | "pages" | "priceRupiah" | "sortOrder">;
 
@@ -12,8 +16,19 @@ export function listPrintTopupPackages(orgId: string): Promise<PrintTopupPackage
     .orderBy(asc(printTopupPackages.sortOrder), asc(printTopupPackages.pages));
 }
 
-/** Atomically load the stored price, credit balance, and write its ledger row. */
-export async function purchasePrintTopup(input: { orgId: string; userId: string; packageId: string }) {
+/**
+ * Atomically load the stored price, credit balance, and write its ledger row.
+ *
+ * `simulatePayment` is a TEST-ONLY seam (defaults to always-approve, [SEC/MONEY]
+ * — see lib/topup/mockPaymentGateway): a forced decline throws PAYMENT_DECLINED
+ * BEFORE any balance change or ledger write.
+ */
+export async function purchasePrintTopup(input: {
+  orgId: string;
+  userId: string;
+  packageId: string;
+  simulatePayment?: PaymentDecision;
+}) {
   if (!input.packageId.trim()) throw new Error("UNKNOWN_PACKAGE");
   return db.transaction(async (tx) => {
     const [pkg] = await tx.select().from(printTopupPackages).where(and(
@@ -29,6 +44,13 @@ export async function purchasePrintTopup(input: { orgId: string; userId: string;
     // resolve within this org before any write [SEC].
     const user = await lockUserRowForCreditWrite(tx, input.orgId, input.userId);
     if (!user) throw new Error("USER_NOT_FOUND");
+
+    // [SEC/MONEY] Forced decline throws PAYMENT_DECLINED before any balance
+    // change or ledger write (the held lock rolls back cleanly on throw).
+    if (!simulatePaymentOutcome(input.simulatePayment)) {
+      throw new Error("PAYMENT_DECLINED");
+    }
+
     const [updatedUser] = await tx.update(appUsers)
       // [SEC][MONEY][I-047 fix-3] int4-clamped increment — clamps the
       // RESULT, not just the package's pages (see int4ClampedAdd).

@@ -54,6 +54,8 @@ export const appUsers = pgTable(
     authUserId: uuid("auth_user_id"),
     email: text("email").notNull(),
     name: text("name").notNull(),
+    // Optional signup contact number (ORIG api/signup/route.ts). Nullable.
+    phone: text("phone"),
     role: roleEnum("role").notNull().default("MEMBER"),
     membershipTier: membershipTierEnum("membership_tier")
       .notNull()
@@ -166,6 +168,11 @@ export const cafeOrders = pgTable(
     index("cafe_orders_org_id_idx").on(t.orgId),
     index("cafe_orders_org_id_status_idx").on(t.orgId, t.status),
     index("cafe_orders_org_id_created_at_idx").on(t.orgId, t.createdAt),
+    index("cafe_orders_org_user_created_at_idx").on(
+      t.orgId,
+      t.customerUserId,
+      t.createdAt,
+    ),
   ],
 );
 

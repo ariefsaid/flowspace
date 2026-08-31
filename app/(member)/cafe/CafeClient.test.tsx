@@ -112,6 +112,37 @@ describe("CafeClient (AC-101)", () => {
     expect(screen.getByText("#abc123")).toBeInTheDocument();
   });
 
+  it("shows the real order status badge (not a hardcoded 'Selesai') when status is provided", () => {
+    render(
+      <CafeClient
+        menu={sampleMenu}
+        recentOrder={{
+          code: "#preparing1",
+          placedAt: new Date("2026-06-15T10:00:00Z").toISOString(),
+          totalRupiah: 32000,
+          items: [{ nameSnapshot: "Latte", qty: 1 }],
+          status: "PREPARING",
+        }}
+        discountPct={0}
+      />,
+    );
+    expect(screen.getByText("Diproses")).toBeInTheDocument();
+    expect(screen.queryByText("Selesai")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the 'Selesai' badge when status is omitted (back-compat)", () => {
+    const recentOrder = {
+      code: "#abc123",
+      placedAt: new Date("2026-06-15T10:00:00Z").toISOString(),
+      totalRupiah: 57000,
+      items: [{ nameSnapshot: "Latte", qty: 1 }],
+    };
+    render(
+      <CafeClient menu={sampleMenu} recentOrder={recentOrder} discountPct={0} />,
+    );
+    expect(screen.getByText("Selesai")).toBeInTheDocument();
+  });
+
   it("AC-102: shows mapped Indonesian error when placeOrder rejects with INVALID_MENU_ITEMS", async () => {
     vi.mocked(placeOrder).mockRejectedValue(new Error("INVALID_MENU_ITEMS"));
 

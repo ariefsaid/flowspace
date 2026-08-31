@@ -24,6 +24,10 @@ import {
 } from "@/lib/db/schema";
 import { recordTransaction } from "@/lib/db/transactions";
 import { recomputeCreditCache, int4ClampedAdd, lockUserRowForCreditWrite } from "@/lib/db/time-credit-lots";
+import {
+  simulatePaymentOutcome,
+  type PaymentDecision,
+} from "@/lib/topup/mockPaymentGateway";
 
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -71,12 +75,17 @@ export function listPackages(orgId: string): Promise<TimeCreditPackage[]> {
  * (`app_users.timeCredits` = SUM of non-expired `remainingHours`, FR-853)
  * are all atomic in one db.transaction.
  *
+ * `simulatePayment` is a TEST-ONLY seam (defaults to always-approve, [SEC/MONEY]
+ * — see lib/topup/mockPaymentGateway): a forced decline throws PAYMENT_DECLINED
+ * BEFORE any ledger/lot write or balance change.
+ *
  * Returns the recomputed derived timeCredits balance.
  */
 export async function purchasePackage(input: {
   orgId: string;
   userId: string;
   packageId: string;
+  simulatePayment?: PaymentDecision;
 }): Promise<{ timeCredits: number }> {
   const { orgId, userId, packageId } = input;
 
@@ -108,6 +117,10 @@ export async function purchasePackage(input: {
     // in lib/db/credit-lock-order.int.test.ts).
     const user = await lockUserRowForCreditWrite(tx, orgId, userId);
     if (!user) throw new Error("USER_NOT_FOUND");
+
+    if (!simulatePaymentOutcome(input.simulatePayment)) {
+      throw new Error("PAYMENT_DECLINED");
+    }
 
     const txn = await recordTransaction(
       {

@@ -26,6 +26,7 @@ export async function signupAction(input: {
   name: string;
   email: string;
   password: string;
+  phone?: string;
 }): Promise<{ ok: true } | { error: string }> {
   const email = input.email.toLowerCase().trim();
 
@@ -85,6 +86,7 @@ export async function signupAction(input: {
       authUserId: data.user.id,
       email,
       name: input.name.trim(),
+      phone: input.phone?.trim().slice(0, 32) || null,
     });
   } catch (e) {
     await admin.auth.admin.deleteUser(data.user.id);

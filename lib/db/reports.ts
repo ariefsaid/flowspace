@@ -92,16 +92,24 @@ export async function getReportsData(
     gte(transactions.createdAt, since),
   );
 
+  // The date_trunc UNIT is inlined as a SQL literal (not a bind param) so the
+  // identical expression appears in select/group/order. Interpolating `trunc`
+  // as `${trunc}` makes Drizzle emit distinct bind params ($1 vs $6), which
+  // Postgres treats as different expressions → 42803 "must appear in GROUP BY".
+  // `trunc` is TRUNC_UNIT[period] (a validated enum → 'day'|'week'|'month'),
+  // never user input, so raw-inlining is injection-safe.
+  const bucket = sql`date_trunc(${sql.raw(`'${trunc}'`)}, ${transactions.createdAt})`;
+
   const [revenueTrend, revenueByType, bookingStats, totals] = await Promise.all([
     db
       .select({
-        bucket: sql<string>`to_char(date_trunc(${trunc}, ${transactions.createdAt}), ${fmt})`,
+        bucket: sql<string>`to_char(${bucket}, ${fmt})`,
         amountRupiah: sql<number>`coalesce(sum(${transactions.amountRupiah}), 0)::int`,
       })
       .from(transactions)
       .where(revenueFilter)
-      .groupBy(sql`date_trunc(${trunc}, ${transactions.createdAt})`)
-      .orderBy(sql`date_trunc(${trunc}, ${transactions.createdAt})`),
+      .groupBy(bucket)
+      .orderBy(bucket),
 
     db
       .select({

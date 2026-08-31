@@ -14,8 +14,6 @@ import { signupAction } from "./actions";
 export default function SignupPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  // `phone` is collected for UI parity with the original but intentionally NOT
-  // persisted: there is no phone column in the current AppUser schema scope.
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -34,7 +32,7 @@ export default function SignupPage() {
 
     setPending(true);
     try {
-      const res = await signupAction({ name, email, password });
+      const res = await signupAction({ name, email, password, phone });
 
       if ("error" in res) {
         setError(res.error); // AC-005: duplicate email, short password, etc.

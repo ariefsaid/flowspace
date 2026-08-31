@@ -36,6 +36,7 @@ const profile = {
   authUserId: "auth-uuid",
   email: "u@x.test",
   name: "User",
+  phone: null,
   role: "MEMBER" as const,
   membershipTier: "REGULAR" as const,
   timeCredits: 0,

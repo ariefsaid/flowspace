@@ -54,6 +54,8 @@ export const appUsers = pgTable(
     authUserId: uuid("auth_user_id"),
     email: text("email").notNull(),
     name: text("name").notNull(),
+    // Optional signup contact number (ORIG api/signup/route.ts). Nullable.
+    phone: text("phone"),
     role: roleEnum("role").notNull().default("MEMBER"),
     membershipTier: membershipTierEnum("membership_tier")
       .notNull()

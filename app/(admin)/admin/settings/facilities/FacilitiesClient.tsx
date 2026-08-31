@@ -71,7 +71,7 @@ export function FacilitiesClient({ facilities: initialFacilities }: { facilities
         <div className="mt-2 flex items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-              <Building2 className="h-7 w-7 text-teal-600" aria-hidden="true" />
+              <Building2 className="h-8 w-8 text-teal-600" aria-hidden="true" />
               Kelola Fasilitas
             </h1>
             <p className="mt-1 text-sm text-gray-500">

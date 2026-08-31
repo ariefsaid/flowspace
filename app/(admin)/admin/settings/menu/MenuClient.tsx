@@ -183,7 +183,7 @@ export function MenuClient({ items: initialItems }: { items: CafeMenuItem[] }) {
               <span className="sr-only">Filter kategori</span>
               <Select
                 aria-label="Filter kategori"
-                className="w-[160px]"
+                className="w-40"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value as "ALL" | CafeCategory)}
               >

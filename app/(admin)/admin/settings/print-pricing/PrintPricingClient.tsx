@@ -190,7 +190,7 @@ export function PrintPricingClient({ cells: initialCells }: { cells: MatrixCell[
           Settings
         </Link>
         <h1 className="mt-2 text-3xl font-bold text-gray-900 flex items-center gap-3">
-          <Printer className="h-7 w-7 text-teal-600" aria-hidden="true" />
+          <Printer className="h-8 w-8 text-teal-600" aria-hidden="true" />
           Harga Print
         </h1>
         <p className="mt-1 text-sm text-gray-500">

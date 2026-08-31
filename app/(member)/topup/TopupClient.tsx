@@ -77,6 +77,7 @@ function toErrorMessage(err: unknown): string {
     INVALID_PAGES: "Jumlah halaman tidak valid.",
     USER_NOT_FOUND: "Sesi berakhir. Silakan masuk kembali.",
     UNAUTHENTICATED: "Sesi berakhir. Silakan masuk kembali.",
+    PAYMENT_DECLINED: "Pembayaran ditolak. Coba lagi atau gunakan metode lain.",
   };
   return map[sentinel] ?? "Pembelian gagal diproses. Coba lagi.";
 }

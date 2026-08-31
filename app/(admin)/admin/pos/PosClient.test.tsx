@@ -93,6 +93,8 @@ describe("PosClient (AC-101)", () => {
       email: "gold@x.test",
       hasActiveBooking: true,
       cafeDiscountPct: 10,
+      activeBookingFacility: "Walk-in Coworking",
+      activeBookingEndAt: null,
     });
 
     render(<PosClient menu={sampleMenu} />);
@@ -142,6 +144,8 @@ describe("PosClient (AC-101)", () => {
       email: "gold@x.test",
       hasActiveBooking: true,
       cafeDiscountPct: 10,
+      activeBookingFacility: "Walk-in Coworking",
+      activeBookingEndAt: null,
     });
 
     render(<PosClient menu={sampleMenu} />);
@@ -175,6 +179,84 @@ describe("PosClient (AC-101)", () => {
 
     resolveLookup(null);
     await screen.findByText(/no member found/i);
+  });
+
+  it("I-047: shows the active-booking facility and end time in the member-found panel (ORIG pos:224-227)", async () => {
+    vi.mocked(lookupPosMemberAction).mockResolvedValue({
+      id: "member-1",
+      name: "Gold Member",
+      email: "gold@x.test",
+      hasActiveBooking: true,
+      cafeDiscountPct: 10,
+      activeBookingFacility: "Meeting Room A",
+      activeBookingEndAt: "2026-06-15T09:05:00.000Z",
+    });
+
+    render(<PosClient menu={sampleMenu} />);
+    fireEvent.change(screen.getByPlaceholderText(/enter email/i), {
+      target: { value: "gold@x.test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /search customer/i }));
+
+    expect(await screen.findByText(/sesi aktif di meeting room a/i)).toBeInTheDocument();
+    expect(screen.getByText(/sampai/i)).toBeInTheDocument();
+  });
+
+  it("I-047: shows just the facility (no 'sampai') when activeBookingEndAt is null (open-ended)", async () => {
+    vi.mocked(lookupPosMemberAction).mockResolvedValue({
+      id: "member-1",
+      name: "Gold Member",
+      email: "gold@x.test",
+      hasActiveBooking: true,
+      cafeDiscountPct: 10,
+      activeBookingFacility: "Walk-in Coworking",
+      activeBookingEndAt: null,
+    });
+
+    render(<PosClient menu={sampleMenu} />);
+    fireEvent.change(screen.getByPlaceholderText(/enter email/i), {
+      target: { value: "gold@x.test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /search customer/i }));
+
+    const facilityLine = await screen.findByText(/sesi aktif di walk-in coworking/i);
+    expect(facilityLine).toBeInTheDocument();
+    expect(facilityLine.textContent).not.toMatch(/sampai/i);
+  });
+
+  it("I-047: clear-cart control resets the cart and the member lookup in one click (ORIG pos:94-99)", async () => {
+    vi.mocked(lookupPosMemberAction).mockResolvedValue({
+      id: "member-1",
+      name: "Gold Member",
+      email: "gold@x.test",
+      hasActiveBooking: true,
+      cafeDiscountPct: 10,
+      activeBookingFacility: "Meeting Room A",
+      activeBookingEndAt: null,
+    });
+
+    render(<PosClient menu={sampleMenu} />);
+
+    // Look up a member and add an item to the cart.
+    fireEvent.change(screen.getByPlaceholderText(/enter email/i), {
+      target: { value: "gold@x.test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /search customer/i }));
+    await screen.findByText("Gold Member");
+    fireEvent.click(screen.getByRole("button", { name: /add croissant/i }));
+    expect(screen.queryByText(/cart is empty/i)).not.toBeInTheDocument();
+
+    // Clear cart — resets cart + member lookup.
+    fireEvent.click(screen.getByRole("button", { name: /clear cart/i }));
+
+    expect(screen.getByText(/cart is empty/i)).toBeInTheDocument();
+    expect(screen.queryByText("Gold Member")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/enter email/i)).toHaveValue("");
+  });
+
+  it("clear-cart control is not shown while the cart is empty", () => {
+    render(<PosClient menu={sampleMenu} />);
+    expect(screen.queryByRole("button", { name: /clear cart/i })).not.toBeInTheDocument();
   });
 
   it("no member found shows a not-found message", async () => {

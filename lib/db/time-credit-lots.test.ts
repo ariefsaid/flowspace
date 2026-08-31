@@ -5,7 +5,7 @@
  * decision to this pure function so it can be proven without a DB.
  */
 import { describe, expect, it } from "vitest";
-import { selectLotsToSpend, type SpendableLot } from "@/lib/db/time-credit-lots";
+import { selectLotsToSpend, assertValidCreditDelta, type SpendableLot } from "@/lib/db/time-credit-lots";
 
 const NOW = new Date("2026-01-01T00:00:00.000Z");
 
@@ -53,5 +53,39 @@ describe("selectLotsToSpend", () => {
   it("rejects a non-positive spend request", () => {
     expect(() => selectLotsToSpend([lot("a", 10, 30)], 0, NOW)).toThrow(/INVALID_HOURS/);
     expect(() => selectLotsToSpend([lot("a", 10, 30)], -1, NOW)).toThrow(/INVALID_HOURS/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assertValidCreditDelta [SEC][I-047 fix-3] — the shared int4/business-cap
+// guard for every manual credit/print-balance delta (users.ts's adjustCredits
+// AND this module's own adjustTimeCreditsForAdmin, defense-in-depth).
+// ---------------------------------------------------------------------------
+describe("assertValidCreditDelta", () => {
+  it("accepts an in-range positive/negative integer, and zero", () => {
+    expect(() => assertValidCreditDelta(5)).not.toThrow();
+    expect(() => assertValidCreditDelta(-5)).not.toThrow();
+    expect(() => assertValidCreditDelta(0)).not.toThrow();
+  });
+
+  it("[SEC] rejects a non-integer delta", () => {
+    expect(() => assertValidCreditDelta(1.5)).toThrow(/INVALID_DELTA/);
+  });
+
+  it("[SEC] rejects a non-finite delta (NaN, Infinity) — never silently treated as zero/no-op", () => {
+    expect(() => assertValidCreditDelta(NaN)).toThrow(/INVALID_DELTA/);
+    expect(() => assertValidCreditDelta(Infinity)).toThrow(/INVALID_DELTA/);
+    expect(() => assertValidCreditDelta(-Infinity)).toThrow(/INVALID_DELTA/);
+  });
+
+  it("[SEC][MONEY] rejects a delta beyond the business cap, well before it could ever approach the Postgres int4 bound (2,147,483,647)", () => {
+    expect(() => assertValidCreditDelta(1_000_001)).toThrow(/INVALID_DELTA/);
+    expect(() => assertValidCreditDelta(-1_000_001)).toThrow(/INVALID_DELTA/);
+    expect(() => assertValidCreditDelta(2_147_483_647)).toThrow(/INVALID_DELTA/);
+  });
+
+  it("accepts exactly the cap boundary", () => {
+    expect(() => assertValidCreditDelta(1_000_000)).not.toThrow();
+    expect(() => assertValidCreditDelta(-1_000_000)).not.toThrow();
   });
 });

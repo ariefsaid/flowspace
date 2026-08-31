@@ -418,6 +418,11 @@ describe("lib/db/print", () => {
       expect(revenue).toBeGreaterThanOrEqual(12000);
       expect(rows.some((j) => j.totalRupiah === 2500)).toBe(false);
     });
+
+    it("[SEC][I-047 minor] honors a smaller caller-supplied limit — the normalized LIMIT is genuinely wired to the SQL query (the decision math itself is unit-tested — lib/db/print.test.ts)", async () => {
+      const rows = await listPrintJobsForAdmin(orgAId, {}, 1);
+      expect(rows).toHaveLength(1);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -450,19 +455,21 @@ describe("lib/db/print", () => {
         // c1: COMPLETED 12000 (10 pages) + PENDING 2000 (4 pages)
         { orgId: orgCId, userId: c1, fileName: "c-done.pdf", pages: 10, copies: 1, colorMode: "COLOR", paperSize: "A4", pricePerPageRupiah: 1500, discountRupiah: 3000, totalRupiah: 12000, status: "COMPLETED" },
         { orgId: orgCId, userId: c1, fileName: "c-pending.pdf", pages: 4, copies: 1, colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, discountRupiah: 0, totalRupiah: 2000, status: "PENDING" },
-        // c2: COMPLETED 3000 (6 pages)
+        // c2: COMPLETED 3000 (6 pages) + PROCESSING 1000 (2 pages)
         { orgId: orgCId, userId: c2, fileName: "c-done2.pdf", pages: 6, copies: 1, colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, discountRupiah: 0, totalRupiah: 3000, status: "COMPLETED" },
+        { orgId: orgCId, userId: c2, fileName: "c-processing.pdf", pages: 2, copies: 1, colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, discountRupiah: 0, totalRupiah: 1000, status: "PROCESSING" },
       ]);
     });
 
     it("AC-301: exact totals — jobs/pages/distinct-users/COMPLETED-revenue (org-scoped)", async () => {
       const s = await getPrintReportSummary(orgCId);
       expect(s).toEqual({
-        totalJobs: 3,
-        totalPages: 20, // 10 + 4 + 6
+        totalJobs: 4,
+        totalPages: 22, // 10 + 4 + 6 + 2
         uniqueUsers: 2, // c1, c2 (distinct userId)
-        totalRevenue: 15000, // 12000 + 3000 COMPLETED; PENDING 2000 excluded
+        totalRevenue: 15000, // 12000 + 3000 COMPLETED; PENDING/PROCESSING excluded
         completedCount: 2,
+        pendingCount: 2, // I-047: 1 PENDING (c1) + 1 PROCESSING (c2)
       });
     });
 
@@ -478,7 +485,80 @@ describe("lib/db/print", () => {
         uniqueUsers: 0,
         totalRevenue: 0,
         completedCount: 0,
+        pendingCount: 0,
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // listPrintJobsForAdmin — filters (I-047): search / status / date range
+  // -------------------------------------------------------------------------
+  describe("listPrintJobsForAdmin — filters (I-047)", () => {
+    let filterOrgId: string;
+    let filterUserAId: string;
+    let filterUserBId: string;
+    const oldDate = new Date("2026-01-05T00:00:00Z");
+    const newDate = new Date("2026-06-15T00:00:00Z");
+
+    beforeAll(async () => {
+      const [org] = await testDb
+        .insert(organizations)
+        .values({ name: "Print Org Filter", slug: "print-org-filter-test" })
+        .returning();
+      filterOrgId = org.id;
+      const [userA] = await testDb
+        .insert(appUsers)
+        .values({ orgId: filterOrgId, email: "filter-alpha@x.test", name: "Alpha Filterman", role: "MEMBER" })
+        .returning();
+      const [userB] = await testDb
+        .insert(appUsers)
+        .values({ orgId: filterOrgId, email: "filter-beta@x.test", name: "Beta Person", role: "MEMBER" })
+        .returning();
+      filterUserAId = userA.id;
+      filterUserBId = userB.id;
+
+      await testDb.insert(printJobs).values([
+        { orgId: filterOrgId, userId: filterUserAId, fileName: "invoice-2026.pdf", pages: 1, copies: 1, colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, totalRupiah: 500, status: "COMPLETED", createdAt: oldDate, updatedAt: oldDate },
+        { orgId: filterOrgId, userId: filterUserAId, fileName: "resume.docx.pdf", pages: 2, copies: 1, colorMode: "BW", paperSize: "A4", pricePerPageRupiah: 500, totalRupiah: 1000, status: "PENDING", createdAt: newDate, updatedAt: newDate },
+        { orgId: filterOrgId, userId: filterUserBId, fileName: "report.pdf", pages: 3, copies: 1, colorMode: "COLOR", paperSize: "A4", pricePerPageRupiah: 2000, totalRupiah: 6000, status: "COMPLETED", createdAt: newDate, updatedAt: newDate },
+      ]);
+    });
+
+    it("[AC-047-P1] search matches the file name (case-insensitive substring)", async () => {
+      const rows = await listPrintJobsForAdmin(filterOrgId, { search: "invoice" });
+      expect(rows.map((r) => r.fileName)).toEqual(["invoice-2026.pdf"]);
+    });
+
+    it("[AC-047-P1] search also matches the owning user's name or email", async () => {
+      const rows = await listPrintJobsForAdmin(filterOrgId, { search: "Beta" });
+      expect(rows.map((r) => r.fileName)).toEqual(["report.pdf"]);
+
+      const byEmail = await listPrintJobsForAdmin(filterOrgId, { search: "filter-alpha" });
+      expect(byEmail.map((r) => r.fileName).sort()).toEqual(["invoice-2026.pdf", "resume.docx.pdf"]);
+    });
+
+    it("[AC-047-P2] status filter narrows to the exact job status", async () => {
+      const rows = await listPrintJobsForAdmin(filterOrgId, { status: "PENDING" });
+      expect(rows.map((r) => r.fileName)).toEqual(["resume.docx.pdf"]);
+    });
+
+    it("[AC-047-P3] date-range filter narrows by createdAt (bounded, parameterized)", async () => {
+      const rows = await listPrintJobsForAdmin(filterOrgId, {
+        dateFrom: new Date("2026-01-01T00:00:00Z"),
+        dateTo: new Date("2026-01-31T23:59:59Z"),
+      });
+      expect(rows.map((r) => r.fileName)).toEqual(["invoice-2026.pdf"]);
+    });
+
+    it("[AC-047-P4] filters combine (AND) and stay org-scoped", async () => {
+      const rows = await listPrintJobsForAdmin(filterOrgId, { status: "COMPLETED", search: "report" });
+      expect(rows.map((r) => r.fileName)).toEqual(["report.pdf"]);
+      expect(rows.every((r) => r.orgId === filterOrgId)).toBe(true);
+    });
+
+    it("no filters → returns every org row (existing behavior preserved)", async () => {
+      const rows = await listPrintJobsForAdmin(filterOrgId);
+      expect(rows).toHaveLength(3);
     });
   });
 });

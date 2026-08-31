@@ -5,15 +5,17 @@
  * leaf's "Selesaikan Sesi & Bayar" CTA opens a cash/QRIS/credits chooser that
  * calls checkoutBookingAction (ADMIN-only SoD) with the admin's chosen
  * payment method, which recomputes billing and flips the booking to
- * COMPLETED (OBS-820).
+ * COMPLETED (OBS-820). The "Tambah Booking" dialog needs the org's member +
+ * facility directories to populate its pickers (I-047) — both reuse
+ * already-existing, already-org-scoped repo reads (no new query added).
  *
  * ponytail: an active walk-in has endAt null — we fall back to startAt so the
  * table's time formatter renders without crashing (active rows render as cards,
  * not table rows, so this only guards the rare ACTIVE-in-table edge).
  */
 import { requireSession } from "@/lib/auth/session";
-import { listBookings } from "@/lib/db/bookings";
-import { findProfilesByIds } from "@/lib/db/users";
+import { listBookings, listFacilities } from "@/lib/db/bookings";
+import { findProfilesByIds, listByOrg } from "@/lib/db/users";
 import { BookingsClient, type AdminBookingView } from "./BookingsClient";
 
 export default async function AdminBookingsPage() {
@@ -21,6 +23,18 @@ export default async function AdminBookingsPage() {
   const orgId = user.orgId;
 
   const rows = await listBookings(orgId);
+  const [allMembers, facilities] = await Promise.all([listByOrg(orgId), listFacilities(orgId)]);
+
+  const members = allMembers
+    .filter((m) => m.role === "MEMBER")
+    .map((m) => ({ id: m.id, name: m.name, email: m.email }));
+
+  const facilityOptions = facilities.map((f) => ({
+    id: f.id,
+    name: f.name,
+    type: f.type,
+    ratePerHourRupiah: f.ratePerHourRupiah,
+  }));
 
   // Attach member profiles in one org-scoped read (cross-org ids never match).
   const memberIds = [...new Set(rows.map((b) => b.userId))];
@@ -50,5 +64,5 @@ export default async function AdminBookingsPage() {
     };
   });
 
-  return <BookingsClient bookings={bookings} />;
+  return <BookingsClient bookings={bookings} members={members} facilities={facilityOptions} />;
 }

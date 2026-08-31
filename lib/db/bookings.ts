@@ -45,7 +45,7 @@ import {
   settleCheckoutTransactions,
   pendingBookingHours,
 } from "@/lib/db/transactions";
-import { spendTimeCredits } from "@/lib/db/time-credit-lots";
+import { spendTimeCredits, lockUserRowForCreditWrite } from "@/lib/db/time-credit-lots";
 import { getTierDiscounts } from "@/lib/db/tier-config";
 import { WALKIN_MAX_HOURS, isWalkin, isScheduled } from "@/lib/booking/walkin";
 import { WALKIN_RATES } from "@/lib/booking/catalog";
@@ -520,15 +520,25 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
   if (walkin) {
     const rate = WALKIN_RATES[facilityType as "WALKIN_COWORKING" | "WALKIN_MEETING"];
     return db.transaction(async (tx) => {
-      // [SEC] Same identity/tenancy guard as the scheduled branch below: a
-      // walk-in has no facility row to anchor org membership through (its
-      // facility_id stays null), so userId is the ONLY org signal — resolve
-      // it INSIDE the tx and require it actually belongs to orgId before any
-      // write. A cross-org userId (or one that doesn't exist) is rejected.
+      // [SEC][I-047 fix-1] Same identity/tenancy guard as the scheduled
+      // branch below: a walk-in has no facility row to anchor org membership
+      // through (its facility_id stays null), so userId is the ONLY org
+      // signal — resolve it INSIDE the tx and require it actually belongs to
+      // orgId AND is not archived (an archived member's access is meant to
+      // be revoked entirely, not just hidden from the directory — matches
+      // `findByAuthUserId`'s session-resolution guard) before any write.
+      // [SEC][MONEY][I-047 fix round 2] Canonical FIRST lock: FOR NO KEY
+      // UPDATE on the member's app_users row, taken before the booking/ledger
+      // INSERTs below (each of which takes an implicit FK KEY SHARE on this
+      // same row) — the same app_users-first order as every other
+      // credit/FK-inserting path (see lockUserRowForCreditWrite,
+      // time-credit-lots.ts). A cross-org or archived userId (or one that
+      // doesn't exist) is rejected before any write.
       const [user] = await tx
         .select({ id: appUsers.id })
         .from(appUsers)
-        .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))
+        .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
+        .for("no key update")
         .limit(1);
       if (!user) throw new Error("USER_NOT_FOUND");
 
@@ -649,41 +659,86 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
     await acquireOrgDayLock(tx, orgId, calendarDay);
     await acquireFacilityLock(tx, orgId, facility.id);
 
-    // [SEC] Identity/tier seam: resolve the user row + its CURRENT tier
-    // INSIDE the tx from the DB — never the caller-supplied `tier` — and
-    // require the user actually belongs to `orgId`. A cross-org userId
-    // (or one that doesn't exist) is rejected before any write.
+    // [SEC][MONEY][I-047 fix round 2] Canonical FIRST row lock: resolve the
+    // user row + its CURRENT tier INSIDE the tx from the DB — never the
+    // caller-supplied `tier` — and require the user actually belongs to
+    // `orgId` and is not archived, holding a FOR NO KEY UPDATE row lock on
+    // this member's app_users row from here on. Round 1 of this fix
+    // deliberately DEFERRED this lock to after the optional credit spend
+    // ("lots before app_users") — but the cross-family re-verify showed the
+    // booking INSERT below takes an implicit, weak `FOR KEY SHARE` on this
+    // same app_users row at insert time, BEFORE any explicit lock; two
+    // creates for the same member could each hold KEY SHARE and then
+    // mutually deadlock upgrading to a strong lock inside
+    // recomputeCreditCache (40P01, proven by the barrier tests in
+    // lib/db/credit-lock-order.int.test.ts). The canonical order is now
+    // app_users(strong) FIRST — before this tx's FK inserts and before any
+    // lot lock — subsuming the implicit KEY SHARE. The strong lock also
+    // doubles as the archived-user TOCTOU close (fix-1, see the removed
+    // trailing re-check further down): a concurrent archiveUser either
+    // committed BEFORE this lock (we see archivedAt and reject) or blocks on
+    // this row until this tx commits — it can never land inside our
+    // transaction anymore. A cross-org or nonexistent userId is rejected
+    // before any write. (The advisory locks above are a separate lock space,
+    // taken in the same day→facility order by create/extend/checkout alike;
+    // the facility ROW lock below is taken after app_users in every path
+    // that co-locks both — only this one — so no cross-object pair
+    // inverts.)
     const [user] = await tx
       .select({ membershipTier: appUsers.membershipTier })
       .from(appUsers)
-      .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))
+      .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
+      .for("no key update")
       .limit(1);
     if (!user) throw new Error("USER_NOT_FOUND");
+
+    // [SEC][MONEY][I-047 fix-2] Facility TOCTOU close: `facility` above was
+    // read BEFORE this transaction (and before its advisory lock) — a
+    // concurrent admin archive/availability-toggle/type-change/rate-change
+    // could have committed in the window between that read and this lock.
+    // Now that this tx holds the facility's own advisory lock, RE-READ the
+    // row `FOR UPDATE` and use ONLY this fresh row for every downstream
+    // decision (type/rate/name/availability) — never the pre-tx snapshot.
+    // `FOR UPDATE` also serializes against a concurrent
+    // updateFacility/archiveFacility write (facilities-admin.ts) targeting
+    // the SAME row: that single-statement write simply blocks until this tx
+    // commits/rolls back, so it can never land strictly between this read
+    // and this transaction's own commit either.
+    const [freshFacility] = await tx
+      .select()
+      .from(facilities)
+      .where(and(eq(facilities.id, facility.id), eq(facilities.orgId, orgId)))
+      .for("update")
+      .limit(1);
+    if (!freshFacility || !freshFacility.available || freshFacility.archivedAt) {
+      throw new Error("FACILITY_UNAVAILABLE");
+    }
+    if (freshFacility.type !== facilityType) throw new Error("FACILITY_TYPE_MISMATCH");
 
     if (isFullRoom) {
       const { dayStart, dayEnd } = dayBounds(calendarDay);
       const dayBlocked = await individualBookingExistsOnDay(tx, orgId, dayStart, dayEnd);
       if (dayBlocked) throw new Error("FACILITY_UNAVAILABLE");
     }
-    const occupied = await facilityHasActiveOverlap(tx, orgId, facility.id, startAt, endAt);
+    const occupied = await facilityHasActiveOverlap(tx, orgId, freshFacility.id, startAt, endAt);
     if (occupied) throw new Error("FACILITY_UNAVAILABLE");
 
     const discounts = await getTierDiscounts(orgId, user.membershipTier, tx);
     const discountPct = resolveDiscountPct(facilityType, discounts);
-    const price = computeBookingPrice({ hours: durationHours, ratePerHourRupiah: facility.ratePerHourRupiah, discountPct });
+    const price = computeBookingPrice({ hours: durationHours, ratePerHourRupiah: freshFacility.ratePerHourRupiah, discountPct });
 
     const [booking] = await tx
       .insert(bookings)
       .values({
         orgId,
         userId,
-        facilityType: facility.type, // [SEC] derived from the resolved row, never the client request
-        facilityId: facility.id,
-        facilityName: facility.name,
+        facilityType: freshFacility.type, // [SEC] derived from the freshly re-read row, never the client request or the pre-tx snapshot
+        facilityId: freshFacility.id,
+        facilityName: freshFacility.name,
         startAt,
         endAt,
         durationHours,
-        ratePerHourRupiah: facility.ratePerHourRupiah,
+        ratePerHourRupiah: freshFacility.ratePerHourRupiah,
         amountRupiah: price.amountRupiah,
         baseAmountRupiah: price.baseAmountRupiah,
         discountRupiah: price.discountRupiah,
@@ -697,16 +752,29 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
 
     if (paymentMethod === "time_credits") {
       // Throws INSUFFICIENT_CREDITS before any debit when short — the whole
-      // tx (including the insert above) rolls back (AC-823).
+      // tx (including the insert above) rolls back (AC-823). Its first
+      // statement re-locks the member's app_users row (a no-op — this tx
+      // already holds it, taken at the top of the transaction).
       await spendTimeCredits({ orgId, userId, hours: durationHours, tx });
     }
+
+    // [SEC][I-047 fix-1 → round 2] The dedicated trailing archived-user
+    // re-check is GONE — subsumed, not weakened: the FOR NO KEY UPDATE lock
+    // taken on this member's app_users row at the TOP of this transaction
+    // (before the booking INSERT and the credit spend) already spans the
+    // whole tx, so a concurrent archiveUser can either commit before this
+    // tx's lock (the locked resolve sees archivedAt and rejects) or block on
+    // this row until this tx commits — no interleave can let an archived
+    // user's booking commit, and the round-1 placement (AFTER the spend) is
+    // precisely what let the implicit FK KEY SHARE → strong-lock upgrade
+    // deadlock of finding 4 materialize.
 
     await recordTransaction(
       {
         orgId,
         userId,
         type: "BOOKING",
-        description: `Booking ${facility.name}`,
+        description: `Booking ${freshFacility.name}`,
         amountRupiah: price.amountRupiah,
         discountRupiah: price.discountRupiah,
         status: txnStatus,
@@ -796,6 +864,73 @@ export async function approvePayment(orgId: string, id: string): Promise<Booking
     }
 
     await updateBookingTransaction(orgId, id, { status: "COMPLETED" }, tx);
+    return updated;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// activateConfirmedBooking [SEC][SoD] — admin "Aktifkan Sekarang" (I-047)
+// ---------------------------------------------------------------------------
+
+/** The payment statuses `runStatusSweep` itself requires before auto-activating a CONFIRMED row — reused here so the manual fallback can never activate a row the sweep itself would refuse. */
+const ACTIVATABLE_PAYMENT_STATUSES: BookingPaymentStatus[] = ["PAID_ONLINE", "PAID_CASHIER"];
+
+/**
+ * Admin manual activation of a paid, scheduled CONFIRMED booking — the
+ * fallback for when `runStatusSweep` (the cron sweep that normally flips
+ * CONFIRMED→ACTIVE at its scheduled start) misfires or hasn't run yet.
+ * Compare-and-set on `status='CONFIRMED'` AND `payment_status` ∈
+ * {PAID_ONLINE, PAID_CASHIER} — matching `runStatusSweep`'s own invariant
+ * [SEC][MONEY]: an unpaid WAITING_CASHIER row is CONFIRMED-shaped only in a
+ * state the normal create/approvePayment flow never actually produces, but
+ * this function must not trust `status` alone to imply payment — a
+ * concurrent cancel/sweep/checkout is also rejected, not silently
+ * overwritten. Org-scoped: a cross-org id resolves to NOT_FOUND before any
+ * write. `startAt` is only ever set to now if it was somehow still unset;
+ * the normal case (startAt already holds the member's actual scheduled
+ * start, chosen at create) is left untouched — activating early/late never
+ * rewrites the booked start time.
+ */
+export async function activateConfirmedBooking(orgId: string, id: string): Promise<Booking> {
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({ startAt: bookings.startAt })
+      .from(bookings)
+      .where(
+        and(
+          eq(bookings.id, id),
+          eq(bookings.orgId, orgId),
+          eq(bookings.status, "CONFIRMED"),
+          eq(bookings.bookingMode, "SCHEDULED"),
+          inArray(bookings.paymentStatus, ACTIVATABLE_PAYMENT_STATUSES),
+        ),
+      )
+      .for("update")
+      .limit(1);
+
+    if (!current) {
+      const [existing] = await tx
+        .select({ id: bookings.id })
+        .from(bookings)
+        .where(and(eq(bookings.id, id), eq(bookings.orgId, orgId)))
+        .limit(1);
+      throw new Error(existing ? "INVALID_TRANSITION" : "NOT_FOUND");
+    }
+
+    const now = new Date();
+    const [updated] = await tx
+      .update(bookings)
+      .set({ status: "ACTIVE", startAt: current.startAt ?? now, updatedAt: now })
+      .where(
+        and(
+          eq(bookings.id, id),
+          eq(bookings.orgId, orgId),
+          eq(bookings.status, "CONFIRMED"),
+          inArray(bookings.paymentStatus, ACTIVATABLE_PAYMENT_STATUSES),
+        ),
+      )
+      .returning();
+    if (!updated) throw new Error("INVALID_TRANSITION");
     return updated;
   });
 }
@@ -1073,6 +1208,21 @@ export async function extendBooking(orgId: string, id: string, extraHours: numbe
       .where(and(eq(bookings.id, id), eq(bookings.orgId, orgId), eq(bookings.status, "ACTIVE")))
       .returning();
     if (!updated) throw new Error("INVALID_TRANSITION");
+
+    // [SEC][MONEY][I-047 fix round 3] Canonical first app_users LOCK, before
+    // the ledger FK insert below (transactions.user_id): the insert's
+    // implicit FOR KEY SHARE subsumes into this FOR NO KEY UPDATE instead of
+    // racing past it. Today this path only writes a PENDING ledger row, but
+    // the moment a credit-spend lands here, an insert-then-strong-lock order
+    // would reintroduce the finding-4 upgrade deadlock (barrier-proven in
+    // lib/db/credit-lock-order.int.test.ts). Position matters: the booking
+    // row (B) was locked by the UPDATE above — B before app_users, the same
+    // cross-object order as checkoutBooking, so no pair inverts. The
+    // membershipTier read above stays an unlocked read: it only feeds
+    // pricing and takes no row lock, so it cannot join a lock cycle. A
+    // nonexistent/cross-org fresh.userId cannot reach here (the booking row
+    // itself is org-scoped and FK-owned).
+    await lockUserRowForCreditWrite(tx, orgId, fresh.userId);
 
     await recordTransaction(
       {

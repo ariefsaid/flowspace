@@ -37,6 +37,19 @@ describe("print topup package repository", () => {
     expect(rows[0]).toMatchObject({ type: "PRINT_TOPUP", amountRupiah: 10000, status: "COMPLETED", orgId: orgA });
   });
 
+  it("[SEC][MONEY][I-047 fix-3] clamps the print-balance increment at the int4 ceiling instead of overflowing", async () => {
+    const [big] = await db
+      .insert(appUsers)
+      .values({ orgId: orgA, email: "int4-member@x.test", name: "Int4", role: "MEMBER", printBalance: 2_147_483_640 })
+      .returning();
+
+    // 2_147_483_640 + 10 pages > INT4_MAX: a raw `print_balance + pages`
+    // addition overflows in Postgres. The RESULT must clamp instead.
+    await purchasePrintTopup({ orgId: orgA, userId: big.id, packageId: "a-10" });
+    const [after] = await db.select({ balance: appUsers.printBalance }).from(appUsers).where(eq(appUsers.id, big.id));
+    expect(after.balance).toBe(2_147_483_647);
+  });
+
   it("AC-630: rejects archived, unknown, and cross-org packages before writes", async () => {
     for (const packageId of ["a-archived", "b-10", "unknown"]) {
       await expect(purchasePrintTopup({ orgId: orgA, userId: userA, packageId })).rejects.toThrow(/UNKNOWN_PACKAGE/);

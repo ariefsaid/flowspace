@@ -7,8 +7,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { eq } from "drizzle-orm";
 import * as schema from "@/lib/db/schema";
-import { appUsers, organizations } from "@/lib/db/schema";
+import { appUsers, organizations, timeCreditLots } from "@/lib/db/schema";
 
 const TEST_URL =
   process.env.TEST_DATABASE_URL ??
@@ -76,9 +77,13 @@ import { createClient } from "@supabase/supabase-js";
 import {
   findByEmail,
   findById,
+  findByAuthUserId,
   listByOrg,
   createMember,
   findMemberByEmail,
+  updateUser,
+  archiveUser,
+  adjustCredits,
 } from "@/lib/db/users";
 
 const SUPABASE_URL =
@@ -89,6 +94,39 @@ const SERVICE_ROLE_KEY =
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
+
+// ---------------------------------------------------------------------------
+// Deterministic ROW-lock barrier (same discipline as lib/db/bookings.int.
+// test.ts): holds the target row via a real `FOR UPDATE` lock FIRST, starts
+// the op, polls `pg_locks` until it is genuinely BLOCKED on that lock, then
+// mutates the row (on the SAME holder connection — never a second pool
+// connection, which would just deadlock the test against its own hold)
+// before releasing — proving real overlap, not trusting timing.
+// ---------------------------------------------------------------------------
+async function runWithRowLockBarrier<T>(
+  holderSql: string,
+  op: () => Promise<T>,
+  onBlocked: (holder: postgres.TransactionSql) => Promise<void>,
+): Promise<T> {
+  let opPromise!: Promise<T>;
+  await testSql.begin(async (holder) => {
+    await holder.unsafe(holderSql);
+    opPromise = op();
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      const rows = await holder.unsafe<{ n: number }[]>(
+        `select count(*)::int as n from pg_locks where locktype IN ('transactionid', 'tuple') and not granted`,
+      );
+      if (Number(rows[0]?.n ?? 0) >= 1) break;
+      if (Date.now() > deadline) throw new Error("timed out waiting for a row-lock waiter");
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    await onBlocked(holder);
+    // Returning here ends the holder's transaction (COMMIT), releasing the
+    // row lock AND committing onBlocked's write atomically together.
+  });
+  return opPromise;
+}
 
 describe("lib/db/users", () => {
   describe("findByEmail", () => {
@@ -204,6 +242,231 @@ describe("lib/db/users", () => {
 
       // Clean up the auth user so the local stack stays reusable.
       await admin.auth.admin.deleteUser(authUserId);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // updateUser (I-047) — admin edits name/role/membershipTier, org-scoped
+  // ---------------------------------------------------------------------------
+  describe("updateUser", () => {
+    it("[AC-047-U1] updates name/role/membershipTier within the caller's org", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `update-${Date.now()}@x.test`, name: "Before", role: "MEMBER", membershipTier: "REGULAR" })
+        .returning();
+      const updated = await updateUser(orgAId, target.id, { name: "After", role: "BARISTA", membershipTier: "GOLD" });
+      expect(updated.name).toBe("After");
+      expect(updated.role).toBe("BARISTA");
+      expect(updated.membershipTier).toBe("GOLD");
+    });
+
+    it("[AC-047-U2] a partial update only touches the given fields", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `partial-${Date.now()}@x.test`, name: "Keep Name", role: "MEMBER", membershipTier: "PREMIUM" })
+        .returning();
+      const updated = await updateUser(orgAId, target.id, { membershipTier: "GOLD" });
+      expect(updated.name).toBe("Keep Name");
+      expect(updated.role).toBe("MEMBER");
+      expect(updated.membershipTier).toBe("GOLD");
+    });
+
+    it("[SEC][AC-047-U3] a cross-org id resolves to NOT_FOUND — no write", async () => {
+      await expect(updateUser(orgAId, bUserId, { name: "Hijack" })).rejects.toThrow(/NOT_FOUND/);
+      const [fresh] = await testDb.select().from(appUsers).where(eq(appUsers.id, bUserId));
+      expect(fresh.name).toBe("Bob");
+    });
+
+    it("[SEC] rejects an invalid role/tier value — never silently coerced", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `invalidrole-${Date.now()}@x.test`, name: "X", role: "MEMBER" })
+        .returning();
+      await expect(updateUser(orgAId, target.id, { role: "SUPERADMIN" as never })).rejects.toThrow(/INVALID_ROLE/);
+      await expect(updateUser(orgAId, target.id, { membershipTier: "PLATINUM" as never })).rejects.toThrow(/INVALID_TIER/);
+    });
+
+    it("rejects a blank name", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `blankname-${Date.now()}@x.test`, name: "X", role: "MEMBER" })
+        .returning();
+      await expect(updateUser(orgAId, target.id, { name: "   " })).rejects.toThrow(/INVALID_NAME/);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // archiveUser (I-047) — soft-archive, org-scoped, ADMIN refused
+  // ---------------------------------------------------------------------------
+  describe("archiveUser", () => {
+    it("[AC-047-U4] soft-archives a MEMBER — archivedAt set, excluded from findById/listByOrg", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `archive-${Date.now()}@x.test`, name: "ToArchive", role: "MEMBER" })
+        .returning();
+      const archived = await archiveUser(orgAId, target.id);
+      expect(archived.archivedAt).not.toBeNull();
+      expect(await findById(orgAId, target.id)).toBeNull();
+      const list = await listByOrg(orgAId);
+      expect(list.some((u) => u.id === target.id)).toBe(false);
+    });
+
+    it("[SEC][AC-047-U5] refuses to archive an ADMIN-role user (never hard-delete either)", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `adminuser-${Date.now()}@x.test`, name: "AdminUser", role: "ADMIN" })
+        .returning();
+      await expect(archiveUser(orgAId, target.id)).rejects.toThrow(/CANNOT_ARCHIVE_ADMIN/);
+      const [fresh] = await testDb.select().from(appUsers).where(eq(appUsers.id, target.id));
+      expect(fresh.archivedAt).toBeNull();
+    });
+
+    it("[SEC] a cross-org id resolves to NOT_FOUND — no write", async () => {
+      await expect(archiveUser(orgAId, bUserId)).rejects.toThrow(/NOT_FOUND/);
+      const [fresh] = await testDb.select().from(appUsers).where(eq(appUsers.id, bUserId));
+      expect(fresh.archivedAt).toBeNull();
+    });
+
+    it("[AC-047-U6][SEC] an archived user's session resolution (findByAuthUserId) returns null — archiving actually revokes access, not just hides them from the directory", async () => {
+      const email = `archived-auth-${Date.now()}@x.test`;
+      const { data, error } = await admin.auth.admin.createUser({
+        email,
+        password: "secret123",
+        email_confirm: true,
+      });
+      expect(error).toBeNull();
+      const authUserId = data.user!.id;
+      const created = await createMember({ orgId: orgAId, authUserId, email, name: "Archived Session" });
+      expect(await findByAuthUserId(authUserId)).not.toBeNull();
+
+      await archiveUser(orgAId, created.id);
+      expect(await findByAuthUserId(authUserId)).toBeNull();
+
+      await admin.auth.admin.deleteUser(authUserId);
+    });
+
+    it("[SEC][I-047 minor] a concurrent promotion to ADMIN that commits WHILE archiveUser is genuinely blocked on the row is respected — the archive is refused, never silently archives the now-ADMIN user (deterministic row-lock barrier)", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `archiverace-${Date.now()}@x.test`, name: "RaceTarget", role: "MEMBER" })
+        .returning();
+
+      // archiveUser's own target-check SELECT is unlocked and will see
+      // role='MEMBER' (still true at that instant) — the race is in its
+      // LATER UPDATE, which this barrier forces to block until AFTER the
+      // promotion below has committed.
+      await expect(
+        runWithRowLockBarrier(
+          `select * from app_users where id = '${target.id}' for update`,
+          () => archiveUser(orgAId, target.id),
+          async (holder) => {
+            await holder`update app_users set role = 'ADMIN' where id = ${target.id}`;
+          },
+        ),
+      ).rejects.toThrow(/CANNOT_ARCHIVE_ADMIN/);
+
+      const [fresh] = await testDb.select().from(appUsers).where(eq(appUsers.id, target.id));
+      expect(fresh.role).toBe("ADMIN");
+      expect(fresh.archivedAt).toBeNull(); // never archived, despite archiveUser's own pre-check having seen MEMBER
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // adjustCredits (I-047) [MONEY] — atomic, clamped ≥0, org-scoped
+  // ---------------------------------------------------------------------------
+  describe("adjustCredits", () => {
+    it("[AC-047-U7] increments printBalance by a positive delta", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `creditprint-${Date.now()}@x.test`, name: "PrintUser", role: "MEMBER", printBalance: 5 })
+        .returning();
+      const result = await adjustCredits(orgAId, target.id, { printBalanceDelta: 10 });
+      expect(result.printBalance).toBe(15);
+    });
+
+    it("[MONEY] a printBalance debit clamps at 0, never negative", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `creditclamp-${Date.now()}@x.test`, name: "ClampUser", role: "MEMBER", printBalance: 3 })
+        .returning();
+      const result = await adjustCredits(orgAId, target.id, { printBalanceDelta: -100 });
+      expect(result.printBalance).toBe(0);
+    });
+
+    it("[AC-047-U9][MONEY] a positive timeCreditsDelta grants a new lot (never writes app_users.timeCredits directly — it's a derived cache) and recomputes the cache", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `credittimegrant-${Date.now()}@x.test`, name: "GrantUser", role: "MEMBER", timeCredits: 0 })
+        .returning();
+      const result = await adjustCredits(orgAId, target.id, { timeCreditsDelta: 5 });
+      expect(result.timeCredits).toBe(5);
+      const lots = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.userId, target.id));
+      expect(lots).toHaveLength(1);
+      expect(lots[0].remainingHours).toBe(5);
+      expect(lots[0].totalHours).toBe(5);
+    });
+
+    it("[AC-047-U10][MONEY] a negative timeCreditsDelta debits existing lots FIFO and clamps at 0 (never throws INSUFFICIENT_CREDITS)", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `credittimedebit-${Date.now()}@x.test`, name: "DebitUser", role: "MEMBER" })
+        .returning();
+      await testDb.insert(timeCreditLots).values({
+        orgId: orgAId,
+        userId: target.id,
+        totalHours: 3,
+        remainingHours: 3,
+        expiresAt: new Date(Date.now() + 30 * 24 * 3_600_000),
+      });
+
+      const result = await adjustCredits(orgAId, target.id, { timeCreditsDelta: -100 });
+      expect(result.timeCredits).toBe(0);
+      const [lot] = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.userId, target.id));
+      expect(lot.remainingHours).toBe(0);
+    });
+
+    it("[SEC] a cross-org id resolves to NOT_FOUND — no write", async () => {
+      await expect(adjustCredits(orgAId, bUserId, { printBalanceDelta: 10 })).rejects.toThrow(/NOT_FOUND/);
+    });
+
+    it("rejects a non-integer delta", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `creditinvalid-${Date.now()}@x.test`, name: "InvalidUser", role: "MEMBER" })
+        .returning();
+      await expect(adjustCredits(orgAId, target.id, { printBalanceDelta: 1.5 })).rejects.toThrow(/INVALID_DELTA/);
+    });
+
+    it("[SEC][MONEY][I-047 fix-3] rejects a delta beyond the int4/business-cap bound — no write at all (not even printBalanceDelta, when timeCreditsDelta is the one out of range)", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `creditbound-${Date.now()}@x.test`, name: "BoundUser", role: "MEMBER", printBalance: 3, timeCredits: 0 })
+        .returning();
+      await expect(
+        adjustCredits(orgAId, target.id, { timeCreditsDelta: 2_147_483_647, printBalanceDelta: 5 }),
+      ).rejects.toThrow(/INVALID_DELTA/);
+
+      const [fresh] = await testDb.select().from(appUsers).where(eq(appUsers.id, target.id));
+      expect(fresh.printBalance).toBe(3); // untouched — the whole call rejected before any write
+      expect(fresh.timeCredits).toBe(0);
+      const lots = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.userId, target.id));
+      expect(lots).toHaveLength(0);
+    });
+
+    it("[SEC][MONEY][I-047 fix-3b] clamps the printBalance RESULT at the int4 ceiling — a valid delta on a near-max balance must not overflow the SQL increment", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `creditint4-${Date.now()}@x.test`, name: "Int4User", role: "MEMBER", printBalance: 2_147_000_000 })
+        .returning();
+
+      // 2_147_000_000 + 1_000_000 > INT4_MAX (2_147_483_647): a raw
+      // `print_balance + delta` integer addition overflows in Postgres
+      // ("integer out of range"). The RESULT must clamp instead.
+      const result = await adjustCredits(orgAId, target.id, { printBalanceDelta: 1_000_000 });
+      expect(result.printBalance).toBe(2_147_483_647);
+
+      const [fresh] = await testDb.select().from(appUsers).where(eq(appUsers.id, target.id));
+      expect(fresh.printBalance).toBe(2_147_483_647);
     });
   });
 });

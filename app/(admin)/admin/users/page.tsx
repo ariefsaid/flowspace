@@ -1,7 +1,9 @@
 /**
  * Admin user-management page — server component.
  * Reads the org-scoped member directory from DB and maps AppUser → AdminUserView
- * for the client leaf. Edit/Add remain non-wired stubs (ponytail — deferred).
+ * for the client leaf, which wires edit / credit-adjust / archive / password-reset
+ * to the already-built actions (I-047). Add stays a non-wired stub — signup
+ * owns member creation.
  *
  * ponytail: phone is not on app_users (renders as "" → omitted by the existing
  * conditional UI); per-user booking/transaction counts are 0 until aggregate
@@ -20,10 +22,13 @@ export default async function AdminUsersPage() {
     name: u.name,
     email: u.email,
     phone: "", // not on app_users today
+    role: u.role,
     tier: u.membershipTier,
     joinedAt: u.createdAt.toISOString(),
     bookings: 0, // per-user aggregates deferred
     transactions: 0,
+    timeCredits: u.timeCredits,
+    printBalance: u.printBalance,
   }));
 
   return <UsersClient users={users} />;

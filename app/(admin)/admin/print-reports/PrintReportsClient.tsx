@@ -1,21 +1,38 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import {
   Printer,
   FileText,
   Banknote,
-  Users,
+  Clock,
   TrendingUp,
   Inbox,
+  Search,
 } from "lucide-react";
-import { StatTile, Badge, Card } from "@/components/ui";
+import { StatTile, Badge, Card, Input, Select } from "@/components/ui";
 import { formatRupiah, formatDateID } from "@/lib/format";
 import type { PrintColorMode, PrintJobStatus } from "@/lib/db/enums";
-import type { AdminPrintJobView, PrintReportsSummary } from "./derive";
+import {
+  toQueryString,
+  EMPTY_FILTER_STATE,
+  type AdminPrintJobView,
+  type PrintReportsSummary,
+  type PrintReportFilterState,
+} from "./derive";
 import { advancePrintJobAction } from "./actions";
 
-export type { AdminPrintJobView, PrintReportsSummary };
+export type { AdminPrintJobView, PrintReportsSummary, PrintReportFilterState };
+
+const STATUS_FILTER_OPTIONS: { value: PrintJobStatus | "ALL"; label: string }[] = [
+  { value: "ALL", label: "Semua Status" },
+  { value: "PENDING", label: "Menunggu" },
+  { value: "PROCESSING", label: "Diproses" },
+  { value: "READY", label: "Siap Ambil" },
+  { value: "COMPLETED", label: "Selesai" },
+  { value: "FAILED", label: "Gagal" },
+];
 
 // ---------------------------------------------------------------------------
 // Pure presentational mappers (AC-302) — exported for unit coverage.
@@ -79,13 +96,41 @@ export function statusLabel(status: PrintJobStatus): string {
 export function PrintReportsClient({
   jobs,
   summary,
+  filters = EMPTY_FILTER_STATE,
 }: {
   jobs: AdminPrintJobView[];
   summary: PrintReportsSummary;
+  /** I-047: server-resolved filter state (from page.tsx searchParams). The
+   * filter bar re-queries the server via router.push — it never refetches
+   * client-side. */
+  filters?: PrintReportFilterState;
 }) {
   const isEmpty = jobs.length === 0;
   const [busyJob, setBusyJob] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const router = useRouter();
+  const pathname = usePathname();
+  const [searchInput, setSearchInput] = useState(filters.search);
+
+  // Keep the local search draft in sync when the server re-renders with a
+  // fresh filter state (e.g. after Reset Filter or a back/forward nav).
+  useEffect(() => {
+    setSearchInput(filters.search);
+  }, [filters.search]);
+
+  function applyFilters(next: Partial<PrintReportFilterState>) {
+    router.push(`${pathname}${toQueryString({ ...filters, ...next })}`);
+  }
+
+  function commitSearch() {
+    if (searchInput !== filters.search) applyFilters({ search: searchInput });
+  }
+
+  function resetFilters() {
+    setSearchInput("");
+    router.push(pathname);
+  }
 
   async function changeStatus(job: AdminPrintJobView, status: PrintJobStatus) {
     setBusyJob(job.id);
@@ -128,10 +173,10 @@ export function PrintReportsClient({
           accent="blue"
         />
         <StatTile
-          label="Pengguna Aktif"
-          value={summary.uniqueUsers}
-          unit="pengguna"
-          icon={Users}
+          label="Menunggu Proses"
+          value={summary.pendingCount}
+          unit="job"
+          icon={Clock}
           accent="teal"
         />
         <StatTile
@@ -159,6 +204,101 @@ export function PrintReportsClient({
           <TrendingUp className="h-5 w-5 text-white" aria-hidden="true" />
         </div>
       </div>
+
+      {/* Filter bar (I-047) — every change re-queries the server via
+          router.push on the current pathname + the new searchParams. */}
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[220px] flex-1">
+            <label
+              htmlFor="print-filter-search"
+              className="mb-1 block text-xs font-medium text-gray-700"
+            >
+              Cari
+            </label>
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                aria-hidden="true"
+              />
+              <Input
+                id="print-filter-search"
+                placeholder="Cari nama file atau user..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onBlur={commitSearch}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitSearch();
+                  }
+                }}
+                className="pl-9"
+              />
+            </div>
+          </div>
+
+          <div className="w-full sm:w-44">
+            <label
+              htmlFor="print-filter-status"
+              className="mb-1 block text-xs font-medium text-gray-700"
+            >
+              Status
+            </label>
+            <Select
+              id="print-filter-status"
+              value={filters.status}
+              onChange={(e) =>
+                applyFilters({ status: e.target.value as PrintReportFilterState["status"] })
+              }
+            >
+              {STATUS_FILTER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          <div className="w-full sm:w-40">
+            <label
+              htmlFor="print-filter-date-from"
+              className="mb-1 block text-xs font-medium text-gray-700"
+            >
+              Dari Tanggal
+            </label>
+            <Input
+              id="print-filter-date-from"
+              type="date"
+              value={filters.dateFrom}
+              onChange={(e) => applyFilters({ dateFrom: e.target.value })}
+            />
+          </div>
+
+          <div className="w-full sm:w-40">
+            <label
+              htmlFor="print-filter-date-to"
+              className="mb-1 block text-xs font-medium text-gray-700"
+            >
+              Sampai Tanggal
+            </label>
+            <Input
+              id="print-filter-date-to"
+              type="date"
+              value={filters.dateTo}
+              onChange={(e) => applyFilters({ dateTo: e.target.value })}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="h-10 shrink-0 rounded-xl border border-slate-200 px-4 text-sm font-medium text-gray-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40"
+          >
+            Reset Filter
+          </button>
+        </div>
+      </Card>
 
       {/* Print jobs table */}
       <Card className="p-0 overflow-hidden">

@@ -2,11 +2,11 @@
 
 import { useState, useCallback, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Search, ShoppingCart, User } from "lucide-react";
+import { Plus, Search, ShoppingCart, Trash2, User } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { formatRupiah } from "@/lib/format";
+import { formatRupiah, formatDateID } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { VariantPickerModal } from "@/components/cafe/VariantPickerModal";
 import { cartLineKey, addCartLine } from "@/lib/cafe/cart";
@@ -196,6 +196,19 @@ export function PosClient({ menu }: PosClientProps) {
     );
   }, []);
 
+  /** I-047 (ORIG pos:94-99): resets the cart and the member lookup in one
+   * click — cashiers start the next order from a clean slate without a page
+   * reload. */
+  const clearCart = useCallback(() => {
+    setCart([]);
+    setNotes("");
+    setEmailInput("");
+    setLookupResult(null);
+    setLookupDone(false);
+    setLookupError(null);
+    setCheckoutSuccessCode(null);
+  }, []);
+
   const handleLookup = useCallback(async () => {
     const email = emailInput.trim();
     if (!email) return;
@@ -382,6 +395,15 @@ export function PosClient({ menu }: PosClientProps) {
                         ? `Sesi aktif — diskon ${lookupResult.cafeDiscountPct}%`
                         : "Tidak ada sesi aktif — tanpa diskon"}
                     </p>
+                    {/* I-047: surfaces the ACTIVE booking's facility + end time (ORIG pos:224-227) */}
+                    {lookupResult.hasActiveBooking && lookupResult.activeBookingFacility ? (
+                      <p className="text-xs text-teal-700">
+                        Sesi aktif di {lookupResult.activeBookingFacility}
+                        {lookupResult.activeBookingEndAt
+                          ? ` — sampai ${formatDateID(lookupResult.activeBookingEndAt)}`
+                          : ""}
+                      </p>
+                    ) : null}
                   </div>
                 ) : (
                   <p className="text-xs text-gray-400">
@@ -397,9 +419,20 @@ export function PosClient({ menu }: PosClientProps) {
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-gray-900">Order</h2>
               {cart.length > 0 && (
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-teal-500 text-xs font-bold text-white">
-                  {cart.reduce((s, l) => s + l.qty, 0)}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-teal-500 text-xs font-bold text-white">
+                    {cart.reduce((s, l) => s + l.qty, 0)}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearCart}
+                    aria-label="Clear cart"
+                    className="px-1.5"
+                  >
+                    <Trash2 size={16} className="text-red-500" aria-hidden="true" />
+                  </Button>
+                </div>
               )}
             </div>
 

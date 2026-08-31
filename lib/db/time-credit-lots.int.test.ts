@@ -16,7 +16,7 @@ import postgres from "postgres";
 import * as schema from "@/lib/db/schema";
 import { organizations, appUsers, timeCreditLots } from "@/lib/db/schema";
 import { db } from "@/lib/db/drizzle";
-import { spendTimeCredits, listLots } from "@/lib/db/time-credit-lots";
+import { spendTimeCredits, listLots, adjustTimeCreditsForAdmin, recomputeCreditCache } from "@/lib/db/time-credit-lots";
 
 const TEST_URL =
   process.env.TEST_DATABASE_URL ??
@@ -271,6 +271,72 @@ describe("lib/db/time-credit-lots — spendTimeCredits [SEC][MONEY]", () => {
 
       const [lotAfter] = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.id, orgALot.id));
       expect(lotAfter.remainingHours).toBe(5); // untouched by the cross-org attempt
+    });
+  });
+
+  describe("adjustTimeCreditsForAdmin [SEC][MONEY][I-047 fix-3] — defense-in-depth delta bound", () => {
+    it("rejects a delta beyond the int4/business-cap bound even when called directly (not only via users.ts's adjustCredits) — no lot/cache write", async () => {
+      await testSql`TRUNCATE TABLE "time_credit_lots" RESTART IDENTITY CASCADE`;
+      const before = await getUserTimeCredits(userAId);
+
+      await expect(
+        db.transaction((tx) =>
+          adjustTimeCreditsForAdmin({ orgId: orgAId, userId: userAId, deltaHours: 5_000_000, tx }),
+        ),
+      ).rejects.toThrow(/INVALID_DELTA/);
+
+      const lots = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.userId, userAId));
+      expect(lots).toHaveLength(0);
+      expect(await getUserTimeCredits(userAId)).toBe(before);
+    });
+  });
+
+  describe("adjustTimeCreditsForAdmin [SEC] — defense-in-depth cross-org guard", () => {
+    it("rejects a userId that belongs to a DIFFERENT org than orgId, even when called directly (not only via users.ts's adjustCredits) — no lot/cache write", async () => {
+      await testSql`TRUNCATE TABLE "time_credit_lots" RESTART IDENTITY CASCADE`;
+
+      await expect(
+        db.transaction((tx) =>
+          adjustTimeCreditsForAdmin({ orgId: orgAId, userId: userBId, deltaHours: 5, tx }),
+        ),
+      ).rejects.toThrow(/NOT_FOUND/);
+
+      const lots = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.userId, userBId));
+      expect(lots).toHaveLength(0);
+    });
+  });
+
+  describe("recomputeCreditCache [SEC][MONEY][I-047 fix-3] — int4 result clamp", () => {
+    it("clamps the cached total at the int4 ceiling when the lot sum exceeds it — never a raw 'integer out of range' cast failure", async () => {
+      await testSql`TRUNCATE TABLE "time_credit_lots" RESTART IDENTITY CASCADE`;
+      const future = new Date(Date.now() + 30 * 24 * 3_600_000);
+      // Three lots of 1.1e9h each: the raw SUM is 3.3e9 — far beyond INT4_MAX
+      // (2_147_483_647). SUM() itself returns bigint (no overflow), but the
+      // old `::int` cast of that sum threw "integer out of range".
+      await testDb.insert(timeCreditLots).values([
+        { orgId: orgAId, userId: userAId, totalHours: 1_100_000_000, remainingHours: 1_100_000_000, expiresAt: future },
+        { orgId: orgAId, userId: userAId, totalHours: 1_100_000_000, remainingHours: 1_100_000_000, expiresAt: future },
+        { orgId: orgAId, userId: userAId, totalHours: 1_100_000_000, remainingHours: 1_100_000_000, expiresAt: future },
+      ]);
+
+      const cached = await db.transaction((tx) =>
+        recomputeCreditCache({ orgId: orgAId, userId: userAId, tx }),
+      );
+      expect(cached).toBe(2_147_483_647); // clamped, not crashed
+      expect(await getUserTimeCredits(userAId)).toBe(2_147_483_647);
+    });
+
+    it("keeps an empty (or all-expired) lot sum at 0 — LEAST skips NULLs, so the clamp must coalesce the sum BEFORE bounding it", async () => {
+      await testSql`TRUNCATE TABLE "time_credit_lots" RESTART IDENTITY CASCADE`;
+
+      // No lots at all: sum(...) is NULL, and least(NULL, INT4_MAX) returns
+      // INT4_MAX (Postgres LEAST/GREATEST skip NULLs) unless the sum is
+      // coalesced first — the clamp once wrote INT4_MAX here.
+      const cached = await db.transaction((tx) =>
+        recomputeCreditCache({ orgId: orgAId, userId: userAId, tx }),
+      );
+      expect(cached).toBe(0);
+      expect(await getUserTimeCredits(userAId)).toBe(0);
     });
   });
 });

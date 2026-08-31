@@ -44,6 +44,11 @@ vi.mock("@/lib/db/transactions", () => ({
   recordTransaction: (...args: unknown[]) => recordTransaction(...args),
 }));
 
+const lockUserRowForCreditWrite = vi.fn();
+vi.mock("@/lib/db/time-credit-lots", () => ({
+  lockUserRowForCreditWrite: (...args: unknown[]) => lockUserRowForCreditWrite(...args),
+}));
+
 import { createOrder } from "@/lib/db/cafe";
 
 const FAKE_ORDER = {
@@ -92,6 +97,7 @@ describe("createOrder — in-tx call-site wiring (I-044 fix round 2, item 3)", (
     findProfilesByIds.mockReset();
     getTierDiscounts.mockReset();
     recordTransaction.mockReset();
+    lockUserRowForCreditWrite.mockReset();
 
     // Pre-tx menu lookup (legitimately on the global `db` — outside any
     // transaction, nothing to thread there).
@@ -119,9 +125,12 @@ describe("createOrder — in-tx call-site wiring (I-044 fix round 2, item 3)", (
       printDiscountPct: 0,
     });
     recordTransaction.mockResolvedValue(undefined);
+    // I-047 fix round 3: the member path's canonical first app_users lock is
+    // also an in-tx repository call — thread the SAME tx (asserted below).
+    lockUserRowForCreditWrite.mockResolvedValue({ id: "user-1" });
   });
 
-  it("[SEC][POOL] passes its OWN tx (not the global db) to getActiveBookingForUpdate, findProfilesByIds, and getTierDiscounts", async () => {
+  it("[SEC][POOL] passes its OWN tx (not the global db) to getActiveBookingForUpdate, findProfilesByIds, getTierDiscounts, and lockUserRowForCreditWrite", async () => {
     await createOrder({
       orgId: "org-1",
       customerUserId: "user-1",
@@ -133,6 +142,8 @@ describe("createOrder — in-tx call-site wiring (I-044 fix round 2, item 3)", (
     expect(getActiveBookingForUpdate).toHaveBeenCalledTimes(1);
     expect(findProfilesByIds).toHaveBeenCalledTimes(1);
     expect(getTierDiscounts).toHaveBeenCalledTimes(1);
+    expect(lockUserRowForCreditWrite).toHaveBeenCalledTimes(1);
+    expect(lockUserRowForCreditWrite).toHaveBeenCalledWith(expect.anything(), "org-1", "user-1");
 
     // The exact SAME tx object the transaction callback received — not a
     // bare 2-arg call that would silently default to the global `db`.
@@ -146,11 +157,17 @@ describe("createOrder — in-tx call-site wiring (I-044 fix round 2, item 3)", (
     expect(txArgFromBooking?.[TX_MARKER]).toBe(true);
     expect(txArgFromProfiles?.[TX_MARKER]).toBe(true);
     expect(txArgFromTierDiscounts?.[TX_MARKER]).toBe(true);
+    const txArgFromUserLock = lockUserRowForCreditWrite.mock.calls[0][0] as Record<
+      symbol,
+      boolean
+    >;
+    expect(txArgFromUserLock?.[TX_MARKER]).toBe(true);
 
     // Also confirm the same tx object identity across all three calls (the
     // ONE transaction's connection, not three different fakes).
     expect(txArgFromProfiles).toBe(txArgFromBooking);
     expect(txArgFromTierDiscounts).toBe(txArgFromBooking);
+    expect(txArgFromUserLock).toBe(txArgFromBooking);
   });
 
   it("never calls findProfilesByIds/getTierDiscounts when there is no active booking (0% short-circuit, no wasted call)", async () => {

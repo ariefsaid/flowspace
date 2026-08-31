@@ -14,7 +14,7 @@
  *   pages × fixed print rate) — never from a client value.
  *   The credit/print-balance increment uses an atomic SQL `+`, not read-then-write.
  */
-import { and, eq, isNull, asc, sql } from "drizzle-orm";
+import { and, eq, isNull, asc } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import {
   timeCreditPackages,
@@ -23,7 +23,7 @@ import {
   type TimeCreditPackage,
 } from "@/lib/db/schema";
 import { recordTransaction } from "@/lib/db/transactions";
-import { recomputeCreditCache } from "@/lib/db/time-credit-lots";
+import { recomputeCreditCache, int4ClampedAdd, lockUserRowForCreditWrite } from "@/lib/db/time-credit-lots";
 import {
   simulatePaymentOutcome,
   type PaymentDecision,
@@ -105,12 +105,17 @@ export async function purchasePackage(input: {
 
     if (!pkg) throw new Error("UNKNOWN_PACKAGE");
 
-    // Cross-org guard [SEC]: the user must resolve within this org before any write.
-    const [user] = await tx
-      .select({ id: appUsers.id })
-      .from(appUsers)
-      .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))
-      .limit(1);
+    // Cross-org guard [SEC]: the user must resolve within this org before
+    // any write. [SEC][MONEY][I-047 fix round 2, finding 5] The guard select
+    // is also the CANONICAL FIRST lock (FOR NO KEY UPDATE): both FK-inserting
+    // statements below (the ledger row, the lot row) take an implicit weak
+    // FOR KEY SHARE on this same app_users row, and recomputeCreditCache
+    // takes a strong lock at the end — locking strong FIRST subsumes those
+    // implicit weak locks and makes a concurrent purchase/spend/grant for
+    // the same member queue here, holding nothing (the KEY SHARE →
+    // strong-lock upgrade deadlock is structurally impossible; barrier test
+    // in lib/db/credit-lock-order.int.test.ts).
+    const user = await lockUserRowForCreditWrite(tx, orgId, userId);
     if (!user) throw new Error("USER_NOT_FOUND");
 
     if (!simulatePaymentOutcome(input.simulatePayment)) {
@@ -177,10 +182,19 @@ export async function topUpPrint(input: {
   const amountRupiah = pages * PRINT_RATE_PER_PAGE_RUPIAH;
 
   return db.transaction(async (tx) => {
+    // [SEC][MONEY][I-047 fix round 2, finding 5] Canonical FIRST lock, before
+    // the balance UPDATE and the FK-inserting ledger write below — same
+    // guard+lock as purchasePackage (see that comment). Also doubles as the
+    // org-scoped existence guard: USER_NOT_FOUND before any write.
+    const user = await lockUserRowForCreditWrite(tx, orgId, userId);
+    if (!user) throw new Error("USER_NOT_FOUND");
+
     const [updated] = await tx
       .update(appUsers)
       .set({
-        printBalance: sql`${appUsers.printBalance} + ${pages}`,
+        // [SEC][MONEY][I-047 fix-3] int4-clamped increment — clamps the
+        // RESULT, not just the pages bound (see int4ClampedAdd).
+        printBalance: int4ClampedAdd(appUsers.printBalance, pages),
         updatedAt: new Date(),
       })
       .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))

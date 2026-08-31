@@ -28,6 +28,7 @@ import {
   assertOrderLineCount,
 } from "@/lib/cafe/validation";
 import { recordTransaction } from "@/lib/db/transactions";
+import { lockUserRowForCreditWrite } from "@/lib/db/time-credit-lots";
 import { generateOrderCode, nextStatus } from "@/lib/cafe/status";
 import type { CafeOrderStatus, OrderLineInput } from "@/lib/cafe/types";
 
@@ -180,6 +181,24 @@ export async function createOrder(input: {
                 .cafeDiscountPct;
             }
           }
+        }
+
+        // [SEC][MONEY][I-047 fix round 3] Canonical first app_users lock
+        // (member path): BEFORE any app_users-FK insert below (cafe_orders.
+        // customer_user_id, transactions.user_id), take the member's row FOR
+        // NO KEY UPDATE — the inserts' implicit FOR KEY SHARE subsumes into
+        // it. Today this path spends no credits, but the moment one does,
+        // an insert-then-strong-lock order would reintroduce the finding-4
+        // KEY SHARE → strong-lock upgrade deadlock (proven by the barrier
+        // tests in lib/db/credit-lock-order.int.test.ts). Position matters:
+        // when the discount path locked the member's ACTIVE booking (B) via
+        // getActiveBookingForUpdate above, B came FIRST — the same
+        // B → app_users order as checkoutBooking/extendBooking, so no
+        // cross-object pair inverts. Guest orders (no customer_user_id)
+        // have nothing to lock and skip this. A cross-org/nonexistent id
+        // locks nothing and still fails on the FK insert, as before.
+        if (customerUserId) {
+          await lockUserRowForCreditWrite(tx, orgId, customerUserId);
         }
 
         const totals = computeOrderTotals(pricedLines, { discountPct });

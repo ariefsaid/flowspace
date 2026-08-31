@@ -352,6 +352,25 @@ describe("lib/db/packages", () => {
       expect(txn.description).toBe("Top up 100 print pages");
     });
 
+    it("[SEC][MONEY][I-047 fix-3] clamps the printBalance RESULT at the int4 ceiling — a valid top-up on a near-max balance must not overflow the SQL increment", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `topup-int4-${Date.now()}@x.test`, name: "TopupInt4", role: "MEMBER", printBalance: 2_147_480_000 })
+        .returning();
+
+      // 2_147_480_000 + 10_000 pages > INT4_MAX: a raw `print_balance + pages`
+      // addition overflows in Postgres. The RESULT must clamp instead.
+      const { printBalance } = await topUpPrint({ orgId: orgAId, userId: target.id, pages: 10_000 });
+      expect(printBalance).toBe(2_147_483_647);
+
+      const [fresh] = await testDb
+        .select({ printBalance: appUsers.printBalance })
+        .from(appUsers)
+        .where(eq(appUsers.id, target.id))
+        .limit(1);
+      expect(fresh?.printBalance).toBe(2_147_483_647);
+    });
+
     it("rejects non-positive / fractional / oversized pages — no write", async () => {
       const [{ count: txnBefore }] = await testSql`
         select count(*)::int as count from transactions where org_id = ${orgAId} and user_id = ${aUserId} and type = 'PRINT_TOPUP'`;

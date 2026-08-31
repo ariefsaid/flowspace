@@ -5,10 +5,15 @@
  * Every org-scoped function takes `orgId` derived from the server session —
  * the client NEVER supplies it (ADR-0004).
  */
-import { and, eq, isNull, asc, inArray } from "drizzle-orm";
+import { and, eq, isNull, ne, asc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import { appUsers, type AppUser } from "@/lib/db/schema";
-import type { MembershipTier } from "@/lib/db/enums";
+import { ROLES, MEMBERSHIP_TIERS, type MembershipTier, type Role } from "@/lib/db/enums";
+import {
+  adjustTimeCreditsForAdmin,
+  assertValidCreditDelta,
+  int4ClampedAdd,
+} from "@/lib/db/time-credit-lots";
 
 /**
  * Login lookup. Email is globally unique in the single-venue MVP so this
@@ -32,6 +37,11 @@ export async function findByEmail(email: string): Promise<AppUser | null> {
 /**
  * Session resolver: find the app_users profile linked to a Supabase auth.users row.
  * Used by getSessionUser() in lib/auth/session.ts (Phase 3).
+ *
+ * [SEC][I-047] Excludes an archived row: an admin's `archiveUser` is meant to
+ * revoke access, not just hide the account from the directory — without this
+ * filter, an archived member/admin's existing Supabase Auth session would
+ * still resolve a full `SessionUser` here and keep working normally.
  */
 export async function findByAuthUserId(
   authUserId: string
@@ -39,7 +49,7 @@ export async function findByAuthUserId(
   const [u] = await db
     .select()
     .from(appUsers)
-    .where(eq(appUsers.authUserId, authUserId))
+    .where(and(eq(appUsers.authUserId, authUserId), isNull(appUsers.archivedAt)))
     .limit(1);
   return u ?? null;
 }
@@ -171,4 +181,197 @@ export async function createMember(input: {
     })
     .returning();
   return u;
+}
+
+// ---------------------------------------------------------------------------
+// Admin user-management (I-047) [SEC] — every function is org-scoped; the
+// ADMIN check itself lives at the action layer (app/(admin)/admin/users/actions.ts),
+// mirroring every other admin repository (bookings/print/cafe).
+// ---------------------------------------------------------------------------
+
+export type UpdateUserInput = {
+  name?: string;
+  role?: Role;
+  membershipTier?: MembershipTier;
+};
+
+/**
+ * Admin edit: name / role / membership tier. Partial — only the given fields
+ * change. [SEC] `role`/`membershipTier` are runtime-validated against the
+ * enum (never trusted/coerced from an arbitrary string); a cross-org id
+ * resolves to NOT_FOUND before any write, and an already-archived row is
+ * excluded (edit a live account only).
+ */
+export async function updateUser(
+  orgId: string,
+  id: string,
+  input: UpdateUserInput,
+): Promise<AppUser> {
+  const values: Partial<typeof appUsers.$inferInsert> = { updatedAt: new Date() };
+
+  if (input.name !== undefined) {
+    const trimmed = input.name.trim();
+    if (!trimmed) throw new Error("INVALID_NAME");
+    values.name = trimmed;
+  }
+  if (input.role !== undefined) {
+    if (!ROLES.includes(input.role)) throw new Error("INVALID_ROLE");
+    values.role = input.role;
+  }
+  if (input.membershipTier !== undefined) {
+    if (!MEMBERSHIP_TIERS.includes(input.membershipTier)) throw new Error("INVALID_TIER");
+    values.membershipTier = input.membershipTier;
+  }
+
+  const [updated] = await db
+    .update(appUsers)
+    .set(values)
+    .where(and(eq(appUsers.id, id), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
+    .returning();
+  if (!updated) throw new Error("NOT_FOUND");
+  return updated;
+}
+
+/**
+ * Soft-archive (never hard-delete — sets `archivedAt`, excluded from every
+ * `isNull(archivedAt)` read: `findById`/`listByOrg`/`findMemberByEmail`, and
+ * now `findByAuthUserId` — so an archived user's existing session stops
+ * resolving too). [SEC] Refuses to archive an ADMIN-role user (ORIG's
+ * "Cannot delete admin users" rule) — an org must always keep its admins
+ * archivable only by demoting the role first, never by this path. A
+ * cross-org id resolves to NOT_FOUND before any write.
+ *
+ * [SEC][I-047 minor] The role check above is a plain (unlocked) pre-read —
+ * a concurrent `updateUser` promoting this SAME id to ADMIN could commit
+ * strictly between it and this function's own UPDATE. The UPDATE's WHERE
+ * therefore re-checks `role != 'ADMIN'` itself (a real compare-and-set
+ * against whatever the row's role is AT THE MOMENT this statement actually
+ * runs, not the earlier snapshot) — a promotion that lands in that window
+ * makes this UPDATE match zero rows, and the fallback below re-reads to
+ * report CANNOT_ARCHIVE_ADMIN rather than the generic NOT_FOUND a plain CAS
+ * miss would otherwise imply.
+ */
+export async function archiveUser(orgId: string, id: string): Promise<AppUser> {
+  const [target] = await db
+    .select({ id: appUsers.id, role: appUsers.role })
+    .from(appUsers)
+    .where(and(eq(appUsers.id, id), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
+    .limit(1);
+  if (!target) throw new Error("NOT_FOUND");
+  if (target.role === "ADMIN") throw new Error("CANNOT_ARCHIVE_ADMIN");
+
+  const [updated] = await db
+    .update(appUsers)
+    .set({ archivedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(appUsers.id, id),
+        eq(appUsers.orgId, orgId),
+        isNull(appUsers.archivedAt),
+        ne(appUsers.role, "ADMIN"),
+      ),
+    )
+    .returning();
+  if (!updated) {
+    const [existing] = await db
+      .select({ role: appUsers.role })
+      .from(appUsers)
+      .where(and(eq(appUsers.id, id), eq(appUsers.orgId, orgId)))
+      .limit(1);
+    throw new Error(existing?.role === "ADMIN" ? "CANNOT_ARCHIVE_ADMIN" : "NOT_FOUND");
+  }
+  return updated;
+}
+
+export type AdjustCreditsInput = {
+  timeCreditsDelta?: number;
+  printBalanceDelta?: number;
+};
+
+/**
+ * Admin manual balance adjustment [SEC][MONEY] — atomic, both deltas applied
+ * (or neither, on any failure) in one transaction, each independently
+ * clamped so a balance never goes negative.
+ *
+ * `printBalance` is a plain counter (no ledger table, per the schema note on
+ * `app_users`) — adjusted with a single clamped SQL increment
+ * (`GREATEST(col + delta, 0)`).
+ *
+ * `timeCredits` is a DERIVED CACHE of the member's `time_credit_lots`
+ * (I-040) — a direct column write here would be silently overwritten by the
+ * next real spend/purchase's `recomputeCreditCache`. `adjustTimeCreditsForAdmin`
+ * (lib/db/time-credit-lots.ts) owns the lot-correct grant/debit and itself
+ * recomputes the cache.
+ *
+ * Org-scoped: a cross-org (or already-archived) id resolves to NOT_FOUND
+ * before any write.
+ */
+export async function adjustCredits(
+  orgId: string,
+  id: string,
+  input: AdjustCreditsInput,
+): Promise<{ timeCredits: number; printBalance: number }> {
+  const timeCreditsDelta = input.timeCreditsDelta ?? 0;
+  const printBalanceDelta = input.printBalanceDelta ?? 0;
+  // [SEC][MONEY][I-047 fix-3] Finite integer within the int4/business-cap
+  // bound (see time-credit-lots.ts's assertValidCreditDelta) — validated
+  // BEFORE the transaction opens, so an out-of-range delta never even
+  // attempts a write. `printBalanceDelta` reuses the same guard: it isn't
+  // hours, but it lands in the same `integer` column with the same raw
+  // Postgres overflow risk, so the same bound applies.
+  assertValidCreditDelta(timeCreditsDelta);
+  assertValidCreditDelta(printBalanceDelta);
+
+  return db.transaction(async (tx) => {
+    // [SEC][MONEY][I-047 fix round 2] Canonical FIRST lock: this guard select
+    // takes the member's app_users row FOR NO KEY UPDATE, before this
+    // transaction touches lots (adjustTimeCreditsForAdmin) and before its
+    // own app_users UPDATE below. Round 1 of this fix codified the opposite
+    // order ("lots before app_users") — but the cross-family re-verify
+    // showed that ANY INSERT referencing app_users (a lot row in the grant
+    // branch, a booking row in createBooking) implicitly takes a weak FOR
+    // KEY SHARE on that member's app_users row AT INSERT TIME, before any
+    // explicit lock; two transactions each holding KEY SHARE and each
+    // upgrading to a strong lock deadlock (40P01). Locking app_users strong
+    // FIRST — in every credit-touching path (adjustCredits,
+    // adjustTimeCreditsForAdmin, spendTimeCredits, recomputeCreditCache,
+    // createBooking, checkoutBooking, purchasePackage, purchasePrintTopup,
+    // topUpPrint) — subsumes every later implicit KEY SHARE and makes the
+    // order structurally acyclic: a concurrent path for the same member
+    // queues here, holding nothing.
+    //
+    // Org-scoped + non-archived: a cross-org (or archived) id resolves to
+    // NOT_FOUND before any write, still holding the lock only for the rest
+    // of this transaction.
+    const [target] = await tx
+      .select({ id: appUsers.id })
+      .from(appUsers)
+      .where(and(eq(appUsers.id, id), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
+      .for("no key update")
+      .limit(1);
+    if (!target) throw new Error("NOT_FOUND");
+
+    if (timeCreditsDelta !== 0) {
+      await adjustTimeCreditsForAdmin({ orgId, userId: id, deltaHours: timeCreditsDelta, tx });
+    }
+
+    if (printBalanceDelta !== 0) {
+      await tx
+        .update(appUsers)
+        .set({
+          // [SEC][MONEY][I-047 fix-3] int4-clamped increment — clamps the
+          // RESULT, not just the delta (see int4ClampedAdd).
+          printBalance: int4ClampedAdd(appUsers.printBalance, printBalanceDelta),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(appUsers.id, id), eq(appUsers.orgId, orgId)));
+    }
+
+    const [final] = await tx
+      .select({ timeCredits: appUsers.timeCredits, printBalance: appUsers.printBalance })
+      .from(appUsers)
+      .where(and(eq(appUsers.id, id), eq(appUsers.orgId, orgId)))
+      .limit(1);
+    return final!;
+  });
 }

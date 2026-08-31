@@ -5,7 +5,7 @@
  * printer capabilities, page ranges, balance debits, and ledger writes are
  * checked on the server; the browser never supplies an authoritative value.
  */
-import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import {
   appUsers,
@@ -48,14 +48,87 @@ export async function listPrintJobsByUser(
   }));
 }
 
-/** Org-scoped, bounded admin report listing. */
-export function listPrintJobsForAdmin(orgId: string, limit = 500): Promise<PrintJob[]> {
+export type PrintReportFilters = {
+  /** Matches the file name OR the owning user's name/email (case-insensitive substring). */
+  search?: string;
+  status?: PrintJobStatus;
+  /** Inclusive lower bound on createdAt. */
+  dateFrom?: Date;
+  /** Inclusive upper bound on createdAt. */
+  dateTo?: Date;
+};
+
+/** [SEC] Hard ceiling on `listPrintJobsForAdmin`'s limit — a caller-supplied
+ *  value above this is clamped, never honored as-is (report-listing DoS,
+ *  same defense-in-depth pattern as bookings.ts's PENDING_BOOKINGS_HARD_LIMIT). */
+const PRINT_REPORT_HARD_LIMIT = 500;
+/** Fallback used when the caller-supplied limit fails normalization, and the
+ *  function's own default parameter — kept as a named constant so both stay
+ *  in sync. */
+const PRINT_REPORT_DEFAULT_LIMIT = 500;
+/** Bound on the search-derived matching-user-id list fed into `inArray` — a
+ *  broad substring match (e.g. a single common letter) could otherwise pull
+ *  in every user in the org as query parameters. */
+const SEARCH_MATCHING_USERS_LIMIT = 500;
+
+/**
+ * [SEC] Coerces a caller-supplied `limit` to a finite positive integer
+ * within `PRINT_REPORT_HARD_LIMIT` — mirrors bookings.ts's
+ * `normalizePendingBookingsLimit`: `Math.min(limit, 500)` ALONE does not
+ * validate its input (`Math.min(-1, 500) === -1`, `Math.min(NaN, 500) ===
+ * NaN`), and Drizzle OMITS the SQL `LIMIT` clause entirely for a negative or
+ * non-finite value, bypassing the cap outright. Any limit that isn't a
+ * finite number > 0 falls back to the safe default, BEFORE the hard-ceiling
+ * clamp is ever applied. Exported (pure, no I/O) so the DoS-bound decision
+ * itself is unit-tested (lib/db/print.test.ts) — ADR-0010.
+ */
+export function normalizePrintReportLimit(limit: number): number {
+  if (!Number.isFinite(limit) || limit <= 0) return PRINT_REPORT_DEFAULT_LIMIT;
+  return Math.min(Math.floor(limit), PRINT_REPORT_HARD_LIMIT);
+}
+
+/**
+ * Org-scoped, bounded admin report listing. `filters` (I-047) narrows the
+ * result — search/status/date-range all combine with AND, and every
+ * condition is parameterized (drizzle `ilike`/`eq`/`gte`/`lte`, never raw
+ * string interpolation) [SEC]. A `search` term also matches the owning
+ * user's name/email via a same-org lookup (never leaking a cross-org user's
+ * name/email into the match set); that lookup is itself bounded
+ * (`SEARCH_MATCHING_USERS_LIMIT`) so a broad substring match can't balloon
+ * into an unbounded `inArray` parameter list.
+ */
+export async function listPrintJobsForAdmin(
+  orgId: string,
+  filters: PrintReportFilters = {},
+  limit: number = PRINT_REPORT_DEFAULT_LIMIT,
+): Promise<PrintJob[]> {
+  const conditions: SQL[] = [eq(printJobs.orgId, orgId)];
+  if (filters.status) conditions.push(eq(printJobs.status, filters.status));
+  if (filters.dateFrom) conditions.push(gte(printJobs.createdAt, filters.dateFrom));
+  if (filters.dateTo) conditions.push(lte(printJobs.createdAt, filters.dateTo));
+
+  const search = filters.search?.trim();
+  if (search) {
+    const q = `%${search}%`;
+    const matchingUsers = await db
+      .select({ id: appUsers.id })
+      .from(appUsers)
+      .where(and(eq(appUsers.orgId, orgId), or(ilike(appUsers.name, q), ilike(appUsers.email, q))))
+      .limit(SEARCH_MATCHING_USERS_LIMIT);
+    const userIds = matchingUsers.map((u) => u.id);
+    const searchCond =
+      userIds.length > 0
+        ? or(ilike(printJobs.fileName, q), inArray(printJobs.userId, userIds))
+        : ilike(printJobs.fileName, q);
+    conditions.push(searchCond!);
+  }
+
   return db
     .select()
     .from(printJobs)
-    .where(eq(printJobs.orgId, orgId))
+    .where(and(...conditions))
     .orderBy(desc(printJobs.createdAt))
-    .limit(limit);
+    .limit(normalizePrintReportLimit(limit));
 }
 
 export type PrintReportSummary = {
@@ -64,6 +137,8 @@ export type PrintReportSummary = {
   uniqueUsers: number;
   totalRevenue: number;
   completedCount: number;
+  /** I-047: PENDING + PROCESSING jobs still awaiting/undergoing work (ORIG's "Menunggu Proses" tile). */
+  pendingCount: number;
 };
 
 export async function getPrintReportSummary(orgId: string): Promise<PrintReportSummary> {
@@ -74,10 +149,13 @@ export async function getPrintReportSummary(orgId: string): Promise<PrintReportS
       uniqueUsers: sql<number>`count(distinct ${printJobs.userId})::int`,
       totalRevenue: sql<number>`coalesce(sum(${printJobs.totalRupiah}) filter (where ${printJobs.status} = 'COMPLETED'), 0)::int`,
       completedCount: sql<number>`count(*) filter (where ${printJobs.status} = 'COMPLETED')::int`,
+      pendingCount: sql<number>`count(*) filter (where ${printJobs.status} in ('PENDING', 'PROCESSING'))::int`,
     })
     .from(printJobs)
     .where(eq(printJobs.orgId, orgId));
-  return row ?? { totalJobs: 0, totalPages: 0, uniqueUsers: 0, totalRevenue: 0, completedCount: 0 };
+  return (
+    row ?? { totalJobs: 0, totalPages: 0, uniqueUsers: 0, totalRevenue: 0, completedCount: 0, pendingCount: 0 }
+  );
 }
 
 type SubmitPrintJobInput = {

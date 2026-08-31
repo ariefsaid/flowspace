@@ -7,7 +7,7 @@
  *         affordance wired to checkoutBookingAction.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { BookingsClient } from "./BookingsClient";
 import type { AdminBookingView } from "./BookingsClient";
 
@@ -17,9 +17,20 @@ vi.mock("next/navigation", () => ({
 }));
 
 const checkoutSpy = vi.fn().mockResolvedValue({});
+const cancelSpy = vi.fn().mockResolvedValue({});
+const activateSpy = vi.fn().mockResolvedValue({});
+const createSpy = vi.fn().mockResolvedValue({});
 vi.mock("@/app/(admin)/admin/bookings/actions", () => ({
   checkoutBookingAction: (id: string, method: string) => checkoutSpy(id, method),
+  cancelBookingAction: (id: string) => cancelSpy(id),
+  activateBookingAction: (id: string) => activateSpy(id),
+  createBookingAsAdminAction: (input: unknown) => createSpy(input),
 }));
+
+const members = [{ id: "u_1", name: "Budi Santoso", email: "budi@x.test" }];
+const facilities = [
+  { id: "f_1", name: "Meja A", type: "COWORKING_SEAT" as const, ratePerHourRupiah: 20000 },
+];
 
 const bookings: AdminBookingView[] = [
   {
@@ -141,5 +152,70 @@ describe("BookingsClient (AC-841)", () => {
     fireEvent.change(select, { target: { value: "all" } });
     expect(screen.getByText("Meja A")).toBeInTheDocument();
     expect(screen.getByText("Meeting Room A")).toBeInTheDocument();
+  });
+
+  it("Batalkan opens a confirm dialog and calls cancelBookingAction on confirm (PENDING row)", async () => {
+    render(<BookingsClient bookings={bookings} />);
+    fireEvent.change(screen.getByDisplayValue("Booking Aktif"), { target: { value: "all" } });
+
+    const row = screen.getByText("Counter 1").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: /batalkan/i }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    fireEvent.click(within(dialog).getByRole("button", { name: /batalkan booking/i }));
+
+    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("bk_pending"));
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+  });
+
+  it("Aktifkan Sekarang calls activateBookingAction for a CONFIRMED row", async () => {
+    render(<BookingsClient bookings={bookings} />);
+    fireEvent.change(screen.getByDisplayValue("Booking Aktif"), { target: { value: "all" } });
+
+    const row = screen.getByText("Meeting Room A").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: /aktifkan sekarang/i }));
+
+    await waitFor(() => expect(activateSpy).toHaveBeenCalledWith("bk_confirmed"));
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+  });
+
+  it("surfaces INVALID_TRANSITION inline on the row when activation fails", async () => {
+    activateSpy.mockRejectedValueOnce(new Error("INVALID_TRANSITION"));
+    render(<BookingsClient bookings={bookings} />);
+    fireEvent.change(screen.getByDisplayValue("Booking Aktif"), { target: { value: "all" } });
+
+    const row = screen.getByText("Meeting Room A").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: /aktifkan sekarang/i }));
+
+    await waitFor(() =>
+      expect(within(row).getByRole("alert")).toHaveTextContent(/tidak bisa diaktifkan/i),
+    );
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it("Tambah Booking opens the manual-create dialog and submits to createBookingAsAdminAction", async () => {
+    render(<BookingsClient bookings={bookings} members={members} facilities={facilities} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /tambah booking/i }));
+    const dialog = await screen.findByRole("dialog", { name: /tambah booking/i });
+
+    fireEvent.change(within(dialog).getByLabelText(/member/i), { target: { value: "u_1" } });
+    fireEvent.change(within(dialog).getByLabelText(/fasilitas/i), { target: { value: "f_1" } });
+    fireEvent.change(within(dialog).getByLabelText(/tanggal mulai/i), { target: { value: "2026-06-10" } });
+    fireEvent.change(within(dialog).getByLabelText(/jam mulai/i), { target: { value: "09:00" } });
+    fireEvent.change(within(dialog).getByLabelText(/tanggal selesai/i), { target: { value: "2026-06-10" } });
+    fireEvent.change(within(dialog).getByLabelText(/jam selesai/i), { target: { value: "11:00" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^simpan$/i }));
+
+    await waitFor(() => expect(createSpy).toHaveBeenCalled());
+    expect(createSpy.mock.calls[0][0]).toMatchObject({
+      userId: "u_1",
+      facilityId: "f_1",
+      facilityType: "COWORKING_SEAT",
+      facilityName: "Meja A",
+    });
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /tambah booking/i })).toBeNull());
   });
 });

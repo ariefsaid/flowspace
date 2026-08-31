@@ -19,7 +19,12 @@ import {
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { checkoutBookingAction } from "@/app/(admin)/admin/bookings/actions";
+import {
+  checkoutBookingAction,
+  cancelBookingAction,
+  activateBookingAction,
+  createBookingAsAdminAction,
+} from "@/app/(admin)/admin/bookings/actions";
 import type {
   BookingStatus,
   BookingPaymentStatus,
@@ -28,6 +33,13 @@ import type {
   MembershipTier,
 } from "@/lib/db/enums";
 import type { CheckoutPaymentMethod } from "@/lib/db/bookings";
+import {
+  AddBookingDialog,
+  type AddBookingMemberOption,
+  type AddBookingFacilityOption,
+  type AddBookingValues,
+} from "./AddBookingDialog";
+import { bookingErrorMessage } from "./bookingErrors";
 
 // ---------------------------------------------------------------------------
 // View shape — DB Booking mapped for this component
@@ -55,6 +67,10 @@ export interface AdminBookingView {
 
 export interface BookingsClientProps {
   bookings: AdminBookingView[];
+  /** Org's active members, for the "Tambah Booking" manual-create picker. */
+  members?: AddBookingMemberOption[];
+  /** Org's bookable facilities, for the "Tambah Booking" manual-create picker. */
+  facilities?: AddBookingFacilityOption[];
 }
 
 // ---------------------------------------------------------------------------
@@ -355,10 +371,16 @@ function ActiveBookingCard({
 
 interface BookingRowProps {
   booking: AdminBookingView;
+  onActivate: (booking: AdminBookingView) => void;
+  onRequestCancel: (booking: AdminBookingView) => void;
+  pending: boolean;
+  error?: string;
 }
 
-function BookingRow({ booking }: BookingRowProps) {
+function BookingRow({ booking, onActivate, onRequestCancel, pending, error }: BookingRowProps) {
   const member = booking.member;
+  const canActivate = booking.status === "CONFIRMED";
+  const canCancel = booking.status === "PENDING" || booking.status === "CONFIRMED";
 
   return (
     <tr className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
@@ -416,10 +438,38 @@ function BookingRow({ booking }: BookingRowProps) {
 
       {/* Actions */}
       <td className="px-4 py-3">
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" className="h-8 px-2 text-xs">
-            Detail
-          </Button>
+        <div className="flex flex-col items-start gap-1">
+          <div className="flex items-center gap-1">
+            {canActivate && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-2 text-xs gap-1"
+                onClick={() => onActivate(booking)}
+                disabled={pending}
+              >
+                <Play size={12} aria-hidden="true" />
+                {pending ? "Mengaktifkan…" : "Aktifkan Sekarang"}
+              </Button>
+            )}
+            {canCancel && (
+              <Button
+                variant="danger"
+                size="sm"
+                className="h-8 px-2 text-xs"
+                onClick={() => onRequestCancel(booking)}
+                disabled={pending}
+              >
+                Batalkan
+              </Button>
+            )}
+            {!canActivate && !canCancel && <span className="text-xs text-gray-400">—</span>}
+          </div>
+          {error && (
+            <p role="alert" className="text-xs text-red-600">
+              {error}
+            </p>
+          )}
         </div>
       </td>
     </tr>
@@ -430,7 +480,7 @@ function BookingRow({ booking }: BookingRowProps) {
 // Page
 // ---------------------------------------------------------------------------
 
-export function BookingsClient({ bookings }: BookingsClientProps) {
+export function BookingsClient({ bookings, members = [], facilities = [] }: BookingsClientProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [filter, setFilter] = useState<FilterOption>("active");
@@ -439,6 +489,12 @@ export function BookingsClient({ bookings }: BookingsClientProps) {
   // mock surface (the input was decorative). Wiring it is a separate concern.
   const [checkoutOpenId, setCheckoutOpenId] = useState<string | null>(null);
   const [pendingCheckoutId, setPendingCheckoutId] = useState<string | null>(null);
+  const [addBookingOpen, setAddBookingOpen] = useState(false);
+  const [rowPendingId, setRowPendingId] = useState<string | null>(null);
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const [cancelTarget, setCancelTarget] = useState<AdminBookingView | null>(null);
+  const [cancelPending, setCancelPending] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const activeBookings = bookings.filter((b) => b.status === "ACTIVE");
   const pendingCount = bookings.filter((b) => b.status === "PENDING").length;
@@ -468,6 +524,56 @@ export function BookingsClient({ bookings }: BookingsClientProps) {
     });
   }
 
+  async function handleActivate(booking: AdminBookingView) {
+    setRowPendingId(booking.id);
+    setRowErrors((prev) => {
+      if (!(booking.id in prev)) return prev;
+      const next = { ...prev };
+      delete next[booking.id];
+      return next;
+    });
+    try {
+      await activateBookingAction(booking.id);
+      startTransition(() => {
+        router.refresh();
+      });
+    } catch (e) {
+      setRowErrors((prev) => ({ ...prev, [booking.id]: bookingErrorMessage(e) }));
+    } finally {
+      setRowPendingId(null);
+    }
+  }
+
+  function handleRequestCancel(booking: AdminBookingView) {
+    setCancelTarget(booking);
+    setCancelError(null);
+  }
+
+  async function handleConfirmCancel() {
+    if (!cancelTarget) return;
+    setCancelPending(true);
+    setCancelError(null);
+    try {
+      await cancelBookingAction(cancelTarget.id);
+      setCancelTarget(null);
+      startTransition(() => {
+        router.refresh();
+      });
+    } catch (e) {
+      setCancelError(bookingErrorMessage(e));
+    } finally {
+      setCancelPending(false);
+    }
+  }
+
+  async function handleCreateBooking(values: AddBookingValues) {
+    await createBookingAsAdminAction(values);
+    setAddBookingOpen(false);
+    startTransition(() => {
+      router.refresh();
+    });
+  }
+
   return (
     <div className="space-y-6">
       {/* Page header */}
@@ -486,8 +592,7 @@ export function BookingsClient({ bookings }: BookingsClientProps) {
             <RefreshCw size={15} />
             Refresh
           </Button>
-          {/* ponytail: Tambah Booking stays a non-wired stub (no admin-create action yet). */}
-          <Button variant="primary" size="md" className="gap-1.5">
+          <Button variant="primary" size="md" className="gap-1.5" onClick={() => setAddBookingOpen(true)}>
             <Plus size={15} />
             Tambah Booking
           </Button>
@@ -597,7 +702,14 @@ export function BookingsClient({ bookings }: BookingsClientProps) {
               </thead>
               <tbody>
                 {historyBookings.map((b) => (
-                  <BookingRow key={b.id} booking={b} />
+                  <BookingRow
+                    key={b.id}
+                    booking={b}
+                    onActivate={handleActivate}
+                    onRequestCancel={handleRequestCancel}
+                    pending={rowPendingId === b.id}
+                    error={rowErrors[b.id]}
+                  />
                 ))}
               </tbody>
             </table>
@@ -615,6 +727,50 @@ export function BookingsClient({ bookings }: BookingsClientProps) {
         <Card className="py-12 text-center">
           <p className="text-sm text-gray-400">Tidak ada booking aktif saat ini.</p>
         </Card>
+      )}
+
+      {/* Tambah Booking — manual admin-create dialog */}
+      {addBookingOpen && (
+        <AddBookingDialog
+          members={members}
+          facilities={facilities}
+          onCancel={() => setAddBookingOpen(false)}
+          onSave={handleCreateBooking}
+        />
+      )}
+
+      {/* Batalkan — cancel confirm dialog */}
+      {cancelTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="cancel-booking-title"
+            className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-md"
+          >
+            <h2 id="cancel-booking-title" className="text-lg font-semibold text-gray-900">
+              Batalkan booking?
+            </h2>
+            <p className="mt-2 text-sm text-gray-500">
+              Booking &quot;{cancelTarget.facility}&quot;
+              {cancelTarget.member ? ` untuk ${cancelTarget.member.name}` : ""} akan dibatalkan. Tindakan ini
+              tidak bisa dibatalkan.
+            </p>
+            {cancelError && (
+              <p role="alert" className="mt-2 text-sm text-red-600">
+                {cancelError}
+              </p>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCancelTarget(null)} disabled={cancelPending}>
+                Tutup
+              </Button>
+              <Button variant="danger" onClick={handleConfirmCancel} disabled={cancelPending}>
+                {cancelPending ? "Membatalkan…" : "Batalkan Booking"}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

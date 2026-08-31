@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useTransition } from "react";
+import { useState, useCallback, useEffect, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Volume2, VolumeX, RefreshCw, Coffee, ChefHat } from "lucide-react";
 import { brand } from "@/brand.config";
@@ -43,6 +43,34 @@ function formatTime(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/**
+ * Plays a short two-tone notification beep via WebAudio — no asset file
+ * needed. Silently no-ops where AudioContext is unavailable (e.g. jsdom,
+ * older browsers) so it can never throw and break the KDS.
+ */
+function playNewOrderBeep() {
+  try {
+    const AudioCtx =
+      window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.3);
+  } catch {
+    // Non-fatal — the KDS still works without sound.
+  }
 }
 
 type OrderStatus = "new" | "preparing" | "ready";
@@ -198,6 +226,45 @@ export function BaristaClient({ initialOrders, orgId }: BaristaClientProps) {
   const [orders, setOrders] = useState<BaristaOrderView[]>(initialOrders);
   const [soundOn, setSoundOn] = useState(true);
   const [spinning, setSpinning] = useState(false);
+  const [showNewOrderToast, setShowNewOrderToast] = useState(false);
+
+  const soundOnRef = useRef(soundOn);
+  useEffect(() => {
+    soundOnRef.current = soundOn;
+  }, [soundOn]);
+
+  // Tracks the NEW-status order ids seen on the previous render so a
+  // realtime-triggered refresh (new `initialOrders` prop, via router.refresh())
+  // can detect an order that just newly appeared. `null` = not mounted yet, so
+  // the very first render never fires the notice (no sound on first load).
+  const prevNewOrderIdsRef = useRef<Set<string> | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setOrders(initialOrders);
+
+    const currentNewIds = new Set(
+      initialOrders.filter((o) => o.status === "new").map((o) => o.id),
+    );
+    const prevNewIds = prevNewOrderIdsRef.current;
+    if (prevNewIds !== null) {
+      const hasNewArrival = [...currentNewIds].some((id) => !prevNewIds.has(id));
+      if (hasNewArrival && soundOnRef.current) {
+        playNewOrderBeep();
+        setShowNewOrderToast(true);
+        if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+        toastTimeoutRef.current = setTimeout(() => setShowNewOrderToast(false), 3500);
+      }
+    }
+    prevNewOrderIdsRef.current = currentNewIds;
+  }, [initialOrders]);
+
+  useEffect(
+    () => () => {
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    },
+    [],
+  );
 
   // Counts
   const newCount = orders.filter((o) => o.status === "new").length;
@@ -255,6 +322,17 @@ export function BaristaClient({ initialOrders, orgId }: BaristaClientProps) {
 
   return (
     <main>
+      {/* New-order toast — transient, auto-dismisses (respects sound toggle) */}
+      {showNewOrderToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed right-4 top-4 z-50 flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm font-medium text-teal-700 shadow-md"
+        >
+          <Coffee className="h-4 w-4" aria-hidden="true" />
+          Pesanan baru masuk!
+        </div>
+      )}
       {/* ------------------------------------------------------------------ */}
       {/* White header band                                                    */}
       {/* ------------------------------------------------------------------ */}

@@ -8,7 +8,7 @@
  *   disabled/"Saldo habis" state when the balance is 0.
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { Step4Confirm } from "./Step4Confirm";
 import type { TimeSelection } from "./Step2Time";
 import type { FacilitySeat } from "./FloorPlan";
@@ -71,5 +71,34 @@ describe("Step4Confirm — payment focus + time-credit balance", () => {
   it("does not surface the raw balance readout outside the payment picker (no more bottom-of-page gray-400 line)", () => {
     render(<Step4Confirm {...baseProps()} />);
     expect(screen.queryByText(/Saldo Time Credits Anda/)).toBeNull();
+  });
+});
+
+describe("Step4Confirm — AC-i049-3: 8-clause booking policy", () => {
+  it("renders all 8 numbered policy clauses in a scrollable box", () => {
+    render(<Step4Confirm {...baseProps()} />);
+    for (let i = 1; i <= 8; i++) {
+      expect(screen.getByText(`${i}.`)).toBeInTheDocument();
+    }
+    expect(screen.getByText(/perekaman video atau fotografi komersial/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/1 \(satu\) jam pemesanan ruang pra-acara/i),
+    ).toBeInTheDocument();
+  });
+
+  it("Konfirmasi Booking stays disabled until the policy checkbox is checked", () => {
+    const { rerender } = render(<Step4Confirm {...baseProps({ policyAccepted: false })} />);
+    expect(screen.getByRole("button", { name: /konfirmasi booking/i })).toBeDisabled();
+
+    rerender(<Step4Confirm {...baseProps({ policyAccepted: true })} />);
+    expect(screen.getByRole("button", { name: /konfirmasi booking/i })).not.toBeDisabled();
+  });
+
+  it("checking the policy checkbox calls onPolicyAcceptedChange(true)", () => {
+    const onPolicyAcceptedChange = vi.fn();
+    render(<Step4Confirm {...baseProps({ onPolicyAcceptedChange })} />);
+    const checkbox = screen.getByRole("checkbox");
+    fireEvent.click(checkbox);
+    expect(onPolicyAcceptedChange).toHaveBeenCalledWith(true);
   });
 });

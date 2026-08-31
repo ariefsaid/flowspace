@@ -527,17 +527,18 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
       // orgId AND is not archived (an archived member's access is meant to
       // be revoked entirely, not just hidden from the directory — matches
       // `findByAuthUserId`'s session-resolution guard) before any write.
-      // `FOR UPDATE` here is safe to take immediately (unlike the scheduled/
-      // time_credits branch below): a walk-in never touches time_credit_lots
-      // in the same transaction, so there is no OTHER contended resource for
-      // this lock to reverse-order against (single-resource transactions
-      // cannot deadlock). A cross-org or archived userId (or one that
+      // [SEC][MONEY][I-047 fix round 2] Canonical FIRST lock: FOR NO KEY
+      // UPDATE on the member's app_users row, taken before the booking/ledger
+      // INSERTs below (each of which takes an implicit FK KEY SHARE on this
+      // same row) — the same app_users-first order as every other
+      // credit/FK-inserting path (see lockUserRowForCreditWrite,
+      // time-credit-lots.ts). A cross-org or archived userId (or one that
       // doesn't exist) is rejected before any write.
       const [user] = await tx
         .select({ id: appUsers.id })
         .from(appUsers)
         .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
-        .for("update")
+        .for("no key update")
         .limit(1);
       if (!user) throw new Error("USER_NOT_FOUND");
 

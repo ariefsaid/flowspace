@@ -378,5 +378,21 @@ describe("lib/db/users", () => {
         .returning();
       await expect(adjustCredits(orgAId, target.id, { printBalanceDelta: 1.5 })).rejects.toThrow(/INVALID_DELTA/);
     });
+
+    it("[SEC][MONEY][I-047 fix-3] rejects a delta beyond the int4/business-cap bound — no write at all (not even printBalanceDelta, when timeCreditsDelta is the one out of range)", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `creditbound-${Date.now()}@x.test`, name: "BoundUser", role: "MEMBER", printBalance: 3, timeCredits: 0 })
+        .returning();
+      await expect(
+        adjustCredits(orgAId, target.id, { timeCreditsDelta: 2_147_483_647, printBalanceDelta: 5 }),
+      ).rejects.toThrow(/INVALID_DELTA/);
+
+      const [fresh] = await testDb.select().from(appUsers).where(eq(appUsers.id, target.id));
+      expect(fresh.printBalance).toBe(3); // untouched — the whole call rejected before any write
+      expect(fresh.timeCredits).toBe(0);
+      const lots = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.userId, target.id));
+      expect(lots).toHaveLength(0);
+    });
   });
 });

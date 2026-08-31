@@ -9,7 +9,7 @@ import { and, eq, isNull, asc, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import { appUsers, type AppUser } from "@/lib/db/schema";
 import { ROLES, MEMBERSHIP_TIERS, type MembershipTier, type Role } from "@/lib/db/enums";
-import { adjustTimeCreditsForAdmin } from "@/lib/db/time-credit-lots";
+import { adjustTimeCreditsForAdmin, assertValidCreditDelta } from "@/lib/db/time-credit-lots";
 
 /**
  * Login lookup. Email is globally unique in the single-venue MVP so this
@@ -283,12 +283,14 @@ export async function adjustCredits(
 ): Promise<{ timeCredits: number; printBalance: number }> {
   const timeCreditsDelta = input.timeCreditsDelta ?? 0;
   const printBalanceDelta = input.printBalanceDelta ?? 0;
-  if (!Number.isFinite(timeCreditsDelta) || !Number.isInteger(timeCreditsDelta)) {
-    throw new Error("INVALID_DELTA");
-  }
-  if (!Number.isFinite(printBalanceDelta) || !Number.isInteger(printBalanceDelta)) {
-    throw new Error("INVALID_DELTA");
-  }
+  // [SEC][MONEY][I-047 fix-3] Finite integer within the int4/business-cap
+  // bound (see time-credit-lots.ts's assertValidCreditDelta) — validated
+  // BEFORE the transaction opens, so an out-of-range delta never even
+  // attempts a write. `printBalanceDelta` reuses the same guard: it isn't
+  // hours, but it lands in the same `integer` column with the same raw
+  // Postgres overflow risk, so the same bound applies.
+  assertValidCreditDelta(timeCreditsDelta);
+  assertValidCreditDelta(printBalanceDelta);
 
   return db.transaction(async (tx) => {
     const [target] = await tx

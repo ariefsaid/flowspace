@@ -64,6 +64,40 @@ export function selectLotsToSpend(
 }
 
 // ---------------------------------------------------------------------------
+// assertValidCreditDelta [SEC][MONEY][I-047 fix-3] — shared int4/business-cap
+// guard for every manual credit/print-balance delta.
+// ---------------------------------------------------------------------------
+
+/** Postgres `integer` column bound — beyond this the DB itself would throw a
+ *  raw "value out of range for type integer" error. */
+const INT4_MAX = 2_147_483_647;
+/** [SEC][MONEY] Coarse business sanity cap on a single manual adjustment
+ *  (time-credit hours OR print-balance pages) — far beyond any real admin
+ *  grant/debit, but small enough that even a crafted or fat-fingered delta
+ *  can never approach the int4 edge, including after being added to an
+ *  existing near-max balance (`GREATEST(col + delta, 0)` in adjustCredits). */
+const MAX_CREDIT_DELTA = 1_000_000;
+
+/**
+ * Validates a single manual credit/print-balance delta [SEC][MONEY] — a
+ * finite integer within `±MAX_CREDIT_DELTA` (which is itself far inside the
+ * Postgres `integer` column bound, `INT4_MAX`). Throws `INVALID_DELTA`
+ * otherwise, including for `NaN`/`Infinity` (never silently treated as a
+ * zero/no-op — the caller must see a clear rejection, not a masked bug).
+ * Shared by `adjustCredits` (users.ts, validated BEFORE its transaction
+ * opens) and `adjustTimeCreditsForAdmin` below (defense-in-depth — this
+ * function is directly callable without going through `adjustCredits`).
+ */
+export function assertValidCreditDelta(delta: number): void {
+  if (!Number.isFinite(delta) || !Number.isInteger(delta)) throw new Error("INVALID_DELTA");
+  if (delta > MAX_CREDIT_DELTA || delta < -MAX_CREDIT_DELTA) throw new Error("INVALID_DELTA");
+  // Belt-and-braces: MAX_CREDIT_DELTA is already « INT4_MAX, but keep the
+  // int4 bound itself explicit so this function's contract doesn't silently
+  // depend on the business cap alone if that constant is ever loosened.
+  if (delta > INT4_MAX || delta < -INT4_MAX) throw new Error("INVALID_DELTA");
+}
+
+// ---------------------------------------------------------------------------
 // spendTimeCredits — the atomic, race-safe debit path [SEC][MONEY]
 // ---------------------------------------------------------------------------
 
@@ -204,9 +238,17 @@ export async function adjustTimeCreditsForAdmin(opts: {
 }): Promise<number> {
   const { orgId, userId, deltaHours, tx } = opts;
 
-  if (!Number.isFinite(deltaHours) || deltaHours === 0) {
+  if (deltaHours === 0) {
     return recomputeCreditCache({ orgId, userId, tx });
   }
+  // [SEC][MONEY][I-047 fix-3] Defense-in-depth: `adjustCredits` (users.ts)
+  // already validates this BEFORE opening its transaction, but this
+  // function is itself exported and directly callable — never trust a
+  // caller-supplied delta this close to the DB's raw int4 bound without its
+  // own check. Also now rejects a non-finite delta outright (NaN/Infinity
+  // used to silently fall through to the recompute-only no-op branch above,
+  // masking a caller bug instead of surfacing it).
+  assertValidCreditDelta(deltaHours);
 
   if (deltaHours > 0) {
     const purchasedAt = new Date();

@@ -16,7 +16,7 @@ import postgres from "postgres";
 import * as schema from "@/lib/db/schema";
 import { organizations, appUsers, timeCreditLots } from "@/lib/db/schema";
 import { db } from "@/lib/db/drizzle";
-import { spendTimeCredits, listLots } from "@/lib/db/time-credit-lots";
+import { spendTimeCredits, listLots, adjustTimeCreditsForAdmin } from "@/lib/db/time-credit-lots";
 
 const TEST_URL =
   process.env.TEST_DATABASE_URL ??
@@ -271,6 +271,23 @@ describe("lib/db/time-credit-lots — spendTimeCredits [SEC][MONEY]", () => {
 
       const [lotAfter] = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.id, orgALot.id));
       expect(lotAfter.remainingHours).toBe(5); // untouched by the cross-org attempt
+    });
+  });
+
+  describe("adjustTimeCreditsForAdmin [SEC][MONEY][I-047 fix-3] — defense-in-depth delta bound", () => {
+    it("rejects a delta beyond the int4/business-cap bound even when called directly (not only via users.ts's adjustCredits) — no lot/cache write", async () => {
+      await testSql`TRUNCATE TABLE "time_credit_lots" RESTART IDENTITY CASCADE`;
+      const before = await getUserTimeCredits(userAId);
+
+      await expect(
+        db.transaction((tx) =>
+          adjustTimeCreditsForAdmin({ orgId: orgAId, userId: userAId, deltaHours: 5_000_000, tx }),
+        ),
+      ).rejects.toThrow(/INVALID_DELTA/);
+
+      const lots = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.userId, userAId));
+      expect(lots).toHaveLength(0);
+      expect(await getUserTimeCredits(userAId)).toBe(before);
     });
   });
 });

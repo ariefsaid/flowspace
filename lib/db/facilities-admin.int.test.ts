@@ -11,6 +11,7 @@
  * AC-1114: negative capacity/maxHoursCap is rejected — no write
  * AC-1115: org isolation — org B never sees org A's facilities
  * AC-1116: updateFacility ignores a crafted orgId/id/archivedAt in the patch — mass-assignment is blocked
+ * AC-1117: a rate/capacity/maxHoursCap beyond int4 max is rejected — no write, no generic DB error
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -194,5 +195,37 @@ describe("lib/db/facilities-admin", () => {
     expect(aRows.map((r) => r.id)).toContain(victim.id);
     const bRows = await listFacilitiesForAdmin(orgBId);
     expect(bRows.map((r) => r.id)).not.toContain(victim.id);
+  });
+
+  it("AC-1117: a rate/capacity/maxHoursCap beyond int4 max is rejected — no write, no generic DB error", async () => {
+    await expect(
+      createFacility(orgAId, {
+        name: "Overflow Rate",
+        type: "COWORKING_SEAT",
+        ratePerHourRupiah: 2_147_483_648,
+      }),
+    ).rejects.toThrow("INVALID_RATE");
+    await expect(
+      createFacility(orgAId, {
+        name: "Overflow Capacity",
+        type: "COWORKING_SEAT",
+        ratePerHourRupiah: 10_000,
+        capacity: 2_147_483_648,
+      }),
+    ).rejects.toThrow("INVALID_CAPACITY");
+    await expect(
+      createFacility(orgAId, {
+        name: "Overflow Max Hours",
+        type: "COWORKING_SEAT",
+        ratePerHourRupiah: 10_000,
+        maxHoursCap: 2_147_483_648,
+      }),
+    ).rejects.toThrow("INVALID_MAX_HOURS_CAP");
+
+    const rows = await testDb
+      .select()
+      .from(facilities)
+      .where(and(eq(facilities.orgId, orgAId), eq(facilities.name, "Overflow Rate")));
+    expect(rows).toHaveLength(0);
   });
 });

@@ -11,6 +11,7 @@
  * AC-1124: negative/non-integer price is rejected — no write
  * AC-1125: org isolation — org B never sees org A's menu items
  * AC-1126: updateMenuItem ignores a crafted orgId/id/archivedAt/hasVariants in the patch — mass-assignment is blocked
+ * AC-1127: a price beyond int4 max is rejected — no write, no generic DB error
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -211,5 +212,23 @@ describe("lib/db/menu-admin", () => {
     expect(aRows.map((r) => r.id)).toContain(victim.id);
     const bRows = await listMenuForAdmin(orgBId);
     expect(bRows.map((r) => r.id)).not.toContain(victim.id);
+  });
+
+  it("AC-1127: a price beyond int4 max is rejected — no write, no generic DB error", async () => {
+    await expect(
+      createMenuItem(orgAId, {
+        name: "Overflow Price",
+        emoji: "☕",
+        category: "COFFEE",
+        priceRupiah: 2_147_483_648,
+        description: "x",
+      }),
+    ).rejects.toThrow("INVALID_PRICE");
+
+    const rows = await testDb
+      .select()
+      .from(cafeMenuItems)
+      .where(and(eq(cafeMenuItems.orgId, orgAId), eq(cafeMenuItems.name, "Overflow Price")));
+    expect(rows).toHaveLength(0);
   });
 });

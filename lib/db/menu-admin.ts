@@ -23,8 +23,13 @@ export type MenuItemInput = {
 
 export type MenuItemUpdateInput = Partial<MenuItemInput>;
 
+/** Postgres `integer` column max — beyond this the DB itself would throw a
+ * generic "value out of range for type integer" error; reject it here first
+ * with a stable error instead. */
+const INT4_MAX = 2_147_483_647;
+
 function assertValidPrice(priceRupiah: number): void {
-  if (!Number.isInteger(priceRupiah) || priceRupiah < 0) {
+  if (!Number.isInteger(priceRupiah) || priceRupiah < 0 || priceRupiah > INT4_MAX) {
     throw new Error("INVALID_PRICE");
   }
 }

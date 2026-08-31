@@ -24,8 +24,13 @@ export type FacilityInput = {
 
 export type FacilityUpdateInput = Partial<FacilityInput>;
 
+/** Postgres `integer` column max — beyond this the DB itself would throw a
+ * generic "value out of range for type integer" error; reject it here first
+ * with a stable, field-named error instead. */
+const INT4_MAX = 2_147_483_647;
+
 function assertNonNegativeInt(value: number, label: string): void {
-  if (!Number.isInteger(value) || value < 0) {
+  if (!Number.isInteger(value) || value < 0 || value > INT4_MAX) {
     throw new Error(`INVALID_${label}`);
   }
 }

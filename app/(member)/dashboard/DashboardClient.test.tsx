@@ -8,7 +8,7 @@
  * [SEC] the QR token is a server-derived prop; the leaf never signs it.
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import {
   DashboardClient,
   type ActiveSessionView,
@@ -55,7 +55,7 @@ const recentBookings: BookingPreviewView[] = [
 
 describe("DashboardClient", () => {
   it("renders balances, tier, QR token, and recent bookings from props (no-active)", () => {
-    const { container } = render(
+    render(
       <DashboardClient
         firstName="Budi"
         hasSession={false}
@@ -80,8 +80,14 @@ describe("DashboardClient", () => {
     // The walk-in banner must NOT render without an active session.
     expect(screen.queryByText("Walk-in Aktif")).toBeNull();
 
-    // QR renders the server token as an <svg>.
-    expect(container.querySelector("svg")).not.toBeNull();
+    // AC-i049-4: without an active session, the QR/Akses-Cepat/WiFi block is
+    // gated off entirely — the "Belum ada sesi aktif" CTA renders instead.
+    expect(screen.queryByText(/QR Akses Pintu & Print/i)).toBeNull();
+    expect(screen.getByText(/belum ada sesi aktif/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /book sekarang/i })).toHaveAttribute(
+      "href",
+      "/booking",
+    );
 
     // Recent bookings preview
     expect(screen.getByText("Meeting Room A")).toBeInTheDocument();
@@ -112,6 +118,11 @@ describe("DashboardClient", () => {
     expect(screen.getAllByText("AKTIF").length).toBeGreaterThan(0);
     // No-session copy must not leak in.
     expect(screen.queryByText("Tidak Ada")).toBeNull();
+
+    // AC-i049-4: with an active session, QR/Akses-Cepat/WiFi renders (and the
+    // no-session CTA does not).
+    expect(screen.getByText(/QR Akses Pintu & Print/i)).toBeInTheDocument();
+    expect(screen.queryByText(/belum ada sesi aktif/i)).toBeNull();
   });
 
   it("design-review: PENDING/CONFIRMED bookings get their own badge tone, not the CANCELLED red catch-all", () => {
@@ -178,6 +189,70 @@ describe("DashboardClient", () => {
       />,
     );
     expect(screen.getByText(/Belum ada riwayat/i)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["REGULAR", ["bg-slate-100", "text-slate-700"]],
+    ["PREMIUM", ["bg-amber-100", "text-amber-700"]],
+    ["GOLD", ["bg-purple-100", "text-purple-700"]],
+  ] as const)(
+    "AC-i049-5: %s tier badge uses its own tone",
+    (tier, expectedClasses) => {
+      render(
+        <DashboardClient
+          firstName="Budi"
+          hasSession={false}
+          timeCredits={139}
+          printBalance={68}
+          tier={tier}
+          qrToken="server-signed-token"
+          activeSession={null}
+          recentBookings={[]}
+          wifi={wifi}
+        />,
+      );
+      const badge = screen.getByText(tier);
+      expect(badge).toHaveClass(...expectedClasses);
+    },
+  );
+
+  it("AC-i049-9: WiFi voucher is hidden until 'Get Voucher' is clicked, only inside the session-gated block", () => {
+    render(
+      <DashboardClient
+        firstName="Budi"
+        hasSession
+        timeCredits={139}
+        printBalance={68}
+        tier="PREMIUM"
+        qrToken="server-signed-token"
+        activeSession={activeSession}
+        recentBookings={recentBookings}
+        wifi={wifi}
+      />,
+    );
+
+    expect(screen.queryByText(wifi.voucher)).not.toBeInTheDocument();
+    const revealBtn = screen.getByRole("button", { name: /get voucher/i });
+    fireEvent.click(revealBtn);
+    expect(screen.getByText(wifi.voucher)).toBeInTheDocument();
+  });
+
+  it("AC-i049-9: no WiFi card at all when there is no active session", () => {
+    render(
+      <DashboardClient
+        firstName="Budi"
+        hasSession={false}
+        timeCredits={139}
+        printBalance={68}
+        tier="PREMIUM"
+        qrToken="server-signed-token"
+        activeSession={null}
+        recentBookings={[]}
+        wifi={wifi}
+      />,
+    );
+    expect(screen.queryByText(/wifi access/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /get voucher/i })).not.toBeInTheDocument();
   });
 
   it("no-mock-import gate: dashboard surface files do not import lib/mock", async () => {

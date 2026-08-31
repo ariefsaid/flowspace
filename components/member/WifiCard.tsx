@@ -37,6 +37,10 @@ function CopyButton({ text }: { text: string }) {
 }
 
 export function WifiCard({ wifi }: WifiCardProps) {
+  // Simulated seam (UniFi integration deferred): voucher starts hidden and is
+  // revealed on request, matching the original's null-until-requested flow.
+  const [revealed, setRevealed] = useState(false);
+
   return (
     <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
       <div className="mb-3 flex items-center gap-2">
@@ -58,18 +62,38 @@ export function WifiCard({ wifi }: WifiCardProps) {
         <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2.5">
           <div>
             <p className="text-xs text-gray-500">Kode Voucher</p>
-            <p className="mt-0.5 font-mono font-semibold tracking-widest text-blue-600">
-              {wifi.voucher}
-            </p>
+            {revealed ? (
+              <p className="mt-0.5 font-mono font-semibold tracking-widest text-blue-600">
+                {wifi.voucher}
+              </p>
+            ) : (
+              <p className="mt-0.5 text-sm italic text-gray-500">Voucher belum tersedia</p>
+            )}
           </div>
-          <CopyButton text={wifi.voucher} />
+          {revealed ? (
+            <CopyButton text={wifi.voucher} />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setRevealed(true)}
+              className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700"
+            >
+              Get Voucher
+            </button>
+          )}
         </div>
       </div>
 
-      <p className="mt-3 text-xs text-gray-500">
-        💡 Hubungkan ke WiFi &quot;{wifi.ssid}&quot;, lalu masukkan kode voucher
-        di halaman login.
-      </p>
+      {revealed ? (
+        <p className="mt-3 text-xs text-gray-500">
+          💡 Hubungkan ke WiFi &quot;{wifi.ssid}&quot;, lalu masukkan kode voucher
+          di halaman login.
+        </p>
+      ) : (
+        <p className="mt-3 text-xs text-amber-600">
+          ⚠️ Klik &quot;Get Voucher&quot; untuk mendapatkan kode akses WiFi.
+        </p>
+      )}
     </div>
   );
 }

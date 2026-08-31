@@ -9,6 +9,7 @@ import {
   CreditCard,
   Coffee,
   CalendarDays,
+  Calendar,
   ArrowRight,
   TrendingUp,
   MapPin,
@@ -134,6 +135,14 @@ const TIER_LABEL: Record<MembershipTier, string> = {
   GOLD: "Member diskon",
 };
 
+// Per-tier badge tone — same AA-passing bg-X-100/text-X-700 pairing as
+// components/ui/Badge.tsx's status tones (no new tokens, no raw hex).
+const TIER_BADGE_TONE: Record<MembershipTier, string> = {
+  REGULAR: "bg-slate-100 text-slate-700",
+  PREMIUM: "bg-amber-100 text-amber-700",
+  GOLD: "bg-purple-100 text-purple-700",
+};
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -191,60 +200,80 @@ export function DashboardClient({
       )}
 
       {/* ── Active Session hero + QR / Akses Cepat / WiFi ────── */}
-      <div className="overflow-hidden rounded-xl border-2 border-teal-500 bg-white shadow-md">
-        {hasSession && activeSession && (
+      {/* Gated on an active session (AC-i049-4): QR access, quick facility
+          links, and the WiFi voucher are only meaningful while a session is
+          running. Without one, a dashed-border CTA points at /booking. */}
+      {hasSession && activeSession ? (
+        <div className="overflow-hidden rounded-xl border-2 border-teal-500 bg-white shadow-md">
           <SessionPanel
             session={activeSession}
             onExtend={(extraHours) => handleExtend(activeSession.bookingId, extraHours)}
           />
-        )}
 
-        <div className="grid grid-cols-1 gap-6 p-6 lg:grid-cols-2">
-          {/* Left: QR */}
-          <div className="flex items-start justify-center">
-            <QrAccessCard token={qrToken} />
-          </div>
+          <div className="grid grid-cols-1 gap-6 p-6 lg:grid-cols-2">
+            {/* Left: QR */}
+            <div className="flex items-start justify-center">
+              <QrAccessCard token={qrToken} />
+            </div>
 
-          {/* Right: Akses Cepat + WiFi */}
-          <div className="flex flex-col gap-4">
-            <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800">
-              <Utensils className="h-4 w-4 text-orange-500" />
-              Akses Cepat Fasilitas
-            </h3>
+            {/* Right: Akses Cepat + WiFi */}
+            <div className="flex flex-col gap-4">
+              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800">
+                <Utensils className="h-4 w-4 text-orange-500" />
+                Akses Cepat Fasilitas
+              </h3>
 
-            {/* Order Cafe */}
-            <Link
-              href="/cafe"
-              className="flex items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3 text-white shadow-md transition-opacity hover:opacity-90"
-            >
-              <Coffee className="h-5 w-5 shrink-0" />
-              <div>
-                <p className="text-sm font-semibold">Order Makanan &amp; Minuman</p>
-                <p className="text-xs text-orange-100">
-                  Diskon khusus member aktif!
-                </p>
-              </div>
-            </Link>
+              {/* Order Cafe */}
+              <Link
+                href="/cafe"
+                className="flex items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3 text-white shadow-md transition-opacity hover:opacity-90"
+              >
+                <Coffee className="h-5 w-5 shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold">Order Makanan &amp; Minuman</p>
+                  <p className="text-xs text-orange-100">
+                    Diskon khusus member aktif!
+                  </p>
+                </div>
+              </Link>
 
-            {/* Print */}
-            <Link
-              href="/print"
-              className="flex items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-purple-500 to-purple-600 px-4 py-3 text-white shadow-md transition-opacity hover:opacity-90"
-            >
-              <Printer className="h-5 w-5 shrink-0" />
-              <div>
-                <p className="text-sm font-semibold">Print / Fotocopy</p>
-                <p className="text-xs text-purple-100">
-                  Saldo: {printBalance} halaman
-                </p>
-              </div>
-            </Link>
+              {/* Print */}
+              <Link
+                href="/print"
+                className="flex items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-purple-500 to-purple-600 px-4 py-3 text-white shadow-md transition-opacity hover:opacity-90"
+              >
+                <Printer className="h-5 w-5 shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold">Print / Fotocopy</p>
+                  <p className="text-xs text-purple-100">
+                    Saldo: {printBalance} halaman
+                  </p>
+                </div>
+              </Link>
 
-            {/* WiFi */}
-            <WifiCard wifi={wifi} />
+              {/* WiFi — voucher hidden until requested (simulated seam, AC-i049-9) */}
+              <WifiCard wifi={wifi} />
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="rounded-xl border-2 border-dashed border-teal-300 bg-teal-50/50 p-8 text-center">
+          <Calendar className="mx-auto h-12 w-12 text-teal-500" aria-hidden="true" />
+          <h3 className="mt-4 text-xl font-semibold text-gray-800">Belum ada sesi aktif</h3>
+          <p className="mt-2 text-gray-600">
+            Booking ruang meeting atau coworking untuk mengakses QR akses pintu, voucher WiFi, dan
+            fasilitas lainnya
+          </p>
+          <Link
+            href="/booking"
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-700"
+          >
+            <Calendar className="h-5 w-5" aria-hidden="true" />
+            Book Sekarang
+            <ArrowRight className="h-5 w-5" aria-hidden="true" />
+          </Link>
+        </div>
+      )}
 
       {/* ── Menu Utama ───────────────────────────────────────── */}
       <Card className="p-5">
@@ -302,7 +331,9 @@ export function DashboardClient({
         <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="min-w-0">
             <p className="text-sm text-gray-500">Membership</p>
-            <span className="mt-1 inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-700">
+            <span
+              className={`mt-1 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${TIER_BADGE_TONE[tier]}`}
+            >
               {tier}
             </span>
             <p className="mt-1 text-xs text-gray-500">{TIER_LABEL[tier]}</p>

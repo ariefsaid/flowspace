@@ -38,18 +38,21 @@ const settingCards: SettingCard[] = [
     title: "Fasilitas",
     description: "Kelola Coworking Seat dan Meeting Room",
     iconColor: "text-blue-500",
+    href: "/admin/settings/facilities",
   },
   {
     icon: <Coffee className="h-8 w-8" />,
     title: "Menu Cafe",
     description: "Kelola item menu makanan dan minuman",
     iconColor: "text-orange-500",
+    href: "/admin/settings/menu",
   },
   {
     icon: <Printer className="h-8 w-8" />,
     title: "Harga Print & Fotocopy",
     description: "Kelola harga print dan fotocopy",
     iconColor: "text-purple-500",
+    href: "/admin/settings/print-pricing",
   },
   {
     icon: <Printer className="h-8 w-8" />,
@@ -70,24 +73,28 @@ const settingCards: SettingCard[] = [
     title: "Site Settings",
     description: "Info, SEO, Theme, Logo, dan Social Media",
     iconColor: "text-green-600",
+    href: "/admin/settings/site",
   },
   {
     icon: <BarChart3 className="h-8 w-8" />,
     title: "Google Analytics",
     description: "Konfigurasi tracking dan analytics",
     iconColor: "text-yellow-600",
+    href: "/admin/settings/analytics",
   },
   {
     icon: <Mail className="h-8 w-8" />,
     title: "Email Settings",
     description: "Konfigurasi notifikasi email otomatis",
     iconColor: "text-red-500",
+    href: "/admin/settings/email",
   },
   {
     icon: <Wifi className="h-8 w-8" />,
     title: "UniFi Controller",
     description: "Konfigurasi WiFi voucher otomatis",
     iconColor: "text-teal-500",
+    href: "/admin/settings/unifi",
   },
 ];
 

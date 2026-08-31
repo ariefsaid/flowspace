@@ -62,6 +62,7 @@ const BUSINESS_TABLES = [
   "print_agent_rate_limit_events",
   "time_credit_lots",
   "print_topup_packages",
+  "org_settings",
 ] as const;
 
 let orgAId: string;

@@ -170,6 +170,106 @@ export async function recomputeCreditCache(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// adjustTimeCreditsForAdmin [SEC][MONEY] — admin manual grant/debit (I-047)
+// ---------------------------------------------------------------------------
+
+/** Same 90-day expiry `purchaseTimeCreditPackage` (packages.ts) grants on a paid lot. */
+const ADMIN_GRANT_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * Admin manual credit adjustment (e.g. compensating a member, correcting an
+ * error) — grants or debits hours OUTSIDE the normal purchase/spend flows.
+ * `app_users.timeCredits` is a derived cache (see the module doc comment
+ * above), so this never writes that column directly:
+ *
+ * - A positive `deltaHours` inserts a NEW 90-day lot (mirrors
+ *   `purchaseTimeCreditPackage`'s grant shape, `packageId`/
+ *   `purchaseTransactionId` both null — an admin grant, not a purchase) so it
+ *   participates in the same FIFO-expiry pool as purchased credits.
+ * - A negative `deltaHours` debits the EXISTING lots FIFO (soonest-expiring
+ *   first — the same row-locked read `spendTimeCredits` uses) but — unlike
+ *   `spendTimeCredits` — CLAMPS to whatever is actually available rather
+ *   than throwing `INSUFFICIENT_CREDITS`: an admin "remove 10h" against a 3h
+ *   balance zeroes the balance instead of failing the whole request.
+ *
+ * Always ends by recomputing the `app_users.timeCredits` cache. Returns the
+ * new cache value. MUST be called with the caller's own `tx` (same pooling
+ * contract as `spendTimeCredits`/`recomputeCreditCache`).
+ */
+export async function adjustTimeCreditsForAdmin(opts: {
+  orgId: string;
+  userId: string;
+  deltaHours: number;
+  tx: Pick<typeof db, "select" | "update" | "insert">;
+}): Promise<number> {
+  const { orgId, userId, deltaHours, tx } = opts;
+
+  if (!Number.isFinite(deltaHours) || deltaHours === 0) {
+    return recomputeCreditCache({ orgId, userId, tx });
+  }
+
+  if (deltaHours > 0) {
+    const purchasedAt = new Date();
+    await tx.insert(timeCreditLots).values({
+      orgId,
+      userId,
+      totalHours: deltaHours,
+      remainingHours: deltaHours,
+      purchasedAt,
+      expiresAt: new Date(purchasedAt.getTime() + ADMIN_GRANT_EXPIRY_MS),
+    });
+    return recomputeCreditCache({ orgId, userId, tx });
+  }
+
+  // Negative delta: debit FIFO, clamped to whatever is actually available —
+  // mirrors spendTimeCredits's row-locked read + expired-lot prune, but never
+  // throws INSUFFICIENT_CREDITS.
+  const rows = await tx
+    .select({
+      id: timeCreditLots.id,
+      remainingHours: timeCreditLots.remainingHours,
+      expiresAt: timeCreditLots.expiresAt,
+    })
+    .from(timeCreditLots)
+    .where(
+      and(
+        eq(timeCreditLots.orgId, orgId),
+        eq(timeCreditLots.userId, userId),
+        gt(timeCreditLots.remainingHours, 0),
+      ),
+    )
+    .orderBy(asc(timeCreditLots.expiresAt))
+    .for("update");
+
+  const now = new Date();
+  const expiredIds = rows.filter((r) => r.expiresAt.getTime() <= now.getTime()).map((r) => r.id);
+  if (expiredIds.length > 0) {
+    await tx
+      .update(timeCreditLots)
+      .set({ remainingHours: 0, updatedAt: now })
+      .where(and(eq(timeCreditLots.orgId, orgId), inArray(timeCreditLots.id, expiredIds)));
+  }
+
+  const activeRows = rows.filter((r) => r.expiresAt.getTime() > now.getTime());
+  const available = activeRows.reduce((sum, r) => sum + r.remainingHours, 0);
+  const want = Math.min(-deltaHours, available);
+  if (want > 0) {
+    const picks = selectLotsToSpend(activeRows, want, now);
+    for (const pick of picks) {
+      await tx
+        .update(timeCreditLots)
+        .set({
+          remainingHours: sql`${timeCreditLots.remainingHours} - ${pick.hoursToDebit}`,
+          updatedAt: now,
+        })
+        .where(and(eq(timeCreditLots.id, pick.id), eq(timeCreditLots.orgId, orgId)));
+    }
+  }
+
+  return recomputeCreditCache({ orgId, userId, tx });
+}
+
+// ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
 

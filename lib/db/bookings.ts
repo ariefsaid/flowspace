@@ -520,15 +520,24 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
   if (walkin) {
     const rate = WALKIN_RATES[facilityType as "WALKIN_COWORKING" | "WALKIN_MEETING"];
     return db.transaction(async (tx) => {
-      // [SEC] Same identity/tenancy guard as the scheduled branch below: a
-      // walk-in has no facility row to anchor org membership through (its
-      // facility_id stays null), so userId is the ONLY org signal — resolve
-      // it INSIDE the tx and require it actually belongs to orgId before any
-      // write. A cross-org userId (or one that doesn't exist) is rejected.
+      // [SEC][I-047 fix-1] Same identity/tenancy guard as the scheduled
+      // branch below: a walk-in has no facility row to anchor org membership
+      // through (its facility_id stays null), so userId is the ONLY org
+      // signal — resolve it INSIDE the tx and require it actually belongs to
+      // orgId AND is not archived (an archived member's access is meant to
+      // be revoked entirely, not just hidden from the directory — matches
+      // `findByAuthUserId`'s session-resolution guard) before any write.
+      // `FOR UPDATE` here is safe to take immediately (unlike the scheduled/
+      // time_credits branch below): a walk-in never touches time_credit_lots
+      // in the same transaction, so there is no OTHER contended resource for
+      // this lock to reverse-order against (single-resource transactions
+      // cannot deadlock). A cross-org or archived userId (or one that
+      // doesn't exist) is rejected before any write.
       const [user] = await tx
         .select({ id: appUsers.id })
         .from(appUsers)
-        .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))
+        .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
+        .for("update")
         .limit(1);
       if (!user) throw new Error("USER_NOT_FOUND");
 
@@ -649,14 +658,46 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
     await acquireOrgDayLock(tx, orgId, calendarDay);
     await acquireFacilityLock(tx, orgId, facility.id);
 
+    // [SEC][MONEY][I-047 fix-2] Facility TOCTOU close: `facility` above was
+    // read BEFORE this transaction (and before its advisory lock) — a
+    // concurrent admin archive/availability-toggle/type-change/rate-change
+    // could have committed in the window between that read and this lock.
+    // Now that this tx holds the facility's own advisory lock, RE-READ the
+    // row `FOR UPDATE` and use ONLY this fresh row for every downstream
+    // decision (type/rate/name/availability) — never the pre-tx snapshot.
+    // `FOR UPDATE` also serializes against a concurrent
+    // updateFacility/archiveFacility write (facilities-admin.ts) targeting
+    // the SAME row: that single-statement write simply blocks until this tx
+    // commits/rolls back, so it can never land strictly between this read
+    // and this transaction's own commit either.
+    const [freshFacility] = await tx
+      .select()
+      .from(facilities)
+      .where(and(eq(facilities.id, facility.id), eq(facilities.orgId, orgId)))
+      .for("update")
+      .limit(1);
+    if (!freshFacility || !freshFacility.available || freshFacility.archivedAt) {
+      throw new Error("FACILITY_UNAVAILABLE");
+    }
+    if (freshFacility.type !== facilityType) throw new Error("FACILITY_TYPE_MISMATCH");
+
     // [SEC] Identity/tier seam: resolve the user row + its CURRENT tier
     // INSIDE the tx from the DB — never the caller-supplied `tier` — and
-    // require the user actually belongs to `orgId`. A cross-org userId
-    // (or one that doesn't exist) is rejected before any write.
+    // require the user actually belongs to `orgId` and is not archived. This
+    // is a fast, UNLOCKED fail-fast (tier resolution + the common case); the
+    // genuine TOCTOU-closing re-check (below, `FOR UPDATE`) is deliberately
+    // deferred until AFTER any time-credit spend so the lock order stays
+    // time_credit_lots-before-app_users across every credit-touching path
+    // (matches spendTimeCredits/recomputeCreditCache and adjustCredits —
+    // see time-credit-lots.ts/users.ts) — locking app_users here, before
+    // spendTimeCredits locks the lots rows, would reverse that order for a
+    // time_credits payment and reintroduce the lock-order deadlock finding 4
+    // fixes elsewhere. A cross-org or archived userId (or one that doesn't
+    // exist) is rejected before any write.
     const [user] = await tx
       .select({ membershipTier: appUsers.membershipTier })
       .from(appUsers)
-      .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))
+      .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
       .limit(1);
     if (!user) throw new Error("USER_NOT_FOUND");
 
@@ -665,25 +706,25 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
       const dayBlocked = await individualBookingExistsOnDay(tx, orgId, dayStart, dayEnd);
       if (dayBlocked) throw new Error("FACILITY_UNAVAILABLE");
     }
-    const occupied = await facilityHasActiveOverlap(tx, orgId, facility.id, startAt, endAt);
+    const occupied = await facilityHasActiveOverlap(tx, orgId, freshFacility.id, startAt, endAt);
     if (occupied) throw new Error("FACILITY_UNAVAILABLE");
 
     const discounts = await getTierDiscounts(orgId, user.membershipTier, tx);
     const discountPct = resolveDiscountPct(facilityType, discounts);
-    const price = computeBookingPrice({ hours: durationHours, ratePerHourRupiah: facility.ratePerHourRupiah, discountPct });
+    const price = computeBookingPrice({ hours: durationHours, ratePerHourRupiah: freshFacility.ratePerHourRupiah, discountPct });
 
     const [booking] = await tx
       .insert(bookings)
       .values({
         orgId,
         userId,
-        facilityType: facility.type, // [SEC] derived from the resolved row, never the client request
-        facilityId: facility.id,
-        facilityName: facility.name,
+        facilityType: freshFacility.type, // [SEC] derived from the freshly re-read row, never the client request or the pre-tx snapshot
+        facilityId: freshFacility.id,
+        facilityName: freshFacility.name,
         startAt,
         endAt,
         durationHours,
-        ratePerHourRupiah: facility.ratePerHourRupiah,
+        ratePerHourRupiah: freshFacility.ratePerHourRupiah,
         amountRupiah: price.amountRupiah,
         baseAmountRupiah: price.baseAmountRupiah,
         discountRupiah: price.discountRupiah,
@@ -701,12 +742,28 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
       await spendTimeCredits({ orgId, userId, hours: durationHours, tx });
     }
 
+    // [SEC][I-047 fix-1] Archived-user TOCTOU close: re-verify, holding a
+    // REAL row lock, as the LAST app_users touch in this transaction —
+    // placed intentionally AFTER the optional time-credit spend above (see
+    // the lock-order comment on the unlocked read further up). Either this
+    // select blocks on a concurrent archiveUser's still-in-flight UPDATE and
+    // then observes its committed result, or archiveUser blocks on THIS
+    // lock and only proceeds after this transaction finishes — no interleave
+    // can let an archived user's booking commit.
+    const [stillActive] = await tx
+      .select({ id: appUsers.id })
+      .from(appUsers)
+      .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
+      .for("update")
+      .limit(1);
+    if (!stillActive) throw new Error("USER_NOT_FOUND");
+
     await recordTransaction(
       {
         orgId,
         userId,
         type: "BOOKING",
-        description: `Booking ${facility.name}`,
+        description: `Booking ${freshFacility.name}`,
         amountRupiah: price.amountRupiah,
         discountRupiah: price.discountRupiah,
         status: txnStatus,

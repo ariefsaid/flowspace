@@ -19,6 +19,7 @@ import {
   bookings,
   transactions,
   membershipTierConfig,
+  timeCreditLots,
 } from "@/lib/db/schema";
 
 const TEST_URL =
@@ -191,6 +192,46 @@ async function bookingRowCount(orgId: string): Promise<number> {
   return count as number;
 }
 
+// ---------------------------------------------------------------------------
+// Deterministic ROW-lock barrier (I-047 fix-2, facility TOCTOU) — same
+// pg_locks-polling discipline as `runWithLockBarrier` above, but for a real
+// `FOR UPDATE` row lock rather than an advisory lock: the holder statement
+// (issued on the SAME connection it will later mutate with) blocks
+// `createBooking`'s post-lock facility re-read, we poll until it is
+// genuinely queued, THEN mutate the row on the holder's own connection
+// (never a second pool connection — that would just deadlock the TEST
+// itself against its own held lock) before releasing.
+// ---------------------------------------------------------------------------
+async function runWithRowLockBarrier<T>(
+  holderSql: string,
+  waiters: number,
+  op: () => Promise<T>,
+  onBlocked: (holder: postgres.TransactionSql) => Promise<void>,
+): Promise<T> {
+  let opPromise!: Promise<T>;
+  await testSql.begin(async (holder) => {
+    await holder.unsafe(holderSql);
+    opPromise = op();
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      const rows = await holder.unsafe<{ n: number }[]>(
+        `select count(*)::int as n from pg_locks where locktype IN ('transactionid', 'tuple') and not granted`,
+      );
+      if (Number(rows[0]?.n ?? 0) >= waiters) break;
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for ${waiters} row-lock waiter(s)`);
+      }
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    await onBlocked(holder);
+    // Returning here ends the holder's transaction (COMMIT), releasing the
+    // row lock AND committing `onBlocked`'s write atomically together — the
+    // waiting op only ever sees either the pre-change or the fully-committed
+    // post-change row, never a half-applied one.
+  });
+  return opPromise;
+}
+
 describe("lib/db/bookings", () => {
   // -------------------------------------------------------------------------
   // listFacilities
@@ -339,6 +380,33 @@ describe("lib/db/bookings", () => {
         }),
       ).rejects.toThrow(/USER_NOT_FOUND/);
       expect(await bookingRowCount(orgAId)).toBe(before);
+    });
+
+    it("[SEC][I-047 fix-1] rejects a scheduled time_credits create for an archived userId — no booking/ledger/credit write", async () => {
+      const [archived] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `archived-sched-${Date.now()}@x.test`, name: "Archived", role: "MEMBER", archivedAt: new Date() })
+        .returning();
+      const [lot] = await testDb
+        .insert(timeCreditLots)
+        .values({ orgId: orgAId, userId: archived.id, totalHours: 10, remainingHours: 10, expiresAt: new Date(Date.now() + 30 * 24 * 3_600_000) })
+        .returning();
+
+      const before = await bookingRowCount(orgAId);
+      await expect(
+        createBooking({
+          orgId: orgAId, userId: archived.id, tier: "REGULAR",
+          facilityType: "COWORKING_SEAT", facilityId: seatAId, facilityName: "Meja A",
+          startAt: new Date("2026-07-06T09:00:00Z"), endAt: new Date("2026-07-06T10:00:00Z"),
+          paymentMethod: "time_credits",
+        }),
+      ).rejects.toThrow(/USER_NOT_FOUND/);
+
+      expect(await bookingRowCount(orgAId)).toBe(before);
+      const [txn] = await testDb.select().from(transactions).where(eq(transactions.userId, archived.id));
+      expect(txn).toBeUndefined();
+      const [freshLot] = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.id, lot.id));
+      expect(freshLot.remainingHours).toBe(10); // no credit spend leaked through
     });
 
     it("AC-806: FULL_ROOM is bookable online at its catalog rate on a day with no individual bookings", async () => {
@@ -543,6 +611,24 @@ describe("lib/db/bookings", () => {
       ).rejects.toThrow(/USER_NOT_FOUND/);
       expect(await bookingRowCount(orgAId)).toBe(before);
     });
+
+    it("[SEC][I-047 fix-1] rejects a walk-in create for an archived userId — no booking/ledger write", async () => {
+      const [archived] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `archived-walkin-${Date.now()}@x.test`, name: "ArchivedWalkin", role: "MEMBER", archivedAt: new Date() })
+        .returning();
+      const before = await bookingRowCount(orgAId);
+      await expect(
+        createBooking({
+          orgId: orgAId, userId: archived.id, tier: "REGULAR",
+          facilityType: "WALKIN_COWORKING", facilityName: "Walk-in Coworking",
+          paymentMethod: "cashier",
+        }),
+      ).rejects.toThrow(/USER_NOT_FOUND/);
+      expect(await bookingRowCount(orgAId)).toBe(before);
+      const [txn] = await testDb.select().from(transactions).where(eq(transactions.userId, archived.id));
+      expect(txn).toBeUndefined();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -610,6 +696,74 @@ describe("lib/db/bookings", () => {
       const dayRows = await testDb.select().from(bookings).where(eq(bookings.orgId, orgAId));
       const thatDay = dayRows.filter((b) => b.startAt.toISOString().slice(0, 10) === day);
       expect(thatDay).toHaveLength(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // createBooking — facility TOCTOU close (I-047 fix-2)
+  // -------------------------------------------------------------------------
+  describe("createBooking — facility TOCTOU (I-047 fix-2)", () => {
+    it("a rate change committed WHILE a concurrent create is genuinely blocked on the post-lock facility re-read is reflected in the booking's price — never the pre-tx stale rate (deterministic row-lock barrier)", async () => {
+      const [facility] = await testDb
+        .insert(facilities)
+        .values({ orgId: orgAId, name: `RaceRate-${Date.now()}`, type: "COWORKING_SEAT", ratePerHourRupiah: 20000, available: true })
+        .returning();
+      const startAt = new Date("2026-08-01T09:00:00Z");
+      const endAt = new Date("2026-08-01T10:00:00Z"); // 1h
+
+      const attempt = () =>
+        createBooking({
+          orgId: orgAId, userId: aUserId, tier: "REGULAR",
+          facilityType: "COWORKING_SEAT", facilityId: facility.id, facilityName: facility.name,
+          startAt, endAt, paymentMethod: "online",
+        });
+
+      // The pre-tx read inside createBooking sees the OLD rate (20000) —
+      // this holder statement doesn't acquire its lock until AFTER that,
+      // so the raciness is real: createBooking's advisory locks succeed
+      // immediately (different lock space), then it blocks on ITS OWN
+      // post-lock `FOR UPDATE` re-read of this same facility row.
+      const result = await runWithRowLockBarrier(
+        `select * from facilities where id = '${facility.id}' for update`,
+        1,
+        attempt,
+        async (holder) => {
+          await holder`update facilities set rate_per_hour_rupiah = 99000 where id = ${facility.id}`;
+        },
+      );
+
+      expect(result.ratePerHourRupiah).toBe(99000); // the FRESH, post-lock rate — never the stale 20000 snapshot
+      expect(result.amountRupiah).toBe(99000); // 1h × the fresh rate, 0% discount (REGULAR)
+    });
+
+    it("a facility archived WHILE a concurrent create is genuinely blocked on the post-lock re-read is rejected — FACILITY_UNAVAILABLE, no booking row (deterministic row-lock barrier)", async () => {
+      const [facility] = await testDb
+        .insert(facilities)
+        .values({ orgId: orgAId, name: `RaceArchive-${Date.now()}`, type: "COWORKING_SEAT", ratePerHourRupiah: 20000, available: true })
+        .returning();
+      const startAt = new Date("2026-08-02T09:00:00Z");
+      const endAt = new Date("2026-08-02T10:00:00Z");
+      const before = await bookingRowCount(orgAId);
+
+      const attempt = () =>
+        createBooking({
+          orgId: orgAId, userId: aUserId, tier: "REGULAR",
+          facilityType: "COWORKING_SEAT", facilityId: facility.id, facilityName: facility.name,
+          startAt, endAt, paymentMethod: "online",
+        });
+
+      await expect(
+        runWithRowLockBarrier(
+          `select * from facilities where id = '${facility.id}' for update`,
+          1,
+          attempt,
+          async (holder) => {
+            await holder`update facilities set archived_at = now() where id = ${facility.id}`;
+          },
+        ),
+      ).rejects.toThrow(/FACILITY_UNAVAILABLE/);
+
+      expect(await bookingRowCount(orgAId)).toBe(before);
     });
   });
 

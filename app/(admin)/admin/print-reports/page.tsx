@@ -11,15 +11,24 @@ import { listPrintJobsForAdmin, getPrintReportSummary } from "@/lib/db/print";
 import { listPrintersForAdmin } from "@/lib/db/printers";
 import { findProfilesByIds } from "@/lib/db/users";
 import { PrintReportsClient } from "./PrintReportsClient";
-import { toView } from "./derive";
+import { toView, parseFilterParams, toDbFilters } from "./derive";
 
-export default async function AdminPrintReportsPage() {
+export default async function AdminPrintReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { orgId } = await requireSession();
 
-  // Summary aggregates come from SQL over ALL jobs (uncapped); the table lists
-  // the newest rows up to listPrintJobsForAdmin's cap.
+  // I-047: the filter bar drives a server-side re-query via URL
+  // searchParams — never a client-side refetch.
+  const filterState = parseFilterParams(await searchParams);
+
+  // Summary aggregates come from SQL over ALL jobs (uncapped, unfiltered); the
+  // table lists the newest rows matching the active filters, up to
+  // listPrintJobsForAdmin's cap.
   const [rows, summary, printerRows] = await Promise.all([
-    listPrintJobsForAdmin(orgId),
+    listPrintJobsForAdmin(orgId, toDbFilters(filterState)),
     getPrintReportSummary(orgId),
     listPrintersForAdmin(orgId),
   ]);
@@ -32,5 +41,5 @@ export default async function AdminPrintReportsPage() {
   const printerById = new Map(printerRows.map((printer) => [printer.id, printer]));
   const jobs = rows.map((r) => toView(r, nameById.get(r.userId) ?? "—", r.printerId ? printerById.get(r.printerId) ?? null : null));
 
-  return <PrintReportsClient jobs={jobs} summary={summary} />;
+  return <PrintReportsClient jobs={jobs} summary={summary} filters={filterState} />;
 }

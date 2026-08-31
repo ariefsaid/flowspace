@@ -37,12 +37,13 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import * as schema from "@/lib/db/schema";
-import { organizations, appUsers, timeCreditLots, facilities, bookings, timeCreditPackages } from "@/lib/db/schema";
+import { organizations, appUsers, timeCreditLots, facilities, bookings, timeCreditPackages, cafeMenuItems, cafeOrders, transactions } from "@/lib/db/schema";
 import { db } from "@/lib/db/drizzle";
 import { spendTimeCredits, recomputeCreditCache } from "@/lib/db/time-credit-lots";
 import { adjustCredits } from "@/lib/db/users";
-import { createBooking } from "@/lib/db/bookings";
+import { createBooking, extendBooking } from "@/lib/db/bookings";
 import { purchasePackage } from "@/lib/db/packages";
+import { createOrder } from "@/lib/db/cafe";
 
 const TEST_URL =
   process.env.TEST_DATABASE_URL ??
@@ -465,6 +466,178 @@ describe("scheduled createBooking vs credit-write lock order (I-047 fix round 2,
       expect(await lotSum(userId)).toBe(6);
       const finalUser = await getUser(userId);
       expect(finalUser.timeCredits).toBe(6); // cache matches the authoritative lot sum
+    },
+    10_000,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// I-047 fix round 3 — the two remaining app_users-FK-inserting paths that
+// still skipped the canonical first lock: cafe createOrder (member path) and
+// extendBooking. Neither inserts a credit spend today, so no ACTIVE cycle
+// exists yet — but the moment a credit-spend lands on either path, its
+// insert-time implicit FOR KEY SHARE on the member's app_users row upgrades
+// to a strong lock mid-transaction and the finding-4 deadlock class is
+// reintroduced. These tests pin the canonical order on BOTH paths now:
+//
+//   [B (when locked)] → app_users(FOR NO KEY UPDATE) → FK inserts
+//
+// B-before-app_users is preserved (createOrder locks the member's ACTIVE
+// booking via getActiveBookingForUpdate before the user lock when a discount
+// is in play; extendBooking's booking UPDATE takes B before its ledger
+// insert) — matching checkoutBooking, so no cross-object pair inverts.
+// ---------------------------------------------------------------------------
+describe("cafe member createOrder + extendBooking canonical first lock (I-047 fix round 3)", () => {
+  async function seedMenuItem(): Promise<{ id: string; priceRupiah: number }> {
+    const [item] = await testDb
+      .insert(cafeMenuItems)
+      .values({ orgId: orgAId, name: "Barrier Kopi", emoji: "☕", category: "COFFEE", priceRupiah: 20_000, description: "lock-order fixture" })
+      .returning();
+    return item;
+  }
+
+  function memberOrder(orgId: string, customerUserId: string, menuItemId: string) {
+    return () =>
+      createOrder({
+        orgId,
+        customerUserId,
+        guestName: null,
+        lines: [{ menuItemId, qty: 1 }],
+        discountEligible: false,
+      });
+  }
+
+  it(
+    "a member cafe createOrder BLOCKS while an external transaction holds the customer's app_users FOR NO KEY UPDATE — proving the member path really takes the canonical first lock before any FK insert",
+    async () => {
+      const userId = await seedUser();
+      const item = await seedMenuItem();
+
+      // Pre-fix, this path only touched app_users via FK-insert-time implicit
+      // KEY SHAREs (cafe_orders.customer_user_id, transactions.user_id) —
+      // compatible with this holder — so it sailed through WITHOUT ever
+      // blocking and the barrier below timed out waiting for its waiter.
+      // Post-fix, lockUserRowForCreditWrite is the path's first row lock: the
+      // order genuinely queues here until the holder commits.
+      const results = await runWithRowLockBarrier(
+        `select * from app_users where id = '${userId}' for no key update`,
+        1,
+        [memberOrder(orgAId, userId, item.id)],
+      );
+
+      expectNoDeadlock(results);
+      expect(results[0].status).toBe("fulfilled");
+
+      // The order + its CAFE_ORDER ledger row actually landed (server-priced:
+      // 1 × 20000, no discount).
+      const [order] = await testDb.select().from(cafeOrders).where(eq(cafeOrders.customerUserId, userId));
+      expect(order).toBeTruthy();
+      expect(order!.totalRupiah).toBe(20_000);
+      const [ledger] = await testDb.select().from(transactions).where(eq(transactions.cafeOrderId, order!.id));
+      expect(ledger).toBeTruthy();
+      expect(ledger!.type).toBe("CAFE_ORDER");
+      expect(ledger!.userId).toBe(userId);
+      expect(ledger!.amountRupiah).toBe(20_000);
+    },
+    10_000,
+  );
+
+  it(
+    "two concurrent member cafe createOrders for the SAME customer, released from a held app_users lock, both succeed serialized — never a 40P01, no lost order (deterministic row-lock barrier)",
+    async () => {
+      const userId = await seedUser();
+      const item = await seedMenuItem();
+
+      const results = await runWithRowLockBarrier(
+        `select * from app_users where id = '${userId}' for no key update`,
+        2,
+        [memberOrder(orgAId, userId, item.id), memberOrder(orgAId, userId, item.id)],
+      );
+
+      expectNoDeadlock(results);
+      expect(results.every((r) => r.status === "fulfilled")).toBe(true);
+
+      // Both orders actually landed, each with its own ledger row — no lost
+      // write, no torn FK insert.
+      const orders = await testDb.select().from(cafeOrders).where(eq(cafeOrders.customerUserId, userId));
+      expect(orders).toHaveLength(2);
+      const ledgers = await testDb
+        .select()
+        .from(transactions)
+        .where(eq(transactions.userId, userId));
+      expect(ledgers.filter((t) => t.type === "CAFE_ORDER")).toHaveLength(2);
+    },
+    10_000,
+  );
+
+  it(
+    "a concurrent extendBooking and negative admin credit-adjust on the SAME user, released together onto the member's app_users row, both complete and settle consistently — never a 40P01 (deterministic row-lock barrier)",
+    async () => {
+      const userId = await seedUser();
+      await testDb.insert(timeCreditLots).values({
+        orgId: orgAId,
+        userId,
+        totalHours: 10,
+        remainingHours: 10,
+        expiresAt: new Date(Date.now() + 30 * 24 * 3_600_000),
+      });
+      // An ACTIVE scheduled booking on a day/facility no other test in this
+      // file touches (Seat B, day +6), so the only contended resources are
+      // the member's app_users row (and, transitively, nothing else): 09:00–
+      // 10:00, extended +2h → 3h total, inside the 4h extension cap.
+      const startAt = new Date(Date.now() + 6 * 24 * 3_600_000);
+      startAt.setUTCHours(9, 0, 0, 0);
+      const endAt = new Date(startAt);
+      endAt.setUTCHours(10, 0, 0, 0);
+      const [bk] = await testDb
+        .insert(bookings)
+        .values({
+          orgId: orgAId,
+          userId,
+          facilityType: "COWORKING_SEAT",
+          facilityId: facilityBId,
+          facilityName: "Lock Order Seat B",
+          startAt,
+          endAt,
+          durationHours: 1,
+          ratePerHourRupiah: 20_000,
+          status: "ACTIVE",
+          paymentStatus: "PAID_ONLINE",
+          bookingMode: "SCHEDULED",
+        })
+        .returning();
+
+      // Pre-fix, extendBooking's app_users touch was an UNLOCKED tier read
+      // and its ledger insert only took an implicit KEY SHARE (compatible
+      // with this holder) — it never queued here, so the barrier's
+      // waiters = 2 was never reached. Post-fix, the canonical
+      // lockUserRowForCreditWrite (taken AFTER the booking-row lock, before
+      // the ledger FK insert — B-first, matching checkoutBooking) makes
+      // extend the second genuine waiter.
+      const results = await runWithRowLockBarrier(
+        `select * from app_users where id = '${userId}' for no key update`,
+        2,
+        [() => extendBooking(orgAId, bk.id, 2), () => adjustCredits(orgAId, userId, { timeCreditsDelta: -3 })],
+      );
+
+      expectNoDeadlock(results);
+
+      // Both writes settled, in EITHER serialization order (they commute):
+      // the extension landed (end 12:00, 3h, PENDING ledger row 2h × 20000)
+      // and the admin debit landed (10 − 3 = 7h, cache matches).
+      const [extended] = await testDb.select().from(bookings).where(eq(bookings.id, bk.id));
+      expect(extended.durationHours).toBe(3);
+      expect(extended.endAt!.getTime()).toBe(startAt.getTime() + 3 * 3_600_000);
+      const [ledger] = await testDb
+        .select()
+        .from(transactions)
+        .where(eq(transactions.bookingId, bk.id));
+      expect(ledger).toBeTruthy();
+      expect(ledger!.status).toBe("PENDING");
+      expect(ledger!.amountRupiah).toBe(40_000);
+      expect(await lotSum(userId)).toBe(7);
+      const finalUser = await getUser(userId);
+      expect(finalUser.timeCredits).toBe(7); // cache matches the authoritative lot sum
     },
     10_000,
   );

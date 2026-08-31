@@ -45,7 +45,7 @@ import {
   settleCheckoutTransactions,
   pendingBookingHours,
 } from "@/lib/db/transactions";
-import { spendTimeCredits } from "@/lib/db/time-credit-lots";
+import { spendTimeCredits, lockUserRowForCreditWrite } from "@/lib/db/time-credit-lots";
 import { getTierDiscounts } from "@/lib/db/tier-config";
 import { WALKIN_MAX_HOURS, isWalkin, isScheduled } from "@/lib/booking/walkin";
 import { WALKIN_RATES } from "@/lib/booking/catalog";
@@ -1208,6 +1208,21 @@ export async function extendBooking(orgId: string, id: string, extraHours: numbe
       .where(and(eq(bookings.id, id), eq(bookings.orgId, orgId), eq(bookings.status, "ACTIVE")))
       .returning();
     if (!updated) throw new Error("INVALID_TRANSITION");
+
+    // [SEC][MONEY][I-047 fix round 3] Canonical first app_users LOCK, before
+    // the ledger FK insert below (transactions.user_id): the insert's
+    // implicit FOR KEY SHARE subsumes into this FOR NO KEY UPDATE instead of
+    // racing past it. Today this path only writes a PENDING ledger row, but
+    // the moment a credit-spend lands here, an insert-then-strong-lock order
+    // would reintroduce the finding-4 upgrade deadlock (barrier-proven in
+    // lib/db/credit-lock-order.int.test.ts). Position matters: the booking
+    // row (B) was locked by the UPDATE above — B before app_users, the same
+    // cross-object order as checkoutBooking, so no pair inverts. The
+    // membershipTier read above stays an unlocked read: it only feeds
+    // pricing and takes no row lock, so it cannot join a lock cycle. A
+    // nonexistent/cross-org fresh.userId cannot reach here (the booking row
+    // itself is org-scoped and FK-owned).
+    await lockUserRowForCreditWrite(tx, orgId, fresh.userId);
 
     await recordTransaction(
       {

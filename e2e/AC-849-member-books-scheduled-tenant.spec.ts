@@ -67,7 +67,9 @@ test("AC-849 member books scheduled coworking via the server-driven floor plan a
   // check on the input itself while still exercising the real change event.
   await expect(page.getByText("Konfirmasi Booking")).toBeVisible({ timeout: 10_000 });
   await page.getByRole("radio", { name: /Online/ }).check({ force: true });
-  await page.getByRole("checkbox", { name: /menyetujui kebijakan/i }).click();
+  // I-049 replaced the one-line policy with an 8-clause policy box; the
+  // checkbox's accessible name is now the "syarat & ketentuan" sentence.
+  await page.getByRole("checkbox", { name: /syarat & ketentuan/i }).click();
 
   const confirmBtn = page.getByRole("button", { name: /Konfirmasi Booking/ });
   await expect(confirmBtn).toBeEnabled();

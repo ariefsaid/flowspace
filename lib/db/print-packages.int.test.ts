@@ -6,6 +6,7 @@ import * as schema from "@/lib/db/schema";
 import { organizations, printTopupPackages, appUsers, transactions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { listPrintTopupPackages, purchasePrintTopup } from "./print-packages";
+import { declinePayment } from "@/lib/topup/mockPaymentGateway";
 
 const sql = postgres(process.env.TEST_DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:34322/postgres", { prepare: false, max: 3 });
 const db = drizzle(sql, { schema });
@@ -42,6 +43,21 @@ describe("print topup package repository", () => {
     }
     const rows = await db.select().from(transactions).where(eq(transactions.userId, userA));
     expect(rows).toHaveLength(1);
+  });
+
+  it("a forced simulated decline throws PAYMENT_DECLINED — no balance change, no ledger row", async () => {
+    const [before] = await db.select({ balance: appUsers.printBalance }).from(appUsers).where(eq(appUsers.id, userA));
+    const rowsBefore = await db.select().from(transactions).where(eq(transactions.userId, userA));
+
+    await expect(
+      purchasePrintTopup({ orgId: orgA, userId: userA, packageId: "a-10", simulatePayment: declinePayment }),
+    ).rejects.toThrow(/PAYMENT_DECLINED/);
+
+    const [after] = await db.select({ balance: appUsers.printBalance }).from(appUsers).where(eq(appUsers.id, userA));
+    expect(after.balance).toBe(before.balance);
+
+    const rowsAfter = await db.select().from(transactions).where(eq(transactions.userId, userA));
+    expect(rowsAfter).toHaveLength(rowsBefore.length);
   });
   it("AC-628: lists only active, non-archived packages for the org in sort order", async () => {
     const rows = await listPrintTopupPackages(orgA);

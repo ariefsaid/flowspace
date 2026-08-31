@@ -32,6 +32,7 @@ import {
   topUpPrint,
   PRINT_RATE_PER_PAGE_RUPIAH,
 } from "@/lib/db/packages";
+import { declinePayment } from "@/lib/topup/mockPaymentGateway";
 
 const TEST_URL =
   process.env.TEST_DATABASE_URL ??
@@ -274,6 +275,42 @@ describe("lib/db/packages", () => {
           packageId: pkgArchivedAId,
         }),
       ).rejects.toThrow(/UNKNOWN_PACKAGE/);
+    });
+
+    it("a forced simulated decline throws PAYMENT_DECLINED — no balance change, no lot, no ledger row", async () => {
+      const before = await testDb
+        .select({ timeCredits: appUsers.timeCredits })
+        .from(appUsers)
+        .where(eq(appUsers.id, aUserId))
+        .limit(1);
+      const [{ count: txnBefore }] = await testSql`
+        select count(*)::int as count from transactions where org_id = ${orgAId} and user_id = ${aUserId}`;
+      const [{ count: lotsBefore }] = await testSql`
+        select count(*)::int as count from time_credit_lots where org_id = ${orgAId} and user_id = ${aUserId}`;
+
+      await expect(
+        purchasePackage({
+          orgId: orgAId,
+          userId: aUserId,
+          packageId: pkg5hAId,
+          simulatePayment: declinePayment,
+        }),
+      ).rejects.toThrow(/PAYMENT_DECLINED/);
+
+      const after = await testDb
+        .select({ timeCredits: appUsers.timeCredits })
+        .from(appUsers)
+        .where(eq(appUsers.id, aUserId))
+        .limit(1);
+      expect(after[0]?.timeCredits).toBe(before[0]?.timeCredits);
+
+      const [{ count: txnAfter }] = await testSql`
+        select count(*)::int as count from transactions where org_id = ${orgAId} and user_id = ${aUserId}`;
+      expect(txnAfter).toBe(txnBefore);
+
+      const [{ count: lotsAfter }] = await testSql`
+        select count(*)::int as count from time_credit_lots where org_id = ${orgAId} and user_id = ${aUserId}`;
+      expect(lotsAfter).toBe(lotsBefore);
     });
   });
 

@@ -223,6 +223,7 @@ import {
   listOrders,
   getOrder,
   setOrderStatus,
+  listRecentOrdersByUser,
 } from "@/lib/db/cafe";
 import { advanceOrderStatusAsActor } from "@/lib/cafe/authz";
 import { generateOrderCode } from "@/lib/cafe/status";
@@ -929,6 +930,81 @@ describe("lib/db/cafe", () => {
       expect(updated.status).toBe("CANCELLED");
       // Cross-org must throw
       await expect(setOrderStatus(orgBId, o.id, "COMPLETED")).rejects.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // C6 — listRecentOrdersByUser (I-049)
+  // -------------------------------------------------------------------------
+  describe("listRecentOrdersByUser", () => {
+    it("returns only the caller's own org+user orders, newest first, capped at the limit, with status+items+total", async () => {
+      // A second member in org A — their orders must never leak into aUserId's list.
+      const [otherA] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: "cafe-a2@x.test", name: "Alice Two", role: "MEMBER" })
+        .returning();
+
+      const placed: string[] = [];
+      for (let i = 0; i < 7; i += 1) {
+        const o = await createOrder({
+          orgId: orgAId,
+          customerUserId: aUserId,
+          guestName: null,
+          lines: [{ menuItemId: latteAId, qty: 1 }],
+          discountEligible: false,
+        });
+        placed.push(o.id);
+      }
+      // Noise: another org-A member's order, and org B's own order.
+      await createOrder({
+        orgId: orgAId,
+        customerUserId: otherA.id,
+        guestName: null,
+        lines: [{ menuItemId: latteAId, qty: 1 }],
+        discountEligible: false,
+      });
+      await createOrder({
+        orgId: orgBId,
+        customerUserId: bUserId,
+        guestName: null,
+        lines: [{ menuItemId: orgBItemId, qty: 1 }],
+        discountEligible: false,
+      });
+
+      const recent = await listRecentOrdersByUser(orgAId, aUserId, 5);
+
+      expect(recent).toHaveLength(5);
+      expect(recent.every((o) => o.customerUserId === aUserId)).toBe(true);
+      expect(recent.every((o) => o.orgId === orgAId)).toBe(true);
+      // every returned id was placed by aUserId (never otherA's or org B's order)
+      expect(recent.every((o) => placed.includes(o.id))).toBe(true);
+      // newest first — each row's createdAt is never older than the next
+      for (let i = 1; i < recent.length; i += 1) {
+        expect(recent[i - 1]!.createdAt.getTime()).toBeGreaterThanOrEqual(
+          recent[i]!.createdAt.getTime(),
+        );
+      }
+      // capped at 5 — the 2 oldest of the 7 placed orders are excluded
+      const excludedIds = placed.slice(0, 2);
+      expect(recent.map((o) => o.id)).not.toEqual(
+        expect.arrayContaining(excludedIds),
+      );
+      // status + items + total are present on every row
+      for (const o of recent) {
+        expect(typeof o.status).toBe("string");
+        expect(Array.isArray(o.items)).toBe(true);
+        expect(o.items.length).toBeGreaterThan(0);
+        expect(typeof o.totalRupiah).toBe("number");
+      }
+    });
+
+    it("returns an empty array for a user with no orders", async () => {
+      const [lonely] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: "cafe-lonely@x.test", name: "Lonely", role: "MEMBER" })
+        .returning();
+      const recent = await listRecentOrdersByUser(orgAId, lonely.id);
+      expect(recent).toEqual([]);
     });
   });
 

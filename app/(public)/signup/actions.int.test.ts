@@ -306,4 +306,39 @@ describe("signupAction", () => {
     const countAfterSecond = (await testDb.select().from(appUsers)).length;
     expect(countAfterSecond).toBe(countAfterFirst);
   });
+
+  it("persists a supplied phone number on the app_users row", async () => {
+    TEST_EMAILS.add("phone@example.com");
+    const res = await signupAction({
+      name: "Phone Person",
+      email: "phone@example.com",
+      password: "secret123",
+      phone: "+62 812 3456 7890",
+    });
+    expect(res).toEqual({ ok: true });
+
+    const [stored] = await testDb
+      .select()
+      .from(appUsers)
+      .where(eq(appUsers.email, "phone@example.com"))
+      .limit(1);
+    expect(stored?.phone).toBe("+62 812 3456 7890");
+  });
+
+  it("stores a null phone when none is supplied", async () => {
+    TEST_EMAILS.add("nophone@example.com");
+    const res = await signupAction({
+      name: "No Phone",
+      email: "nophone@example.com",
+      password: "secret123",
+    });
+    expect(res).toEqual({ ok: true });
+
+    const [stored] = await testDb
+      .select()
+      .from(appUsers)
+      .where(eq(appUsers.email, "nophone@example.com"))
+      .limit(1);
+    expect(stored?.phone).toBeNull();
+  });
 });

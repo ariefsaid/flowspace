@@ -5,7 +5,7 @@
  * Every org-scoped function takes `orgId` derived from the server session —
  * the client NEVER supplies it (ADR-0004).
  */
-import { and, eq, isNull, asc, inArray, sql } from "drizzle-orm";
+import { and, eq, isNull, ne, asc, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import { appUsers, type AppUser } from "@/lib/db/schema";
 import { ROLES, MEMBERSHIP_TIERS, type MembershipTier, type Role } from "@/lib/db/enums";
@@ -234,6 +234,16 @@ export async function updateUser(
  * "Cannot delete admin users" rule) — an org must always keep its admins
  * archivable only by demoting the role first, never by this path. A
  * cross-org id resolves to NOT_FOUND before any write.
+ *
+ * [SEC][I-047 minor] The role check above is a plain (unlocked) pre-read —
+ * a concurrent `updateUser` promoting this SAME id to ADMIN could commit
+ * strictly between it and this function's own UPDATE. The UPDATE's WHERE
+ * therefore re-checks `role != 'ADMIN'` itself (a real compare-and-set
+ * against whatever the row's role is AT THE MOMENT this statement actually
+ * runs, not the earlier snapshot) — a promotion that lands in that window
+ * makes this UPDATE match zero rows, and the fallback below re-reads to
+ * report CANNOT_ARCHIVE_ADMIN rather than the generic NOT_FOUND a plain CAS
+ * miss would otherwise imply.
  */
 export async function archiveUser(orgId: string, id: string): Promise<AppUser> {
   const [target] = await db
@@ -247,9 +257,23 @@ export async function archiveUser(orgId: string, id: string): Promise<AppUser> {
   const [updated] = await db
     .update(appUsers)
     .set({ archivedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(appUsers.id, id), eq(appUsers.orgId, orgId), isNull(appUsers.archivedAt)))
+    .where(
+      and(
+        eq(appUsers.id, id),
+        eq(appUsers.orgId, orgId),
+        isNull(appUsers.archivedAt),
+        ne(appUsers.role, "ADMIN"),
+      ),
+    )
     .returning();
-  if (!updated) throw new Error("NOT_FOUND");
+  if (!updated) {
+    const [existing] = await db
+      .select({ role: appUsers.role })
+      .from(appUsers)
+      .where(and(eq(appUsers.id, id), eq(appUsers.orgId, orgId)))
+      .limit(1);
+    throw new Error(existing?.role === "ADMIN" ? "CANNOT_ARCHIVE_ADMIN" : "NOT_FOUND");
+  }
   return updated;
 }
 

@@ -95,6 +95,39 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
+// ---------------------------------------------------------------------------
+// Deterministic ROW-lock barrier (same discipline as lib/db/bookings.int.
+// test.ts): holds the target row via a real `FOR UPDATE` lock FIRST, starts
+// the op, polls `pg_locks` until it is genuinely BLOCKED on that lock, then
+// mutates the row (on the SAME holder connection — never a second pool
+// connection, which would just deadlock the test against its own hold)
+// before releasing — proving real overlap, not trusting timing.
+// ---------------------------------------------------------------------------
+async function runWithRowLockBarrier<T>(
+  holderSql: string,
+  op: () => Promise<T>,
+  onBlocked: (holder: postgres.TransactionSql) => Promise<void>,
+): Promise<T> {
+  let opPromise!: Promise<T>;
+  await testSql.begin(async (holder) => {
+    await holder.unsafe(holderSql);
+    opPromise = op();
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      const rows = await holder.unsafe<{ n: number }[]>(
+        `select count(*)::int as n from pg_locks where locktype IN ('transactionid', 'tuple') and not granted`,
+      );
+      if (Number(rows[0]?.n ?? 0) >= 1) break;
+      if (Date.now() > deadline) throw new Error("timed out waiting for a row-lock waiter");
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    await onBlocked(holder);
+    // Returning here ends the holder's transaction (COMMIT), releasing the
+    // row lock AND committing onBlocked's write atomically together.
+  });
+  return opPromise;
+}
+
 describe("lib/db/users", () => {
   describe("findByEmail", () => {
     it("returns the user when email matches", async () => {
@@ -310,6 +343,31 @@ describe("lib/db/users", () => {
       expect(await findByAuthUserId(authUserId)).toBeNull();
 
       await admin.auth.admin.deleteUser(authUserId);
+    });
+
+    it("[SEC][I-047 minor] a concurrent promotion to ADMIN that commits WHILE archiveUser is genuinely blocked on the row is respected — the archive is refused, never silently archives the now-ADMIN user (deterministic row-lock barrier)", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `archiverace-${Date.now()}@x.test`, name: "RaceTarget", role: "MEMBER" })
+        .returning();
+
+      // archiveUser's own target-check SELECT is unlocked and will see
+      // role='MEMBER' (still true at that instant) — the race is in its
+      // LATER UPDATE, which this barrier forces to block until AFTER the
+      // promotion below has committed.
+      await expect(
+        runWithRowLockBarrier(
+          `select * from app_users where id = '${target.id}' for update`,
+          () => archiveUser(orgAId, target.id),
+          async (holder) => {
+            await holder`update app_users set role = 'ADMIN' where id = ${target.id}`;
+          },
+        ),
+      ).rejects.toThrow(/CANNOT_ARCHIVE_ADMIN/);
+
+      const [fresh] = await testDb.select().from(appUsers).where(eq(appUsers.id, target.id));
+      expect(fresh.role).toBe("ADMIN");
+      expect(fresh.archivedAt).toBeNull(); // never archived, despite archiveUser's own pre-check having seen MEMBER
     });
   });
 

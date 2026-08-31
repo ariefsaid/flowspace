@@ -86,6 +86,46 @@ describe("updateUserAction", () => {
     requireSession.mockResolvedValue({ id: "admin1", orgId: orgAId, role: "ADMIN" });
     await expect(updateUserAction(bUserId, { name: "Hijacked" })).rejects.toThrow("NOT_FOUND");
   });
+
+  it("[SEC][I-047 minor] a role change propagates to the Supabase Auth app_metadata.role claim — a promoted ADMIN's JWT actually carries it", async () => {
+    const email = `rolesync-${Date.now()}@x.test`;
+    const { data, error } = await admin.auth.admin.createUser({ email, password: "secret123", email_confirm: true });
+    expect(error).toBeNull();
+    const authUserId = data.user!.id;
+    const [target] = await testDb
+      .insert(appUsers)
+      .values({ orgId: orgAId, authUserId, email, name: "RoleSyncMe", role: "MEMBER" })
+      .returning();
+
+    requireSession.mockResolvedValue({ id: "admin1", orgId: orgAId, role: "ADMIN" });
+    const updated = await updateUserAction(target.id, { role: "ADMIN" });
+    expect(updated.role).toBe("ADMIN");
+
+    const { data: authUser } = await admin.auth.admin.getUserById(authUserId);
+    expect(authUser.user?.app_metadata?.role).toBe("ADMIN");
+    expect(authUser.user?.app_metadata?.org_id).toBe(orgAId);
+
+    await admin.auth.admin.deleteUser(authUserId);
+  });
+
+  it("[SEC][I-047 minor] a non-role edit (e.g. name only) never touches the Supabase Auth metadata call", async () => {
+    const email = `norolesync-${Date.now()}@x.test`;
+    const { data, error } = await admin.auth.admin.createUser({ email, password: "secret123", email_confirm: true });
+    expect(error).toBeNull();
+    const authUserId = data.user!.id;
+    const [target] = await testDb
+      .insert(appUsers)
+      .values({ orgId: orgAId, authUserId, email, name: "Before", role: "MEMBER" })
+      .returning();
+
+    requireSession.mockResolvedValue({ id: "admin1", orgId: orgAId, role: "ADMIN" });
+    await updateUserAction(target.id, { name: "After" });
+
+    const { data: authUser } = await admin.auth.admin.getUserById(authUserId);
+    expect(authUser.user?.app_metadata?.role).toBeUndefined(); // never set — no role change occurred
+
+    await admin.auth.admin.deleteUser(authUserId);
+  });
 });
 
 describe("archiveUserAction", () => {

@@ -8,6 +8,7 @@
 import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/auth/session";
 import { setOrgSettings } from "@/lib/db/org-settings";
+import { assertSafeHttpsUrl } from "../url-guard";
 
 export type SiteSettingsInput = {
   name: string;
@@ -36,12 +37,18 @@ const FIELDS = [
   "socialWhatsapp",
 ] as const;
 
-/** Rejects any field over MAX_LEN — no write on an oversized value. */
+const SOCIAL_URL_FIELDS = ["socialInstagram", "socialFacebook", "socialWhatsapp"] as const;
+
+/** Rejects any field over MAX_LEN, or a social link that isn't https:// on a
+ * public host — no write on an invalid value. */
 function assertValid(input: SiteSettingsInput): void {
   for (const field of FIELDS) {
     if (input[field].length > MAX_LEN) {
       throw new Error(`INVALID_LENGTH:${field}`);
     }
+  }
+  for (const field of SOCIAL_URL_FIELDS) {
+    assertSafeHttpsUrl(input[field], field);
   }
 }
 

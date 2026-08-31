@@ -56,4 +56,27 @@ describe("saveSiteSettingsAction", () => {
     await expect(saveSiteSettingsAction(tooLong)).rejects.toThrow("INVALID_LENGTH:address");
     expect(setOrgSettings).not.toHaveBeenCalled();
   });
+
+  it("AC: an ADMIN can leave a social link blank (not a format error)", async () => {
+    requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
+    const blank = { ...input, socialInstagram: "", socialFacebook: "", socialWhatsapp: "" };
+    await saveSiteSettingsAction(blank);
+    expect(setOrgSettings).toHaveBeenCalledWith("o1", "site", blank);
+  });
+
+  it("[SEC] AC: a non-https social link is rejected, no write", async () => {
+    requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
+    const badScheme = { ...input, socialInstagram: "http://instagram.com/flowspace" };
+    await expect(saveSiteSettingsAction(badScheme)).rejects.toThrow(
+      "INVALID_URL:socialInstagram",
+    );
+    expect(setOrgSettings).not.toHaveBeenCalled();
+  });
+
+  it("[SEC] AC: a social link pointing at an internal host is rejected, no write", async () => {
+    requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
+    const badHost = { ...input, socialFacebook: "https://169.254.169.254/latest/meta-data" };
+    await expect(saveSiteSettingsAction(badHost)).rejects.toThrow("INVALID_URL:socialFacebook");
+    expect(setOrgSettings).not.toHaveBeenCalled();
+  });
 });

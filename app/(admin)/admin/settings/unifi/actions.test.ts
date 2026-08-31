@@ -71,6 +71,28 @@ describe("saveUnifiSettingsAction", () => {
     expect(setOrgSettings).not.toHaveBeenCalled();
   });
 
+  it("[SEC] AC: a non-https cloud console URL is rejected, no write", async () => {
+    requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
+    await expect(
+      saveUnifiSettingsAction({
+        ...cloudInput,
+        cloudConsoleUrl: "http://unifi.ui.com/consoles/ABC123/network/default/dashboard",
+      }),
+    ).rejects.toThrow("INVALID_URL:cloudConsoleUrl");
+    expect(setOrgSettings).not.toHaveBeenCalled();
+  });
+
+  it("[SEC] AC: a cloud console URL pointing at an internal/metadata host is rejected, no write", async () => {
+    requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
+    await expect(
+      saveUnifiSettingsAction({
+        ...cloudInput,
+        cloudConsoleUrl: "https://169.254.169.254/latest/meta-data",
+      }),
+    ).rejects.toThrow("INVALID_URL:cloudConsoleUrl");
+    expect(setOrgSettings).not.toHaveBeenCalled();
+  });
+
   it("AC: cloud mode with no consoleId detected is rejected, no write", async () => {
     requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
     await expect(

@@ -12,6 +12,7 @@
 import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/auth/session";
 import { getOrgSettings, setOrgSettings } from "@/lib/db/org-settings";
+import { assertSafeHttpsUrl } from "../url-guard";
 
 export type UnifiConnectionMode = "cloud" | "local";
 
@@ -94,9 +95,13 @@ export async function saveUnifiSettingsAction(input: UnifiSaveInput): Promise<vo
   if (input.password !== undefined) assertLen(input.password, "password");
 
   if (input.connectionMode === "cloud") {
-    if (!input.cloudConsoleUrl || !URL_PATTERN.test(input.cloudConsoleUrl)) {
+    if (!input.cloudConsoleUrl) {
       throw new Error("INVALID_URL:cloudConsoleUrl");
     }
+    // [SEC] require https:// and reject an obviously-internal/metadata host
+    // (finding 5) — no outbound call happens here (I-045), this just
+    // tightens the stored shape.
+    assertSafeHttpsUrl(input.cloudConsoleUrl, "cloudConsoleUrl");
     if (!input.consoleId) {
       throw new Error("REQUIRED:consoleId");
     }

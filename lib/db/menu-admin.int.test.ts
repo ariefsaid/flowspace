@@ -10,6 +10,7 @@
  * AC-1123: archiveMenuItem soft-archives — row stays, archivedAt is set, excluded from the default list
  * AC-1124: negative/non-integer price is rejected — no write
  * AC-1125: org isolation — org B never sees org A's menu items
+ * AC-1126: updateMenuItem ignores a crafted orgId/id/archivedAt/hasVariants in the patch — mass-assignment is blocked
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -164,5 +165,51 @@ describe("lib/db/menu-admin", () => {
 
     const bRows = await listMenuForAdmin(orgBId);
     expect(bRows.map((r) => r.name)).not.toContain("Org A Only");
+  });
+
+  it("AC-1126: updateMenuItem ignores a crafted orgId/id/archivedAt/hasVariants in the patch — mass-assignment is blocked", async () => {
+    const victim = await createMenuItem(orgAId, {
+      name: "Mass-Assignment Target",
+      emoji: "☕",
+      category: "COFFEE",
+      priceRupiah: 20_000,
+      description: "x",
+    });
+    const other = await createMenuItem(orgAId, {
+      name: "Other Item",
+      emoji: "☕",
+      category: "COFFEE",
+      priceRupiah: 9_000,
+      description: "x",
+    });
+
+    // A crafted payload — as a raw JSON body over the wire could carry these
+    // keys regardless of the TS type — must not reassign org, retarget the
+    // row, flip archivedAt, or toggle hasVariants.
+    const evilPatch = {
+      priceRupiah: 22_000,
+      orgId: orgBId,
+      id: other.id,
+      archivedAt: new Date(),
+      hasVariants: true,
+      variantConfig: { evil: true },
+    } as unknown as Parameters<typeof updateMenuItem>[2];
+
+    await updateMenuItem(orgAId, victim.id, evilPatch);
+
+    const [row] = await testDb.select().from(cafeMenuItems).where(eq(cafeMenuItems.id, victim.id));
+    expect(row).toBeDefined();
+    expect(row.orgId).toBe(orgAId);
+    expect(row.priceRupiah).toBe(22_000);
+    expect(row.archivedAt).toBeNull();
+    expect(row.hasVariants).toBe(false);
+
+    const [otherRow] = await testDb.select().from(cafeMenuItems).where(eq(cafeMenuItems.id, other.id));
+    expect(otherRow.priceRupiah).toBe(9_000);
+
+    const aRows = await listMenuForAdmin(orgAId);
+    expect(aRows.map((r) => r.id)).toContain(victim.id);
+    const bRows = await listMenuForAdmin(orgBId);
+    expect(bRows.map((r) => r.id)).not.toContain(victim.id);
   });
 });

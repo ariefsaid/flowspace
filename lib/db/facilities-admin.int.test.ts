@@ -10,6 +10,7 @@
  * AC-1113: negative/non-integer rate is rejected — no write
  * AC-1114: negative capacity/maxHoursCap is rejected — no write
  * AC-1115: org isolation — org B never sees org A's facilities
+ * AC-1116: updateFacility ignores a crafted orgId/id/archivedAt in the patch — mass-assignment is blocked
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -154,5 +155,44 @@ describe("lib/db/facilities-admin", () => {
 
     const bRows = await listFacilitiesForAdmin(orgBId);
     expect(bRows.map((r) => r.name)).not.toContain("Org A Only");
+  });
+
+  it("AC-1116: updateFacility ignores a crafted orgId/id/archivedAt in the patch — mass-assignment is blocked", async () => {
+    const victim = await createFacility(orgAId, {
+      name: "Mass-Assignment Target",
+      type: "COWORKING_SEAT",
+      ratePerHourRupiah: 30_000,
+    });
+    const other = await createFacility(orgAId, {
+      name: "Other Row",
+      type: "COWORKING_SEAT",
+      ratePerHourRupiah: 10_000,
+    });
+
+    // A crafted payload — as a raw JSON body over the wire could carry these
+    // keys regardless of the TS type — must not reassign org, retarget the
+    // row, or flip archivedAt.
+    const evilPatch = {
+      ratePerHourRupiah: 45_000,
+      orgId: orgBId,
+      id: other.id,
+      archivedAt: new Date(),
+    } as unknown as Parameters<typeof updateFacility>[2];
+
+    await updateFacility(orgAId, victim.id, evilPatch);
+
+    const [row] = await testDb.select().from(facilities).where(eq(facilities.id, victim.id));
+    expect(row).toBeDefined();
+    expect(row.orgId).toBe(orgAId);
+    expect(row.ratePerHourRupiah).toBe(45_000);
+    expect(row.archivedAt).toBeNull();
+
+    const [otherRow] = await testDb.select().from(facilities).where(eq(facilities.id, other.id));
+    expect(otherRow.ratePerHourRupiah).toBe(10_000);
+
+    const aRows = await listFacilitiesForAdmin(orgAId);
+    expect(aRows.map((r) => r.id)).toContain(victim.id);
+    const bRows = await listFacilitiesForAdmin(orgBId);
+    expect(bRows.map((r) => r.id)).not.toContain(victim.id);
   });
 });

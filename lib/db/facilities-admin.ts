@@ -71,6 +71,26 @@ export async function createFacility(orgId: string, input: FacilityInput): Promi
   return row;
 }
 
+/**
+ * Build an explicit allowlisted patch from `input` — [SEC] never spread
+ * `input` into `.set()`. A caller's raw JSON body can carry ANY key
+ * regardless of the `FacilityUpdateInput` TS type (e.g. a crafted `orgId` to
+ * reassign the row cross-org, or `id`/`archivedAt` to retarget/tamper with
+ * another row) — only the intended editable columns are ever copied.
+ */
+function toFacilityPatch(input: FacilityUpdateInput): Partial<typeof facilities.$inferInsert> {
+  const patch: Partial<typeof facilities.$inferInsert> = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.type !== undefined) patch.type = input.type;
+  if (input.ratePerHourRupiah !== undefined) patch.ratePerHourRupiah = input.ratePerHourRupiah;
+  if (input.capacity !== undefined) patch.capacity = input.capacity;
+  if (input.seatLabel !== undefined) patch.seatLabel = input.seatLabel;
+  if (input.zone !== undefined) patch.zone = input.zone;
+  if (input.maxHoursCap !== undefined) patch.maxHoursCap = input.maxHoursCap;
+  if (input.available !== undefined) patch.available = input.available;
+  return patch;
+}
+
 /** Patch a facility's fields in place (ADMIN-only — caller enforces role). */
 export async function updateFacility(
   orgId: string,
@@ -80,7 +100,7 @@ export async function updateFacility(
   assertValidFacilityFields(input);
   await db
     .update(facilities)
-    .set({ ...input, updatedAt: new Date() })
+    .set({ ...toFacilityPatch(input), updatedAt: new Date() })
     .where(and(eq(facilities.orgId, orgId), eq(facilities.id, id)));
 }
 

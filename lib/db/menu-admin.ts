@@ -56,6 +56,27 @@ export async function createMenuItem(orgId: string, input: MenuItemInput): Promi
   return row;
 }
 
+/**
+ * Build an explicit allowlisted patch from `input` — [SEC] never spread
+ * `input` into `.set()`. A caller's raw JSON body can carry ANY key
+ * regardless of the `MenuItemUpdateInput` TS type (e.g. a crafted `orgId` to
+ * reassign the row cross-org, or `id`/`archivedAt`/`hasVariants`/
+ * `variantConfig` to retarget/tamper with another row) — only the intended
+ * editable columns are ever copied. `hasVariants`/`variantConfig` (I-044) are
+ * intentionally excluded — this foundation repo doesn't touch the variant
+ * editor.
+ */
+function toMenuItemPatch(input: MenuItemUpdateInput): Partial<typeof cafeMenuItems.$inferInsert> {
+  const patch: Partial<typeof cafeMenuItems.$inferInsert> = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.emoji !== undefined) patch.emoji = input.emoji;
+  if (input.category !== undefined) patch.category = input.category;
+  if (input.priceRupiah !== undefined) patch.priceRupiah = input.priceRupiah;
+  if (input.description !== undefined) patch.description = input.description;
+  if (input.available !== undefined) patch.available = input.available;
+  return patch;
+}
+
 /** Patch a menu item's fields in place (ADMIN-only — caller enforces role). */
 export async function updateMenuItem(
   orgId: string,
@@ -65,7 +86,7 @@ export async function updateMenuItem(
   if (input.priceRupiah !== undefined) assertValidPrice(input.priceRupiah);
   await db
     .update(cafeMenuItems)
-    .set({ ...input, updatedAt: new Date() })
+    .set({ ...toMenuItemPatch(input), updatedAt: new Date() })
     .where(and(eq(cafeMenuItems.orgId, orgId), eq(cafeMenuItems.id, id)));
 }
 

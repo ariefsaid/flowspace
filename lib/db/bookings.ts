@@ -801,6 +801,57 @@ export async function approvePayment(orgId: string, id: string): Promise<Booking
 }
 
 // ---------------------------------------------------------------------------
+// activateConfirmedBooking [SEC][SoD] — admin "Aktifkan Sekarang" (I-047)
+// ---------------------------------------------------------------------------
+
+/**
+ * Admin manual activation of a paid, scheduled CONFIRMED booking — the
+ * fallback for when `runStatusSweep` (the cron sweep that normally flips
+ * CONFIRMED→ACTIVE at its scheduled start) misfires or hasn't run yet.
+ * Compare-and-set on `status='CONFIRMED'` (a concurrent cancel/sweep/
+ * checkout is rejected, not silently overwritten) — org-scoped: a cross-org
+ * id resolves to NOT_FOUND before any write. `startAt` is only ever set to
+ * now if it was somehow still unset; the normal case (startAt already holds
+ * the member's actual scheduled start, chosen at create) is left untouched
+ * — activating early/late never rewrites the booked start time.
+ */
+export async function activateConfirmedBooking(orgId: string, id: string): Promise<Booking> {
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({ startAt: bookings.startAt })
+      .from(bookings)
+      .where(
+        and(
+          eq(bookings.id, id),
+          eq(bookings.orgId, orgId),
+          eq(bookings.status, "CONFIRMED"),
+          eq(bookings.bookingMode, "SCHEDULED"),
+        ),
+      )
+      .for("update")
+      .limit(1);
+
+    if (!current) {
+      const [existing] = await tx
+        .select({ id: bookings.id })
+        .from(bookings)
+        .where(and(eq(bookings.id, id), eq(bookings.orgId, orgId)))
+        .limit(1);
+      throw new Error(existing ? "INVALID_TRANSITION" : "NOT_FOUND");
+    }
+
+    const now = new Date();
+    const [updated] = await tx
+      .update(bookings)
+      .set({ status: "ACTIVE", startAt: current.startAt ?? now, updatedAt: now })
+      .where(and(eq(bookings.id, id), eq(bookings.orgId, orgId), eq(bookings.status, "CONFIRMED")))
+      .returning();
+    if (!updated) throw new Error("INVALID_TRANSITION");
+    return updated;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // previewCheckout + checkoutBooking [SEC][MONEY] — ADMIN-only at the action layer
 // ---------------------------------------------------------------------------
 

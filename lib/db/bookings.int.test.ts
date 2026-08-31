@@ -45,6 +45,7 @@ import {
   facilitiesAvailableInWindow,
   approveAndStartWalkIn,
   approvePayment,
+  activateConfirmedBooking,
   previewCheckout,
   checkoutBooking,
   extendBooking,
@@ -689,6 +690,88 @@ describe("lib/db/bookings", () => {
       await expect(approvePayment(orgAId, created.id)).rejects.toThrow(/NOT_FOUND/);
       const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, created.id));
       expect(fresh.status).toBe("PENDING");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // activateConfirmedBooking (I-047) — admin "Aktifkan Sekarang" fallback
+  // -------------------------------------------------------------------------
+  describe("activateConfirmedBooking", () => {
+    it("[AC-047-B1] a CONFIRMED scheduled booking activates to ACTIVE, its already-set startAt is left untouched", async () => {
+      const created = await createBooking({
+        orgId: orgAId, userId: aUserId, tier: "REGULAR",
+        facilityType: "COWORKING_SEAT", facilityId: seatAId, facilityName: "Meja A",
+        startAt: new Date("2026-08-01T09:00:00Z"), endAt: new Date("2026-08-01T10:00:00Z"),
+        paymentMethod: "online", // online → CONFIRMED/PAID_ONLINE at create
+      });
+      expect(created.status).toBe("CONFIRMED");
+
+      const activated = await activateConfirmedBooking(orgAId, created.id);
+      expect(activated.status).toBe("ACTIVE");
+      expect(activated.startAt.toISOString()).toBe(new Date("2026-08-01T09:00:00Z").toISOString());
+    });
+
+    it("[AC-047-B2] rejects a booking that is not CONFIRMED (e.g. still PENDING) — no state change", async () => {
+      const created = await createBooking({
+        orgId: orgAId, userId: aUserId, tier: "REGULAR",
+        facilityType: "COWORKING_SEAT", facilityId: seatAId, facilityName: "Meja A",
+        startAt: new Date("2026-08-02T09:00:00Z"), endAt: new Date("2026-08-02T10:00:00Z"),
+        paymentMethod: "cashier", // → PENDING/WAITING_CASHIER
+      });
+      expect(created.status).toBe("PENDING");
+      await expect(activateConfirmedBooking(orgAId, created.id)).rejects.toThrow(/INVALID_TRANSITION/);
+      const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, created.id));
+      expect(fresh.status).toBe("PENDING");
+    });
+
+    it("[AC-047-B2] rejects a walk-in — activation only applies to a scheduled booking", async () => {
+      const created = await createBooking({
+        orgId: orgAId, userId: aUserId, tier: "REGULAR",
+        facilityType: "WALKIN_COWORKING", facilityName: "Walk-in Coworking",
+        paymentMethod: "cashier",
+      });
+      await approveAndStartWalkIn(orgAId, created.id); // walk-ins never reach CONFIRMED
+      await expect(activateConfirmedBooking(orgAId, created.id)).rejects.toThrow(/INVALID_TRANSITION/);
+    });
+
+    it("[SEC] a cross-org booking id resolves to NOT_FOUND, no write", async () => {
+      const created = await createBooking({
+        orgId: orgBId, userId: bUserId, tier: "REGULAR",
+        facilityType: "COWORKING_SEAT", facilityId: orgBFacilityId, facilityName: "Meja A",
+        startAt: new Date("2026-08-03T09:00:00Z"), endAt: new Date("2026-08-03T10:00:00Z"),
+        paymentMethod: "online",
+      });
+      await expect(activateConfirmedBooking(orgAId, created.id)).rejects.toThrow(/NOT_FOUND/);
+      const [fresh] = await testDb.select().from(bookings).where(eq(bookings.id, created.id));
+      expect(fresh.status).toBe("CONFIRMED");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // createBooking — admin creates on a member's behalf (I-047, [MONEY])
+  // -------------------------------------------------------------------------
+  describe("createBooking — admin-on-behalf-of-member (tenancy + pricing)", () => {
+    it("[AC-047-B3][MONEY] createBooking is safely callable with an admin-chosen target userId — server-priced from the DB rate row", async () => {
+      const booking = await createBooking({
+        orgId: orgAId, userId: aUserId, tier: "REGULAR", // [SEC] tier is IGNORED — priced from the DB row
+        facilityType: "COWORKING_SEAT", facilityId: seatAId, facilityName: "Meja A",
+        startAt: new Date("2026-08-04T09:00:00Z"), endAt: new Date("2026-08-04T11:00:00Z"),
+        paymentMethod: "cashier",
+      });
+      expect(booking.userId).toBe(aUserId);
+      expect(booking.orgId).toBe(orgAId);
+      expect(booking.amountRupiah).toBe(40000); // 2h * 20000, never a client-supplied amount
+    });
+
+    it("[SEC] a target userId from a DIFFERENT org is rejected — USER_NOT_FOUND, no write", async () => {
+      await expect(
+        createBooking({
+          orgId: orgAId, userId: bUserId, tier: "REGULAR", // bUserId belongs to orgB
+          facilityType: "COWORKING_SEAT", facilityId: seatAId, facilityName: "Meja A",
+          startAt: new Date("2026-08-05T09:00:00Z"), endAt: new Date("2026-08-05T10:00:00Z"),
+          paymentMethod: "cashier",
+        }),
+      ).rejects.toThrow(/USER_NOT_FOUND/);
     });
   });
 

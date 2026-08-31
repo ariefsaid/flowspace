@@ -86,7 +86,7 @@ export async function signupAction(input: {
       authUserId: data.user.id,
       email,
       name: input.name.trim(),
-      phone: input.phone?.trim() || null,
+      phone: input.phone?.trim().slice(0, 32) || null,
     });
   } catch (e) {
     await admin.auth.admin.deleteUser(data.user.id);

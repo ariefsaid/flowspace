@@ -168,6 +168,11 @@ export const cafeOrders = pgTable(
     index("cafe_orders_org_id_idx").on(t.orgId),
     index("cafe_orders_org_id_status_idx").on(t.orgId, t.status),
     index("cafe_orders_org_id_created_at_idx").on(t.orgId, t.createdAt),
+    index("cafe_orders_org_user_created_at_idx").on(
+      t.orgId,
+      t.customerUserId,
+      t.createdAt,
+    ),
   ],
 );
 

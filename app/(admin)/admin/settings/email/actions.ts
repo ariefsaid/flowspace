@@ -28,6 +28,14 @@ export async function saveEmailSettingsAction(input: EmailSettingsInput) {
     throw new Error("INVALID_LENGTH:senderName");
   }
 
-  await setOrgSettings(user.orgId, "email", input);
+  // [SEC] allowlisted object — never spread `input` through; a raw JSON
+  // body can carry an extra/huge key regardless of the TS type.
+  const values: EmailSettingsInput = {
+    senderName: input.senderName,
+    registrationEnabled: input.registrationEnabled,
+    bookingEnabled: input.bookingEnabled,
+    paymentEnabled: input.paymentEnabled,
+  };
+  await setOrgSettings(user.orgId, "email", values);
   revalidatePath("/admin/settings/email");
 }

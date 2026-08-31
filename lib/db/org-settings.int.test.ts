@@ -6,6 +6,7 @@
  * AC-1102: setOrgSettings on an existing category updates in place (no duplicate row)
  * AC-1103: unknown category is rejected — no write
  * AC-1104: org isolation — org B never sees org A's settings
+ * AC-1105: setOrgSettings rejects an oversized total payload as a backstop — no write
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -89,5 +90,19 @@ describe("lib/db/org-settings", () => {
 
     const bSettings = await getOrgSettings(orgBId, "email");
     expect(bSettings).toEqual({});
+  });
+
+  it("[SEC] AC-1105: setOrgSettings rejects an oversized total payload as a backstop — no write", async () => {
+    // Every settings action is expected to allowlist+cap its own fields
+    // BEFORE calling setOrgSettings — this is the backstop for a bug in one
+    // of those callers (or a future category) that forwards raw input,
+    // guarding the jsonb column against unbounded growth either way.
+    const oversized = { junk: "x".repeat(20_000) };
+    await expect(setOrgSettings(orgAId, "unifi", oversized)).rejects.toThrow(
+      "SETTINGS_TOO_LARGE",
+    );
+
+    const settings = await getOrgSettings(orgAId, "unifi");
+    expect(settings).toEqual({});
   });
 });

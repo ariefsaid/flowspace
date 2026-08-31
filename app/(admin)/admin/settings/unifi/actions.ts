@@ -88,6 +88,7 @@ export async function saveUnifiSettingsAction(input: UnifiSaveInput): Promise<vo
   }
 
   assertLen(input.cloudConsoleUrl, "cloudConsoleUrl");
+  assertLen(input.consoleId, "consoleId");
   assertLen(input.controllerHost, "controllerHost");
   assertLen(input.username, "username");
   assertLen(input.siteName, "siteName");

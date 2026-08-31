@@ -138,6 +138,14 @@ describe("saveUnifiSettingsAction", () => {
     expect(setOrgSettings).not.toHaveBeenCalled();
   });
 
+  it("[SEC] AC: a consoleId over 500 chars is rejected, no write", async () => {
+    requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
+    await expect(
+      saveUnifiSettingsAction({ ...cloudInput, consoleId: "x".repeat(501) }),
+    ).rejects.toThrow("INVALID_LENGTH:consoleId");
+    expect(setOrgSettings).not.toHaveBeenCalled();
+  });
+
   it("AC: omitting siteManagerApiKey (unedited) keeps the previously stored secret, never re-sending it as an explicit value", async () => {
     requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
     getOrgSettings.mockResolvedValue({ siteManagerApiKey: "already-stored-key" });

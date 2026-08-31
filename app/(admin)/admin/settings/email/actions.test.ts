@@ -50,4 +50,15 @@ describe("saveEmailSettingsAction", () => {
     await expect(saveEmailSettingsAction(tooLong)).rejects.toThrow("INVALID_LENGTH:senderName");
     expect(setOrgSettings).not.toHaveBeenCalled();
   });
+
+  it("[SEC] AC: an unknown/huge extra key on the payload is never persisted (allowlisted, not spread through)", async () => {
+    requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
+    const withExtra = { ...input, evilProp: "x".repeat(100_000) } as EmailSettingsInput & {
+      evilProp: string;
+    };
+    await saveEmailSettingsAction(withExtra);
+    const persisted = setOrgSettings.mock.calls[0]?.[2];
+    expect(persisted).not.toHaveProperty("evilProp");
+    expect(persisted).toEqual(input);
+  });
 });

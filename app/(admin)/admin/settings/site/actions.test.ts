@@ -79,4 +79,15 @@ describe("saveSiteSettingsAction", () => {
     await expect(saveSiteSettingsAction(badHost)).rejects.toThrow("INVALID_URL:socialFacebook");
     expect(setOrgSettings).not.toHaveBeenCalled();
   });
+
+  it("[SEC] AC: an unknown/huge extra key on the payload is never persisted (allowlisted, not spread through)", async () => {
+    requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
+    const withExtra = { ...input, evilProp: "x".repeat(100_000) } as SiteSettingsInput & {
+      evilProp: string;
+    };
+    await saveSiteSettingsAction(withExtra);
+    const persisted = setOrgSettings.mock.calls[0]?.[2];
+    expect(persisted).not.toHaveProperty("evilProp");
+    expect(persisted).toEqual(input);
+  });
 });

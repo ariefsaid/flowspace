@@ -59,4 +59,27 @@ describe("saveAnalyticsSettingsAction", () => {
     ).rejects.toThrow("INVALID_MEASUREMENT_ID");
     expect(setOrgSettings).not.toHaveBeenCalled();
   });
+
+  it("[SEC] AC: an oversized measurement ID is rejected before the format check, no write", async () => {
+    requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
+    const huge = "G-" + "A".repeat(200); // matches the GA4 shape regex but is absurdly long
+    await expect(saveAnalyticsSettingsAction({ measurementId: huge, enabled: true })).rejects.toThrow(
+      "INVALID_LENGTH:measurementId",
+    );
+    expect(setOrgSettings).not.toHaveBeenCalled();
+  });
+
+  it("[SEC] AC: an unknown/huge extra key on the payload is never persisted (allowlisted, not spread through)", async () => {
+    requireSession.mockResolvedValue({ id: "a", role: "ADMIN", orgId: "o1" });
+    const withExtra = {
+      measurementId: "G-ABC1234",
+      enabled: true,
+      evilProp: "x".repeat(100_000),
+    } as unknown as Parameters<typeof saveAnalyticsSettingsAction>[0];
+    await saveAnalyticsSettingsAction(withExtra);
+    expect(setOrgSettings).toHaveBeenCalledWith("o1", "analytics", {
+      measurementId: "G-ABC1234",
+      enabled: true,
+    });
+  });
 });

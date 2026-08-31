@@ -59,6 +59,21 @@ export async function saveSiteSettingsAction(input: SiteSettingsInput) {
   }
 
   assertValid(input);
-  await setOrgSettings(user.orgId, "site", input);
+  // [SEC] allowlisted, per-field-capped object — never spread `input`
+  // through; a raw JSON body can carry any extra/huge key regardless of the
+  // TS type, which would otherwise bypass MAX_LEN and bloat the jsonb blob.
+  const values: SiteSettingsInput = {
+    name: input.name,
+    tagline: input.tagline,
+    address: input.address,
+    phone: input.phone,
+    openingHours: input.openingHours,
+    seoTitle: input.seoTitle,
+    seoDescription: input.seoDescription,
+    socialInstagram: input.socialInstagram,
+    socialFacebook: input.socialFacebook,
+    socialWhatsapp: input.socialWhatsapp,
+  };
+  await setOrgSettings(user.orgId, "site", values);
   revalidatePath("/admin/settings/site");
 }

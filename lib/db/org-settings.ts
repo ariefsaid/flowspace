@@ -32,9 +32,19 @@ export async function getOrgSettings(
 export type Txdb = Pick<typeof db, "insert">;
 
 /**
+ * [SEC] Backstop total-payload cap (8KB) — each settings action is expected
+ * to build its own explicit allowlisted, per-field-capped object BEFORE
+ * calling this, but this guards the jsonb column either way (a bug in a
+ * caller, or a future category) against unbounded growth. 8KB comfortably
+ * covers the largest legitimate category today (site: 10 fields x 500
+ * chars) with headroom, while still rejecting a multi-KB abuse payload.
+ */
+const MAX_SETTINGS_BYTES = 8_000;
+
+/**
  * Upsert the jsonb blob for (org, category) — ADMIN-only, the caller enforces
- * role. Rejects an unknown category (no write); the unique (org, category)
- * key makes the write idempotent.
+ * role. Rejects an unknown category or an oversized total payload (no
+ * write); the unique (org, category) key makes the write idempotent.
  */
 export async function setOrgSettings(
   orgId: string,
@@ -44,6 +54,9 @@ export async function setOrgSettings(
 ): Promise<void> {
   if (!ORG_SETTINGS_CATEGORIES.includes(category)) {
     throw new Error("INVALID_CATEGORY");
+  }
+  if (Buffer.byteLength(JSON.stringify(values), "utf8") > MAX_SETTINGS_BYTES) {
+    throw new Error("SETTINGS_TOO_LARGE");
   }
   await txdb
     .insert(orgSettings)

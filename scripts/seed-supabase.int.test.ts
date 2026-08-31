@@ -13,9 +13,9 @@ import { execSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import * as schema from "@/lib/db/schema";
-import { organizations, cafeMenuItems } from "@/lib/db/schema";
+import { organizations, cafeMenuItems, appUsers, transactions } from "@/lib/db/schema";
 import type { VariantConfig } from "@/lib/cafe/types";
 
 const TEST_URL =
@@ -117,5 +117,47 @@ describe("scripts/seed-supabase — cafe menu variant seed", () => {
       const groupNames = config?.variants.map((g) => g.name) ?? [];
       expect(groupNames).not.toContain("Temperature");
     }
+  });
+});
+
+describe("scripts/seed-supabase — sample transactions + per-tier members (I-049)", () => {
+  it("seeds ~5 sample transactions for the demo member across PACKAGE_PURCHASE/CAFE_ORDER/PRINT_JOB/BOOKING, stable across a rerun", async () => {
+    const [demoMember] = await testDb
+      .select()
+      .from(appUsers)
+      .where(eq(appUsers.email, "budi@flowspace.test"))
+      .limit(1);
+    expect(demoMember).toBeDefined();
+
+    const rows = await testDb
+      .select()
+      .from(transactions)
+      .where(and(eq(transactions.orgId, orgId), eq(transactions.userId, demoMember.id)));
+
+    expect(rows.length).toBeGreaterThanOrEqual(5);
+
+    const types = new Set(rows.map((r) => r.type));
+    expect(types.has("PACKAGE_PURCHASE")).toBe(true);
+    expect(types.has("CAFE_ORDER")).toBe(true);
+    expect(types.has("PRINT_JOB")).toBe(true);
+    expect(types.has("BOOKING")).toBe(true);
+
+    // Idempotent — the beforeAll already ran the seed twice; the count must
+    // not have doubled (deterministic ids, upserted not appended).
+    const [{ count }] = await testSql<{ count: number }[]>`
+      select count(*)::int as count from transactions where org_id = ${orgId} and user_id = ${demoMember.id}`;
+    expect(count).toBe(rows.length);
+  });
+
+  it("seeds one member per membership tier (REGULAR, PREMIUM, GOLD)", async () => {
+    const members = await testDb
+      .select({ email: appUsers.email, tier: appUsers.membershipTier })
+      .from(appUsers)
+      .where(and(eq(appUsers.orgId, orgId), eq(appUsers.role, "MEMBER")));
+
+    const tiers = new Set(members.map((m) => m.tier));
+    expect(tiers.has("REGULAR")).toBe(true);
+    expect(tiers.has("PREMIUM")).toBe(true);
+    expect(tiers.has("GOLD")).toBe(true);
   });
 });

@@ -29,12 +29,14 @@ import {
   printTopupPackages,
   printers,
   timeCreditLots,
+  transactions,
 } from "@/lib/db/schema";
 import {
   MEMBERSHIP_TIERS,
   type Role,
   type MembershipTier,
   type CafeCategory,
+  type TransactionType,
 } from "@/lib/db/enums";
 import type { VariantConfig } from "@/lib/cafe/types";
 import { PRINT_PRICE_MATRIX, PRINT_MATRIX_CELLS } from "@/lib/print/pricing";
@@ -102,6 +104,50 @@ const SEED_USERS: Array<{
     credits: 0,
     print: 0,
   },
+  // I-049: one member per tier (REGULAR + GOLD, alongside the existing PREMIUM
+  // "budi" member) so every tier's discount path is demoable out of the box.
+  {
+    key: "MEMBER_REGULAR",
+    email: process.env.SEED_MEMBER_REGULAR_EMAIL ?? "citra@flowspace.test",
+    name: "Citra Wulandari",
+    password: process.env.SEED_MEMBER_REGULAR_PASSWORD ?? "dev-member-pw",
+    role: "MEMBER",
+    tier: "REGULAR",
+    credits: 10,
+    print: 20,
+  },
+  {
+    key: "MEMBER_GOLD",
+    email: process.env.SEED_MEMBER_GOLD_EMAIL ?? "dimas@flowspace.test",
+    name: "Dimas Pratama",
+    password: process.env.SEED_MEMBER_GOLD_PASSWORD ?? "dev-member-pw",
+    role: "MEMBER",
+    tier: "GOLD",
+    credits: 200,
+    print: 150,
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Sample ledger rows (I-049) — the demo member's ("budi") member /history and
+// dashboard "recent transactions" are empty on a fresh seed otherwise. Spans
+// every TransactionType so all history filters are demoable. Deterministic
+// ids → idempotent upsert (never doubles on a rerun). `daysAgo` spreads the
+// createdAt so the history reads as a real timeline, newest last in this
+// array (BOOKING = most recent).
+// ---------------------------------------------------------------------------
+const SAMPLE_TRANSACTIONS: Array<{
+  slug: string;
+  type: TransactionType;
+  description: string;
+  amountRupiah: number;
+  daysAgo: number;
+}> = [
+  { slug: "pkg-10h", type: "PACKAGE_PURCHASE", description: "Pembelian paket 10 Jam", amountRupiah: 140000, daysAgo: 6 },
+  { slug: "cafe-1", type: "CAFE_ORDER", description: "Es Kopi Susu Aren x2", amountRupiah: 50000, daysAgo: 5 },
+  { slug: "print-1", type: "PRINT_JOB", description: "Cetak dokumen 5 halaman", amountRupiah: 2500, daysAgo: 3 },
+  { slug: "cafe-2", type: "CAFE_ORDER", description: "Paket B + Es Teh Manis", amountRupiah: 42000, daysAgo: 2 },
+  { slug: "booking-1", type: "BOOKING", description: "Booking Meeting Room A - 2 jam", amountRupiah: 100000, daysAgo: 1 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -221,7 +267,7 @@ async function main() {
 
   const sql = postgres(DATABASE_URL, { prepare: false });
   const db = drizzle(sql, {
-    schema: { organizations, appUsers, cafeMenuItems, timeCreditPackages, facilities, printTopupPackages, printers },
+    schema: { organizations, appUsers, cafeMenuItems, timeCreditPackages, facilities, printTopupPackages, printers, transactions },
   });
 
   // -- Org upsert (by slug) --------------------------------------------------
@@ -433,6 +479,37 @@ async function main() {
       expiresAt: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000),
     });
     console.log(`  Seeded transitional lot for ${u.email} (${u.credits}h, expires +90d)`);
+  }
+
+  // -- Sample transactions (I-049) — demo member ledger, idempotent upsert --
+  const DEMO_MEMBER_EMAIL = process.env.SEED_MEMBER_EMAIL ?? "budi@flowspace.test";
+  const [demoMember] = await db
+    .select({ id: appUsers.id })
+    .from(appUsers)
+    .where(eq(appUsers.email, DEMO_MEMBER_EMAIL))
+    .limit(1);
+  if (demoMember) {
+    for (const t of SAMPLE_TRANSACTIONS) {
+      const id = `${org.id}__demo-txn-${t.slug}`;
+      const createdAt = new Date(Date.now() - t.daysAgo * 24 * 60 * 60 * 1000);
+      await db
+        .insert(transactions)
+        .values({
+          id,
+          orgId: org.id,
+          userId: demoMember.id,
+          type: t.type,
+          description: t.description,
+          amountRupiah: t.amountRupiah,
+          status: "COMPLETED",
+          createdAt,
+        })
+        .onConflictDoUpdate({
+          target: transactions.id,
+          set: { description: t.description, amountRupiah: t.amountRupiah, createdAt },
+        });
+    }
+    console.log(`Seeded ${SAMPLE_TRANSACTIONS.length} sample transactions for ${DEMO_MEMBER_EMAIL}.`);
   }
 
   // -- Pricing config (I-041, spec 0008) — 4-dim locked map, idempotent upsert ----

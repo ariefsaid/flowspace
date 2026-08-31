@@ -229,8 +229,12 @@ export async function spendTimeCredits(opts: {
  * UPDATE), but stays compatible with the implicit FOR KEY SHARE of
  * unrelated single-statement FK inserts (e.g. a ledger row written by a
  * non-credit path) — those neither block on us nor deadlock us.
+ *
+ * Exported as THE shared canonical first lock: packages.ts
+ * (purchasePackage/topUpPrint) and print-packages.ts (purchasePrintTopup)
+ * take it before their FK-inserting statements too.
  */
-async function lockUserRowForCreditWrite(
+export async function lockUserRowForCreditWrite(
   tx: Pick<typeof db, "select">,
   orgId: string,
   userId: string,
@@ -251,7 +255,6 @@ export async function recomputeCreditCache(opts: {
   tx: Pick<typeof db, "update" | "select">;
 }): Promise<number> {
   const { orgId, userId, tx } = opts;
-  const now = new Date();
 
   // [SEC][MONEY][I-047 fix-5] Lock the member's OWN app_users row FIRST,
   // before summing — without this, two concurrent recomputes (e.g. two
@@ -272,6 +275,15 @@ export async function recomputeCreditCache(opts: {
   // already-held lock.
   await lockUserRowForCreditWrite(tx, orgId, userId);
 
+  // [SEC][MONEY][I-047 fix round 2, finding 5] `now` is captured AFTER the
+  // profile lock, not before — the lock can BLOCK (a concurrent credit path
+  // for the same member). A `now` captured before that wait would treat a
+  // lot whose expiresAt passed DURING the wait as still spendable in the
+  // cached sum (`gt(expiresAt, now)` below) — caching a balance the member
+  // can no longer actually spend. Same discipline as spendTimeCredits's
+  // post-lots-lock `now` capture.
+  const now = new Date();
+
   const [row] = await tx
     .select({
       // [SEC][MONEY][I-047 fix-3] SUM(int) returns bigint in Postgres, so the
@@ -281,7 +293,11 @@ export async function recomputeCreditCache(opts: {
       // grants). Clamp the RESULT to the int4 ceiling instead: the cache
       // column is int4, so a beyond-int4 balance is unrepresentable either
       // way — clamping keeps the write alive and monotone near the edge.
-      total: sql<number>`coalesce(least(sum(${timeCreditLots.remainingHours}), ${INT4_MAX}), 0)::int`,
+      // COALESCE comes BEFORE least on purpose: Postgres LEAST/GREATEST skip
+      // NULLs, so least(NULL, INT4_MAX) would return INT4_MAX and an
+      // all-expired / lot-less member's cache would silently become INT4_MAX
+      // instead of 0 (caught by the `now`-after-lock barrier test).
+      total: sql<number>`least(coalesce(sum(${timeCreditLots.remainingHours}), 0), ${INT4_MAX})::int`,
     })
     .from(timeCreditLots)
     .where(

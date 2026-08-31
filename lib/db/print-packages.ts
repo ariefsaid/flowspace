@@ -2,7 +2,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import { appUsers, printTopupPackages, type PrintTopupPackage } from "@/lib/db/schema";
 import { recordTransaction } from "@/lib/db/transactions";
-import { int4ClampedAdd } from "@/lib/db/time-credit-lots";
+import { lockUserRowForCreditWrite, int4ClampedAdd } from "@/lib/db/time-credit-lots";
 
 export type PrintTopupPackageView = Pick<PrintTopupPackage, "id" | "pages" | "priceRupiah" | "sortOrder">;
 
@@ -23,13 +23,19 @@ export async function purchasePrintTopup(input: { orgId: string; userId: string;
       isNull(printTopupPackages.archivedAt),
     )).limit(1);
     if (!pkg) throw new Error("UNKNOWN_PACKAGE");
-    const [user] = await tx.update(appUsers)
+    // [SEC][MONEY][I-047 fix round 2, finding 5] Canonical FIRST lock (FOR NO
+    // KEY UPDATE) before the balance UPDATE and the FK-inserting ledger row —
+    // same guard+lock as purchasePackage (see packages.ts). The user must
+    // resolve within this org before any write [SEC].
+    const user = await lockUserRowForCreditWrite(tx, input.orgId, input.userId);
+    if (!user) throw new Error("USER_NOT_FOUND");
+    const [updatedUser] = await tx.update(appUsers)
       // [SEC][MONEY][I-047 fix-3] int4-clamped increment — clamps the
       // RESULT, not just the package's pages (see int4ClampedAdd).
       .set({ printBalance: int4ClampedAdd(appUsers.printBalance, pkg.pages), updatedAt: new Date() })
       .where(and(eq(appUsers.id, input.userId), eq(appUsers.orgId, input.orgId)))
       .returning({ id: appUsers.id });
-    if (!user) throw new Error("USER_NOT_FOUND");
+    if (!updatedUser) throw new Error("USER_NOT_FOUND");
     return recordTransaction({
       orgId: input.orgId, userId: input.userId, type: "PRINT_TOPUP",
       description: `Print balance · ${pkg.pages} pages`, amountRupiah: pkg.priceRupiah,

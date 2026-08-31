@@ -325,5 +325,18 @@ describe("lib/db/time-credit-lots — spendTimeCredits [SEC][MONEY]", () => {
       expect(cached).toBe(2_147_483_647); // clamped, not crashed
       expect(await getUserTimeCredits(userAId)).toBe(2_147_483_647);
     });
+
+    it("keeps an empty (or all-expired) lot sum at 0 — LEAST skips NULLs, so the clamp must coalesce the sum BEFORE bounding it", async () => {
+      await testSql`TRUNCATE TABLE "time_credit_lots" RESTART IDENTITY CASCADE`;
+
+      // No lots at all: sum(...) is NULL, and least(NULL, INT4_MAX) returns
+      // INT4_MAX (Postgres LEAST/GREATEST skip NULLs) unless the sum is
+      // coalesced first — the clamp once wrote INT4_MAX here.
+      const cached = await db.transaction((tx) =>
+        recomputeCreditCache({ orgId: orgAId, userId: userAId, tx }),
+      );
+      expect(cached).toBe(0);
+      expect(await getUserTimeCredits(userAId)).toBe(0);
+    });
   });
 });

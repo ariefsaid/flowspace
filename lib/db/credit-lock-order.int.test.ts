@@ -37,11 +37,12 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import * as schema from "@/lib/db/schema";
-import { organizations, appUsers, timeCreditLots, facilities, bookings } from "@/lib/db/schema";
+import { organizations, appUsers, timeCreditLots, facilities, bookings, timeCreditPackages } from "@/lib/db/schema";
 import { db } from "@/lib/db/drizzle";
-import { spendTimeCredits } from "@/lib/db/time-credit-lots";
+import { spendTimeCredits, recomputeCreditCache } from "@/lib/db/time-credit-lots";
 import { adjustCredits } from "@/lib/db/users";
 import { createBooking } from "@/lib/db/bookings";
+import { purchasePackage } from "@/lib/db/packages";
 
 const TEST_URL =
   process.env.TEST_DATABASE_URL ??
@@ -254,6 +255,90 @@ describe("recomputeCreditCache — concurrent-grant race (I-047 fix-5)", () => {
       const finalUser = await getUser(userId);
       expect(await lotSum(userId)).toBe(8);
       expect(finalUser.timeCredits).toBe(8); // the cache reflects BOTH grants, not whichever committed last against a stale sum
+    },
+    10_000,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// I-047 fix round 2, finding 5 — package-purchase grant deadlock + the
+// recompute `now` capture point.
+// ---------------------------------------------------------------------------
+describe("purchasePackage grant order + recomputeCreditCache `now` (I-047 fix round 2, finding 5)", () => {
+  it(
+    "two concurrent purchasePackage calls for the SAME user — the grant-side KEY SHARE → FOR UPDATE upgrade deadlock — both complete, never a 40P01 (deterministic row-lock barrier)",
+    async () => {
+      const userId = await seedUser();
+      const [pkg] = await testDb
+        .insert(timeCreditPackages)
+        .values({ orgId: orgAId, name: "Barrier 5h", hours: 5, priceRupiah: 100_000, pricePerHourRupiah: 20_000, sortOrder: 1 })
+        .returning();
+
+      // Holding app_users FOR SHARE is the precise pre-fix trap: FOR SHARE
+      // is compatible with the implicit FOR KEY SHARE each purchase's
+      // ledger/lot INSERT takes, so BOTH purchases sail past their inserts
+      // and genuinely queue at recomputeCreditCache's strong lock (waiters =
+      // 2). On release, each FOR UPDATE conflicts with the OTHER's still-
+      // held KEY SHARE — a guaranteed 40P01 cycle. Under the canonical
+      // app_users-first order, both purchases instead queue at their FIRST
+      // statement (FOR NO KEY UPDATE conflicts with this holder's FOR
+      // SHARE) and serialize cleanly.
+      const results = await runWithRowLockBarrier(
+        `select * from app_users where id = '${userId}' for share`,
+        2,
+        [
+          () => purchasePackage({ orgId: orgAId, userId, packageId: pkg.id }),
+          () => purchasePackage({ orgId: orgAId, userId, packageId: pkg.id }),
+        ],
+      );
+
+      expectNoDeadlock(results);
+
+      // Both grants actually landed (no lost purchase, no torn ledger).
+      const lots = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.userId, userId));
+      expect(lots).toHaveLength(2);
+      expect(await lotSum(userId)).toBe(10);
+      const finalUser = await getUser(userId);
+      expect(finalUser.timeCredits).toBe(10); // cache reflects BOTH grants
+    },
+    10_000,
+  );
+
+  it(
+    "recomputeCreditCache captures `now` AFTER the app_users lock — a lot that expires while the recompute waits on the lock is excluded, not cached as spendable",
+    async () => {
+      const userId = await seedUser();
+      const EXPIRES_IN_MS = 600;
+      await testDb.insert(timeCreditLots).values({
+        orgId: orgAId,
+        userId,
+        totalHours: 7,
+        remainingHours: 7,
+        expiresAt: new Date(Date.now() + EXPIRES_IN_MS),
+      });
+
+      // Hold the member's app_users row until well past the lot's expiry,
+      // THEN let the recompute in: its `now` must be captured after the
+      // wait (so the expired lot is excluded from the cached sum), never
+      // before it.
+      const results = await runWithRowLockBarrier(
+        `select * from app_users where id = '${userId}' for no key update`,
+        1,
+        [() => db.transaction((tx) => recomputeCreditCache({ orgId: orgAId, userId, tx }))],
+        { holdMsAfterWaiters: EXPIRES_IN_MS + 400 },
+      );
+
+      expectNoDeadlock(results);
+      const [first] = results;
+      expect(first.status).toBe("fulfilled");
+      if (first.status === "fulfilled") {
+        expect(first.value).toBe(0); // returned cache value: expired lot excluded
+      }
+      const finalUser = await getUser(userId);
+      expect(finalUser.timeCredits).toBe(0); // cached column: expired lot excluded
+      // The lot row itself is untouched — expiry handling (prune) is the
+      // spend/debit paths' job; recompute only filters what it caches.
+      expect(await lotSum(userId)).toBe(7);
     },
     10_000,
   );

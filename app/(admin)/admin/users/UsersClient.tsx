@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Search,
   UserPlus,
@@ -9,20 +10,25 @@ import {
   Phone,
   CalendarDays,
   Pencil,
-  Trash2,
+  Archive,
+  Wallet,
   ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Input } from "@/components/ui/Input";
-import type { MembershipTier } from "@/lib/db/enums";
+import type { MembershipTier, Role } from "@/lib/db/enums";
+import { updateUserAction, archiveUserAction, adjustCreditsAction, resetUserPasswordAction } from "./actions";
+import { UserFormDialog, TIER_LABELS, type UserFormValues } from "./UserFormDialog";
+import { CreditAdjustDialog, type CreditAdjustValues } from "./CreditAdjustDialog";
+import { userErrorMessage } from "./userErrors";
 
 // ---------------------------------------------------------------------------
 // View shape — maps DB AppUser to what this component consumes.
 // ponytail: phone/bookings/transactions are not on app_users; phone renders as
 // "" (omitted by the existing conditional), the two counts render as 0 until
-// per-user aggregate reads are a separate concern. Edit/Add stay non-wired
-// stubs (markup preserved, no action) — ponytail, deferred to a later issue.
+// per-user aggregate reads are a separate concern. Add User stays a
+// non-wired stub — signup owns member creation (I-047 scope).
 // ---------------------------------------------------------------------------
 
 export interface AdminUserView {
@@ -31,21 +37,18 @@ export interface AdminUserView {
   email: string;
   /** Not on app_users today — empty string keeps the conditional UI intact. */
   phone: string;
+  role: Role;
   tier: MembershipTier;
   joinedAt: string; // ISO
   bookings: number;
   transactions: number;
+  timeCredits: number;
+  printBalance: number;
 }
 
 // ---------------------------------------------------------------------------
 // Tier helpers (DB enum domain: REGULAR / PREMIUM / GOLD)
 // ---------------------------------------------------------------------------
-
-const TIER_LABELS: Record<MembershipTier, string> = {
-  REGULAR: "Regular",
-  PREMIUM: "Premium",
-  GOLD: "Gold",
-};
 
 const TIER_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: "all", label: "Semua Membership" },
@@ -90,9 +93,17 @@ export interface UsersClientProps {
   users: AdminUserView[];
 }
 
-export function UsersClient({ users }: UsersClientProps) {
+export function UsersClient({ users: initialUsers }: UsersClientProps) {
+  const router = useRouter();
+  const [users, setUsers] = useState(initialUsers);
   const [search, setSearch] = useState("");
   const [tierFilter, setTierFilter] = useState("all");
+
+  const [editingUser, setEditingUser] = useState<AdminUserView | null>(null);
+  const [adjustingUser, setAdjustingUser] = useState<AdminUserView | null>(null);
+  const [archivingUser, setArchivingUser] = useState<AdminUserView | null>(null);
+  const [archivePending, setArchivePending] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
   const filtered = users.filter((u) => {
     const q = search.toLowerCase();
@@ -105,6 +116,57 @@ export function UsersClient({ users }: UsersClientProps) {
     return matchSearch && matchTier;
   });
 
+  async function handleEditSave(values: UserFormValues) {
+    if (!editingUser) return;
+    const updated = await updateUserAction(editingUser.id, {
+      name: values.name,
+      role: values.role,
+      membershipTier: values.membershipTier,
+    });
+    if (values.password.trim()) {
+      await resetUserPasswordAction(editingUser.id, values.password.trim());
+    }
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === editingUser.id
+          ? { ...u, name: updated.name, role: updated.role, tier: updated.membershipTier }
+          : u,
+      ),
+    );
+    setEditingUser(null);
+    router.refresh();
+  }
+
+  async function handleAdjustCredits(values: CreditAdjustValues) {
+    if (!adjustingUser) return;
+    const result = await adjustCreditsAction(adjustingUser.id, values);
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === adjustingUser.id
+          ? { ...u, timeCredits: result.timeCredits, printBalance: result.printBalance }
+          : u,
+      ),
+    );
+    setAdjustingUser(null);
+    router.refresh();
+  }
+
+  async function handleConfirmArchive() {
+    if (!archivingUser) return;
+    setArchivePending(true);
+    setArchiveError(null);
+    try {
+      await archiveUserAction(archivingUser.id);
+      setUsers((prev) => prev.filter((u) => u.id !== archivingUser.id));
+      setArchivingUser(null);
+      router.refresh();
+    } catch (e) {
+      setArchiveError(userErrorMessage(e));
+    } finally {
+      setArchivePending(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* ── Page header ── */}
@@ -115,7 +177,7 @@ export function UsersClient({ users }: UsersClientProps) {
             Kelola member dan membership
           </p>
         </div>
-        {/* ponytail: Add User stays a non-wired stub (no createMember action yet). */}
+        {/* ponytail: Add User stays a non-wired stub — signup owns member creation. */}
         <Button variant="primary" size="md" className="shrink-0">
           <UserPlus className="h-4 w-4" aria-hidden="true" />
           Tambah User
@@ -166,10 +228,63 @@ export function UsersClient({ users }: UsersClientProps) {
           )}
 
           {filtered.map((user) => (
-            <UserRow key={user.id} user={user} />
+            <UserRow
+              key={user.id}
+              user={user}
+              onEdit={() => setEditingUser(user)}
+              onAdjustCredits={() => setAdjustingUser(user)}
+              onArchive={() => {
+                setArchiveError(null);
+                setArchivingUser(user);
+              }}
+            />
           ))}
         </div>
       </section>
+
+      {editingUser && (
+        <UserFormDialog user={editingUser} onCancel={() => setEditingUser(null)} onSave={handleEditSave} />
+      )}
+
+      {adjustingUser && (
+        <CreditAdjustDialog
+          user={adjustingUser}
+          onCancel={() => setAdjustingUser(null)}
+          onSave={handleAdjustCredits}
+        />
+      )}
+
+      {archivingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="archive-confirm-title"
+            className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-md"
+          >
+            <h2 id="archive-confirm-title" className="text-lg font-semibold text-gray-900">
+              Arsipkan user?
+            </h2>
+            <p className="mt-2 text-sm text-gray-500">
+              &quot;{archivingUser.name}&quot; tidak akan muncul lagi di direktori. Riwayat booking &amp; transaksi
+              tetap tersimpan.
+            </p>
+            {archiveError && (
+              <p role="alert" className="mt-3 text-sm text-red-600">
+                {archiveError}
+              </p>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setArchivingUser(null)} disabled={archivePending}>
+                Batal
+              </Button>
+              <Button variant="danger" onClick={handleConfirmArchive} disabled={archivePending}>
+                {archivePending ? "Mengarsipkan…" : "Arsipkan"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -178,7 +293,17 @@ export function UsersClient({ users }: UsersClientProps) {
 // UserRow
 // ---------------------------------------------------------------------------
 
-function UserRow({ user }: { user: AdminUserView }) {
+function UserRow({
+  user,
+  onEdit,
+  onAdjustCredits,
+  onArchive,
+}: {
+  user: AdminUserView;
+  onEdit: () => void;
+  onAdjustCredits: () => void;
+  onArchive: () => void;
+}) {
   return (
     <div className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
       {/* Main info */}
@@ -222,23 +347,32 @@ function UserRow({ user }: { user: AdminUserView }) {
         </div>
       </div>
 
-      {/* Action buttons — Edit outlined pill + trash icon-only.
-          ponytail: Edit/Delete stay non-wired stubs (no update/archive action yet). */}
+      {/* Action buttons */}
       <div className="flex shrink-0 items-center gap-2">
         <button
           type="button"
+          onClick={onEdit}
           aria-label={`Edit ${user.name}`}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-teal-600 text-teal-600 text-sm font-medium hover:bg-teal-50 transition-colors"
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-teal-600 text-teal-600 text-sm font-medium hover:bg-teal-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40"
         >
           <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
           Edit
         </button>
         <button
           type="button"
-          aria-label={`Hapus ${user.name}`}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
+          onClick={onAdjustCredits}
+          aria-label={`Sesuaikan saldo ${user.name}`}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-gray-500 hover:bg-slate-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40"
         >
-          <Trash2 className="h-4 w-4" aria-hidden="true" />
+          <Wallet className="h-4 w-4" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          onClick={onArchive}
+          aria-label={`Arsipkan ${user.name}`}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+        >
+          <Archive className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
     </div>

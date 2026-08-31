@@ -93,6 +93,8 @@ describe("PosClient (AC-101)", () => {
       email: "gold@x.test",
       hasActiveBooking: true,
       cafeDiscountPct: 10,
+      activeBookingFacility: "Walk-in Coworking",
+      activeBookingEndAt: null,
     });
 
     render(<PosClient menu={sampleMenu} />);
@@ -142,6 +144,8 @@ describe("PosClient (AC-101)", () => {
       email: "gold@x.test",
       hasActiveBooking: true,
       cafeDiscountPct: 10,
+      activeBookingFacility: "Walk-in Coworking",
+      activeBookingEndAt: null,
     });
 
     render(<PosClient menu={sampleMenu} />);

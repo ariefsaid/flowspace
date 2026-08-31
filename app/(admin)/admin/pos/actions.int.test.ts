@@ -26,6 +26,7 @@ import {
   appUsers,
   cafeMenuItems,
   bookings,
+  facilities,
   membershipTierConfig,
 } from "@/lib/db/schema";
 
@@ -40,12 +41,15 @@ let orgBId: string;
 let cashierId: string;
 let activeMemberId: string;
 let inactiveMemberId: string;
+let scheduledActiveMemberId: string;
+let scheduledActiveEndAt: Date;
 let latteAId: string;
 let variantLatteAId: string;
 
 const ACTIVE_MEMBER_EMAIL = "gold-active@x.test";
 const INACTIVE_MEMBER_EMAIL = "regular-inactive@x.test";
 const DUPLICATE_EMAIL = "shared@x.test";
+const SCHEDULED_ACTIVE_MEMBER_EMAIL = "gold-scheduled-active@x.test";
 
 beforeAll(async () => {
   await testSql`TRUNCATE TABLE "cafe_order_items","cafe_orders","cafe_menu_items","bookings","membership_tier_config","app_users","organizations" RESTART IDENTITY CASCADE`;
@@ -116,6 +120,41 @@ beforeAll(async () => {
     paymentStatus: "WAITING_CASHIER",
     bookingMode: "WALKIN",
     paymentMethod: "cashier",
+  });
+
+  // I-047: a second member with a SCHEDULED (fixed end time) ACTIVE booking
+  // — proves lookupPosMemberAction surfaces the real facility name + endAt,
+  // not just a boolean.
+  const [scheduledActiveMember] = await testDb
+    .insert(appUsers)
+    .values({
+      orgId: orgAId,
+      email: SCHEDULED_ACTIVE_MEMBER_EMAIL,
+      name: "Gold Scheduled Active",
+      role: "MEMBER",
+      membershipTier: "GOLD",
+    })
+    .returning();
+  scheduledActiveMemberId = scheduledActiveMember.id;
+  scheduledActiveEndAt = new Date(Date.now() + 2 * 3_600_000);
+  const [meetingRoom] = await testDb
+    .insert(facilities)
+    .values({ orgId: orgAId, name: "Ruang Rapat Elang", type: "MEETING_ROOM", ratePerHourRupiah: 120000, available: true })
+    .returning();
+  await testDb.insert(bookings).values({
+    orgId: orgAId,
+    userId: scheduledActiveMemberId,
+    facilityType: "MEETING_ROOM",
+    facilityId: meetingRoom.id,
+    facilityName: "Ruang Rapat Elang",
+    startAt: new Date(),
+    endAt: scheduledActiveEndAt,
+    durationHours: 2,
+    ratePerHourRupiah: 120000,
+    status: "ACTIVE",
+    paymentStatus: "PAID_ONLINE",
+    bookingMode: "SCHEDULED",
+    paymentMethod: "online",
   });
 
   const [latte] = await testDb
@@ -200,6 +239,8 @@ describe("app/(admin)/admin/pos/actions", () => {
       expect(result!.id).toBe(inactiveMemberId);
       expect(result!.hasActiveBooking).toBe(false);
       expect(result!.cafeDiscountPct).toBe(0);
+      expect(result!.activeBookingFacility).toBeNull();
+      expect(result!.activeBookingEndAt).toBeNull();
     });
 
     it("AC-716: a member with an ACTIVE booking returns the configured tier cafeDiscountPct, not a hardcoded rate", async () => {
@@ -210,6 +251,22 @@ describe("app/(admin)/admin/pos/actions", () => {
       expect(result!.hasActiveBooking).toBe(true);
       expect(result!.cafeDiscountPct).toBe(10);
       expect(result!.cafeDiscountPct).not.toBe(15); // ORIG's hardcoded rate (OBS-713) must never leak through
+    });
+
+    it("[AC-047-POS1] an ACTIVE walk-in (open-ended) surfaces its facility name and a null end time", async () => {
+      asCashier();
+      const result = await lookupPosMemberAction(ACTIVE_MEMBER_EMAIL);
+      expect(result!.activeBookingFacility).toBe("Walk-in Coworking");
+      expect(result!.activeBookingEndAt).toBeNull();
+    });
+
+    it("[AC-047-POS2] an ACTIVE scheduled booking surfaces its facility name and real end time", async () => {
+      asCashier();
+      const result = await lookupPosMemberAction(SCHEDULED_ACTIVE_MEMBER_EMAIL);
+      expect(result).not.toBeNull();
+      expect(result!.hasActiveBooking).toBe(true);
+      expect(result!.activeBookingFacility).toBe("Ruang Rapat Elang");
+      expect(result!.activeBookingEndAt).toBe(scheduledActiveEndAt.toISOString());
     });
 
     it("AC-717: a nonexistent email returns null, no data disclosed", async () => {

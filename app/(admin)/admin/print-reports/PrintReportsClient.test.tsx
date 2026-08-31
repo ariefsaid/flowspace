@@ -22,6 +22,7 @@ const emptySummary: PrintReportsSummary = {
   uniqueUsers: 0,
   totalRevenue: 0,
   completedCount: 0,
+  pendingCount: 0,
 };
 
 const discountedJob: AdminPrintJobView = {
@@ -104,7 +105,7 @@ describe("PrintReportsClient render", () => {
       netRupiah: 3000, datetime: "2026-06-15T10:00:00Z", status,
       processedBy: "agent", processedAt: "2026-06-15T10:01:00Z", completedAt: null,
       canAdvance: status !== "COMPLETED",
-    }))} summary={{ totalJobs: 5, totalPages: 15, uniqueUsers: 1, totalRevenue: 3000, completedCount: 0 }} />);
+    }))} summary={{ totalJobs: 5, totalPages: 15, uniqueUsers: 1, totalRevenue: 3000, completedCount: 0, pendingCount: 3 }} />);
     expect(screen.getByText("PROCESSING")).toBeInTheDocument();
     expect(screen.getByText("Diproses")).toBeInTheDocument();
     expect(screen.getByText("Gagal")).toBeInTheDocument();
@@ -121,11 +122,16 @@ describe("PrintReportsClient render", () => {
           uniqueUsers: 2,
           totalRevenue: 12000,
           completedCount: 1,
+          pendingCount: 1,
         }}
       />,
     );
     expect(screen.getByText("Budi Santoso")).toBeInTheDocument();
     expect(screen.getByText("kontrak-sewa.pdf")).toBeInTheDocument();
+    // I-047: the "Menunggu Proses" (pending+processing) tile replaces the old
+    // "Pengguna Aktif" tile (ORIG parity).
+    expect(screen.getByText("Menunggu Proses")).toBeInTheDocument();
+    expect(screen.queryByText("Pengguna Aktif")).not.toBeInTheDocument();
     expect(screen.getByText("Warna")).toBeInTheDocument();
     expect(screen.getByText("20%")).toBeInTheDocument(); // derived discount
     expect(screen.getByText("Selesai")).toBeInTheDocument();

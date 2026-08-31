@@ -5,7 +5,7 @@ import {
   Printer,
   FileText,
   Banknote,
-  Users,
+  Clock,
   TrendingUp,
   Inbox,
 } from "lucide-react";
@@ -128,10 +128,10 @@ export function PrintReportsClient({
           accent="blue"
         />
         <StatTile
-          label="Pengguna Aktif"
-          value={summary.uniqueUsers}
-          unit="pengguna"
-          icon={Users}
+          label="Menunggu Proses"
+          value={summary.pendingCount}
+          unit="job"
+          icon={Clock}
           accent="teal"
         />
         <StatTile

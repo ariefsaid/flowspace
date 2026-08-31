@@ -5,7 +5,7 @@
  * printer capabilities, page ranges, balance debits, and ledger writes are
  * checked on the server; the browser never supplies an authoritative value.
  */
-import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import {
   appUsers,
@@ -48,12 +48,53 @@ export async function listPrintJobsByUser(
   }));
 }
 
-/** Org-scoped, bounded admin report listing. */
-export function listPrintJobsForAdmin(orgId: string, limit = 500): Promise<PrintJob[]> {
+export type PrintReportFilters = {
+  /** Matches the file name OR the owning user's name/email (case-insensitive substring). */
+  search?: string;
+  status?: PrintJobStatus;
+  /** Inclusive lower bound on createdAt. */
+  dateFrom?: Date;
+  /** Inclusive upper bound on createdAt. */
+  dateTo?: Date;
+};
+
+/**
+ * Org-scoped, bounded admin report listing. `filters` (I-047) narrows the
+ * result — search/status/date-range all combine with AND, and every
+ * condition is parameterized (drizzle `ilike`/`eq`/`gte`/`lte`, never raw
+ * string interpolation) [SEC]. A `search` term also matches the owning
+ * user's name/email via a same-org lookup (never leaking a cross-org user's
+ * name/email into the match set).
+ */
+export async function listPrintJobsForAdmin(
+  orgId: string,
+  filters: PrintReportFilters = {},
+  limit = 500,
+): Promise<PrintJob[]> {
+  const conditions: SQL[] = [eq(printJobs.orgId, orgId)];
+  if (filters.status) conditions.push(eq(printJobs.status, filters.status));
+  if (filters.dateFrom) conditions.push(gte(printJobs.createdAt, filters.dateFrom));
+  if (filters.dateTo) conditions.push(lte(printJobs.createdAt, filters.dateTo));
+
+  const search = filters.search?.trim();
+  if (search) {
+    const q = `%${search}%`;
+    const matchingUsers = await db
+      .select({ id: appUsers.id })
+      .from(appUsers)
+      .where(and(eq(appUsers.orgId, orgId), or(ilike(appUsers.name, q), ilike(appUsers.email, q))));
+    const userIds = matchingUsers.map((u) => u.id);
+    const searchCond =
+      userIds.length > 0
+        ? or(ilike(printJobs.fileName, q), inArray(printJobs.userId, userIds))
+        : ilike(printJobs.fileName, q);
+    conditions.push(searchCond!);
+  }
+
   return db
     .select()
     .from(printJobs)
-    .where(eq(printJobs.orgId, orgId))
+    .where(and(...conditions))
     .orderBy(desc(printJobs.createdAt))
     .limit(limit);
 }
@@ -64,6 +105,8 @@ export type PrintReportSummary = {
   uniqueUsers: number;
   totalRevenue: number;
   completedCount: number;
+  /** I-047: PENDING + PROCESSING jobs still awaiting/undergoing work (ORIG's "Menunggu Proses" tile). */
+  pendingCount: number;
 };
 
 export async function getPrintReportSummary(orgId: string): Promise<PrintReportSummary> {
@@ -74,10 +117,13 @@ export async function getPrintReportSummary(orgId: string): Promise<PrintReportS
       uniqueUsers: sql<number>`count(distinct ${printJobs.userId})::int`,
       totalRevenue: sql<number>`coalesce(sum(${printJobs.totalRupiah}) filter (where ${printJobs.status} = 'COMPLETED'), 0)::int`,
       completedCount: sql<number>`count(*) filter (where ${printJobs.status} = 'COMPLETED')::int`,
+      pendingCount: sql<number>`count(*) filter (where ${printJobs.status} in ('PENDING', 'PROCESSING'))::int`,
     })
     .from(printJobs)
     .where(eq(printJobs.orgId, orgId));
-  return row ?? { totalJobs: 0, totalPages: 0, uniqueUsers: 0, totalRevenue: 0, completedCount: 0 };
+  return (
+    row ?? { totalJobs: 0, totalPages: 0, uniqueUsers: 0, totalRevenue: 0, completedCount: 0, pendingCount: 0 }
+  );
 }
 
 type SubmitPrintJobInput = {

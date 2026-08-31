@@ -28,6 +28,8 @@ export interface PrintReportsSummary {
   uniqueUsers: number;
   totalRevenue: number;
   completedCount: number;
+  /** I-047: PENDING + PROCESSING jobs still awaiting/undergoing work. */
+  pendingCount: number;
 }
 
 type PrinterView = { name: string; displayName: string };

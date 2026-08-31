@@ -300,6 +300,26 @@ export async function adjustCredits(
       .limit(1);
     if (!target) throw new Error("NOT_FOUND");
 
+    // [SEC][MONEY][I-047 fix-4] Lock-order deadlock fix: `time_credit_lots`
+    // MUST be touched (if at all) BEFORE `app_users` in every credit-writing
+    // transaction — the SAME canonical order `spendTimeCredits`/
+    // `recomputeCreditCache` already use on the booking/checkout side
+    // (time-credit-lots.ts). The old code did the printBalance UPDATE
+    // (locks app_users) FIRST, then adjustTimeCreditsForAdmin (locks lots)
+    // second — the exact REVERSE of booking/checkout's order. Two
+    // transactions acquiring the same pair of resources in opposite orders
+    // is the textbook lock-order deadlock: a concurrent adjustCredits (old
+    // order: app_users→lots) and spendTimeCredits (lots→app_users) on the
+    // SAME user could each hold one resource while waiting on the other —
+    // proven by a real Postgres "deadlock detected" (40P01) under a forced-
+    // overlap barrier test (lib/db/credit-lock-order.int.test.ts). Doing the
+    // lots-touching work FIRST here (before the printBalance write) makes
+    // app_users always the LAST resource this transaction locks, matching
+    // every other credit path.
+    if (timeCreditsDelta !== 0) {
+      await adjustTimeCreditsForAdmin({ orgId, userId: id, deltaHours: timeCreditsDelta, tx });
+    }
+
     if (printBalanceDelta !== 0) {
       await tx
         .update(appUsers)
@@ -308,10 +328,6 @@ export async function adjustCredits(
           updatedAt: new Date(),
         })
         .where(and(eq(appUsers.id, id), eq(appUsers.orgId, orgId)));
-    }
-
-    if (timeCreditsDelta !== 0) {
-      await adjustTimeCreditsForAdmin({ orgId, userId: id, deltaHours: timeCreditsDelta, tx });
     }
 
     const [final] = await tx

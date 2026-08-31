@@ -172,6 +172,35 @@ export async function spendTimeCredits(opts: {
 // recomputeCreditCache — derived-balance sync [SEC]
 // ---------------------------------------------------------------------------
 
+/**
+ * [SEC][MONEY][I-047 fix-5] Locks the member's own `app_users` row `FOR
+ * UPDATE` — the serialization point that closes the credit-cache recompute
+ * race (see `recomputeCreditCache` below). Exported as its own step (not
+ * folded silently into `recomputeCreditCache`'s body) because
+ * `adjustTimeCreditsForAdmin`'s GRANT branch must take THIS SAME lock BEFORE
+ * inserting a new lot row, never after: inserting a row that references
+ * `userId` via FK implicitly takes a weaker `FOR KEY SHARE` lock on this
+ * same `app_users` row for the referential-integrity check — that lock mode
+ * is compatible with ANOTHER transaction's concurrent `FOR KEY SHARE`
+ * (i.e. two concurrent grants can both insert their own lot uncontested),
+ * but is NOT compatible with either side later trying to upgrade to `FOR
+ * UPDATE`. Two transactions each holding `FOR KEY SHARE` and each wanting to
+ * upgrade to `FOR UPDATE` is itself a lock-order deadlock — acquiring the
+ * strong lock FIRST, before either side's insert can take the weak one,
+ * avoids ever entering that state.
+ */
+async function lockUserRowForCreditWrite(
+  tx: Pick<typeof db, "select">,
+  orgId: string,
+  userId: string,
+): Promise<void> {
+  await tx
+    .select({ id: appUsers.id })
+    .from(appUsers)
+    .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))
+    .for("update");
+}
+
 /** Sets app_users.timeCredits = SUM(remainingHours) of non-expired lots; returns the value. */
 export async function recomputeCreditCache(opts: {
   orgId: string;
@@ -180,6 +209,25 @@ export async function recomputeCreditCache(opts: {
 }): Promise<number> {
   const { orgId, userId, tx } = opts;
   const now = new Date();
+
+  // [SEC][MONEY][I-047 fix-5] Lock the member's OWN app_users row FIRST,
+  // before summing — without this, two concurrent recomputes (e.g. two
+  // overlapping admin grants, or a grant racing a spend) can each read the
+  // lots table from a snapshot that doesn't yet include the OTHER's
+  // just-inserted/just-decremented rows, then both write their own
+  // (incomplete) sum: whichever commits LAST silently overwrites the
+  // other's correct total with a stale one — the lot rows stay correct, but
+  // the cache drifts from their true sum. Locking this row first forces the
+  // second concurrent recompute to wait for the first to fully COMMIT (so
+  // its lot write is visible), then re-sum against the now-complete data —
+  // proven by a forced-overlap barrier test
+  // (lib/db/credit-lock-order.int.test.ts). This is intentionally the FIRST
+  // lock this function takes and the LAST resource any credit-writing path
+  // locks (see the lock-order note on `adjustCredits`, users.ts). Re-locking
+  // a row THIS transaction already holds (e.g. the GRANT branch below, which
+  // locks it even earlier) is a harmless no-op — Postgres never blocks a
+  // transaction on its own already-held lock.
+  await lockUserRowForCreditWrite(tx, orgId, userId);
 
   const [row] = await tx
     .select({
@@ -251,6 +299,14 @@ export async function adjustTimeCreditsForAdmin(opts: {
   assertValidCreditDelta(deltaHours);
 
   if (deltaHours > 0) {
+    // [SEC][MONEY][I-047 fix-5] Lock app_users BEFORE inserting the new lot
+    // — see lockUserRowForCreditWrite's doc comment: inserting a lot row
+    // FIRST would take only a weak, cross-transaction-compatible FK lock on
+    // this row, letting two concurrent grants both proceed past their
+    // insert and then deadlock trying to each upgrade to FOR UPDATE inside
+    // recomputeCreditCache. Locking strong up front instead makes a
+    // concurrent grant for the same user simply queue behind this one.
+    await lockUserRowForCreditWrite(tx, orgId, userId);
     const purchasedAt = new Date();
     await tx.insert(timeCreditLots).values({
       orgId,

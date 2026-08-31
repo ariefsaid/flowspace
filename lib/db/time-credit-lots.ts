@@ -20,7 +20,7 @@
  * updated) `remainingHours` before deciding, so combined demand can never
  * jointly overspend past what the lots actually hold.
  */
-import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import { appUsers, timeCreditLots, type TimeCreditLot } from "@/lib/db/schema";
 
@@ -73,9 +73,11 @@ export function selectLotsToSpend(
 const INT4_MAX = 2_147_483_647;
 /** [SEC][MONEY] Coarse business sanity cap on a single manual adjustment
  *  (time-credit hours OR print-balance pages) — far beyond any real admin
- *  grant/debit, but small enough that even a crafted or fat-fingered delta
- *  can never approach the int4 edge, including after being added to an
- *  existing near-max balance (`GREATEST(col + delta, 0)` in adjustCredits). */
+ *  grant/debit, and it keeps any SINGLE delta well inside the int4 bound.
+ *  It does NOT by itself make `col + delta` overflow-proof (an existing
+ *  near-max balance plus a valid delta can still exceed INT4_MAX) — that is
+ *  the result-side clamp `int4ClampedAdd` / the recompute SUM clamp below.
+ */
 const MAX_CREDIT_DELTA = 1_000_000;
 
 /**
@@ -95,6 +97,24 @@ export function assertValidCreditDelta(delta: number): void {
   // int4 bound itself explicit so this function's contract doesn't silently
   // depend on the business cap alone if that constant is ever loosened.
   if (delta > INT4_MAX || delta < -INT4_MAX) throw new Error("INVALID_DELTA");
+}
+
+/**
+ * [SEC][MONEY][I-047 fix-3] int4-safe balance-increment expression —
+ * `least(greatest((col)::bigint + delta, 0), INT4_MAX)::int`.
+ *
+ * Delta-side validation (assertValidCreditDelta) bounds each DELTA, but the
+ * re-verify of I-047 showed that alone is not enough: `print_balance + delta`
+ * is an INTEGER addition in Postgres, so a valid delta on an existing
+ * near-max balance still overflowed with a raw "integer out of range". The
+ * arithmetic therefore runs in bigint (no intermediate overflow), the RESULT
+ * is clamped into `[0, INT4_MAX]` (the column's own domain), and only then
+ * cast back to int4. Shared by every print-balance increment:
+ * `adjustCredits` (users.ts), `topUpPrint` (packages.ts),
+ * `purchasePrintTopup` (print-packages.ts).
+ */
+export function int4ClampedAdd(column: AnyColumn, delta: number): SQL<number> {
+  return sql`least(greatest((${column})::bigint + ${delta}, 0), ${INT4_MAX})::int`;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +251,14 @@ export async function recomputeCreditCache(opts: {
 
   const [row] = await tx
     .select({
-      total: sql<number>`coalesce(sum(${timeCreditLots.remainingHours}), 0)::int`,
+      // [SEC][MONEY][I-047 fix-3] SUM(int) returns bigint in Postgres, so the
+      // sum itself can't overflow — but the old `::int` CAST of that sum
+      // threw a raw "integer out of range" once the lots summed past INT4_MAX
+      // (delta-side validation can't prevent accumulation across many
+      // grants). Clamp the RESULT to the int4 ceiling instead: the cache
+      // column is int4, so a beyond-int4 balance is unrepresentable either
+      // way — clamping keeps the write alive and monotone near the edge.
+      total: sql<number>`coalesce(least(sum(${timeCreditLots.remainingHours}), ${INT4_MAX}), 0)::int`,
     })
     .from(timeCreditLots)
     .where(

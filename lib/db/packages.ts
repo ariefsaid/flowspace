@@ -14,7 +14,7 @@
  *   pages × fixed print rate) — never from a client value.
  *   The credit/print-balance increment uses an atomic SQL `+`, not read-then-write.
  */
-import { and, eq, isNull, asc, sql } from "drizzle-orm";
+import { and, eq, isNull, asc } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import {
   timeCreditPackages,
@@ -23,7 +23,7 @@ import {
   type TimeCreditPackage,
 } from "@/lib/db/schema";
 import { recordTransaction } from "@/lib/db/transactions";
-import { recomputeCreditCache } from "@/lib/db/time-credit-lots";
+import { recomputeCreditCache, int4ClampedAdd } from "@/lib/db/time-credit-lots";
 
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -167,7 +167,9 @@ export async function topUpPrint(input: {
     const [updated] = await tx
       .update(appUsers)
       .set({
-        printBalance: sql`${appUsers.printBalance} + ${pages}`,
+        // [SEC][MONEY][I-047 fix-3] int4-clamped increment — clamps the
+        // RESULT, not just the pages bound (see int4ClampedAdd).
+        printBalance: int4ClampedAdd(appUsers.printBalance, pages),
         updatedAt: new Date(),
       })
       .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))

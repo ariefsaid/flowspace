@@ -16,7 +16,7 @@ import postgres from "postgres";
 import * as schema from "@/lib/db/schema";
 import { organizations, appUsers, timeCreditLots } from "@/lib/db/schema";
 import { db } from "@/lib/db/drizzle";
-import { spendTimeCredits, listLots, adjustTimeCreditsForAdmin } from "@/lib/db/time-credit-lots";
+import { spendTimeCredits, listLots, adjustTimeCreditsForAdmin, recomputeCreditCache } from "@/lib/db/time-credit-lots";
 
 const TEST_URL =
   process.env.TEST_DATABASE_URL ??
@@ -303,6 +303,27 @@ describe("lib/db/time-credit-lots — spendTimeCredits [SEC][MONEY]", () => {
 
       const lots = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.userId, userBId));
       expect(lots).toHaveLength(0);
+    });
+  });
+
+  describe("recomputeCreditCache [SEC][MONEY][I-047 fix-3] — int4 result clamp", () => {
+    it("clamps the cached total at the int4 ceiling when the lot sum exceeds it — never a raw 'integer out of range' cast failure", async () => {
+      await testSql`TRUNCATE TABLE "time_credit_lots" RESTART IDENTITY CASCADE`;
+      const future = new Date(Date.now() + 30 * 24 * 3_600_000);
+      // Three lots of 1.1e9h each: the raw SUM is 3.3e9 — far beyond INT4_MAX
+      // (2_147_483_647). SUM() itself returns bigint (no overflow), but the
+      // old `::int` cast of that sum threw "integer out of range".
+      await testDb.insert(timeCreditLots).values([
+        { orgId: orgAId, userId: userAId, totalHours: 1_100_000_000, remainingHours: 1_100_000_000, expiresAt: future },
+        { orgId: orgAId, userId: userAId, totalHours: 1_100_000_000, remainingHours: 1_100_000_000, expiresAt: future },
+        { orgId: orgAId, userId: userAId, totalHours: 1_100_000_000, remainingHours: 1_100_000_000, expiresAt: future },
+      ]);
+
+      const cached = await db.transaction((tx) =>
+        recomputeCreditCache({ orgId: orgAId, userId: userAId, tx }),
+      );
+      expect(cached).toBe(2_147_483_647); // clamped, not crashed
+      expect(await getUserTimeCredits(userAId)).toBe(2_147_483_647);
     });
   });
 });

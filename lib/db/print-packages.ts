@@ -1,7 +1,8 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import { appUsers, printTopupPackages, type PrintTopupPackage } from "@/lib/db/schema";
 import { recordTransaction } from "@/lib/db/transactions";
+import { int4ClampedAdd } from "@/lib/db/time-credit-lots";
 
 export type PrintTopupPackageView = Pick<PrintTopupPackage, "id" | "pages" | "priceRupiah" | "sortOrder">;
 
@@ -23,7 +24,9 @@ export async function purchasePrintTopup(input: { orgId: string; userId: string;
     )).limit(1);
     if (!pkg) throw new Error("UNKNOWN_PACKAGE");
     const [user] = await tx.update(appUsers)
-      .set({ printBalance: sql`${appUsers.printBalance} + ${pkg.pages}`, updatedAt: new Date() })
+      // [SEC][MONEY][I-047 fix-3] int4-clamped increment — clamps the
+      // RESULT, not just the package's pages (see int4ClampedAdd).
+      .set({ printBalance: int4ClampedAdd(appUsers.printBalance, pkg.pages), updatedAt: new Date() })
       .where(and(eq(appUsers.id, input.userId), eq(appUsers.orgId, input.orgId)))
       .returning({ id: appUsers.id });
     if (!user) throw new Error("USER_NOT_FOUND");

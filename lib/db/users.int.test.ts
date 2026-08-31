@@ -452,5 +452,21 @@ describe("lib/db/users", () => {
       const lots = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.userId, target.id));
       expect(lots).toHaveLength(0);
     });
+
+    it("[SEC][MONEY][I-047 fix-3b] clamps the printBalance RESULT at the int4 ceiling — a valid delta on a near-max balance must not overflow the SQL increment", async () => {
+      const [target] = await testDb
+        .insert(appUsers)
+        .values({ orgId: orgAId, email: `creditint4-${Date.now()}@x.test`, name: "Int4User", role: "MEMBER", printBalance: 2_147_000_000 })
+        .returning();
+
+      // 2_147_000_000 + 1_000_000 > INT4_MAX (2_147_483_647): a raw
+      // `print_balance + delta` integer addition overflows in Postgres
+      // ("integer out of range"). The RESULT must clamp instead.
+      const result = await adjustCredits(orgAId, target.id, { printBalanceDelta: 1_000_000 });
+      expect(result.printBalance).toBe(2_147_483_647);
+
+      const [fresh] = await testDb.select().from(appUsers).where(eq(appUsers.id, target.id));
+      expect(fresh.printBalance).toBe(2_147_483_647);
+    });
   });
 });

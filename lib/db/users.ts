@@ -5,11 +5,15 @@
  * Every org-scoped function takes `orgId` derived from the server session —
  * the client NEVER supplies it (ADR-0004).
  */
-import { and, eq, isNull, ne, asc, inArray, sql } from "drizzle-orm";
+import { and, eq, isNull, ne, asc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/drizzle";
 import { appUsers, type AppUser } from "@/lib/db/schema";
 import { ROLES, MEMBERSHIP_TIERS, type MembershipTier, type Role } from "@/lib/db/enums";
-import { adjustTimeCreditsForAdmin, assertValidCreditDelta } from "@/lib/db/time-credit-lots";
+import {
+  adjustTimeCreditsForAdmin,
+  assertValidCreditDelta,
+  int4ClampedAdd,
+} from "@/lib/db/time-credit-lots";
 
 /**
  * Login lookup. Email is globally unique in the single-venue MVP so this
@@ -348,7 +352,9 @@ export async function adjustCredits(
       await tx
         .update(appUsers)
         .set({
-          printBalance: sql`GREATEST(${appUsers.printBalance} + ${printBalanceDelta}, 0)`,
+          // [SEC][MONEY][I-047 fix-3] int4-clamped increment — clamps the
+          // RESULT, not just the delta (see int4ClampedAdd).
+          printBalance: int4ClampedAdd(appUsers.printBalance, printBalanceDelta),
           updatedAt: new Date(),
         })
         .where(and(eq(appUsers.id, id), eq(appUsers.orgId, orgId)));

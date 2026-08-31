@@ -32,7 +32,8 @@ describe("SessionPanel", () => {
 
     expect(screen.getByText(/Sesi Aktif/)).toBeInTheDocument();
     expect(screen.getAllByText(/tersisa/i).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /Perpanjang Sesi/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Perpanjang 1 jam/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Perpanjang 2 jam/i })).toBeInTheDocument();
   });
 
   it("AC-829: extension affordance calls onExtend and disables while pending", async () => {
@@ -47,11 +48,28 @@ describe("SessionPanel", () => {
       maxHours: 4,
     };
     render(<SessionPanel session={session} onExtend={onExtend} />);
-    fireEvent.click(screen.getByRole("button", { name: /Perpanjang Sesi/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Perpanjang 1 jam/i }));
     await waitFor(() => expect(onExtend).toHaveBeenCalledWith(1));
   });
 
-  it("NFR-803: an extension failure (EXTENSION_BLOCKED_BY_NEXT_BOOKING) renders an inline error within the panel itself, not silently swallowed", async () => {
+  it("AC-i049-6: 2h choice is disabled when 3h are already booked (would exceed the 4h cap)", () => {
+    const session: SessionView = {
+      bookingId: "bk_1",
+      facilityName: "Meeting Room A",
+      // 3h booked total (175 min elapsed + 5 min remaining), near end.
+      bookingMode: "SCHEDULED",
+      startAt: iso(-175 * 60_000),
+      endAt: iso(5 * 60_000),
+      ratePerHourRupiah: 150_000,
+      maxHours: 4,
+    };
+    render(<SessionPanel session={session} onExtend={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /Perpanjang 1 jam/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Perpanjang 2 jam/i })).toBeDisabled();
+  });
+
+  it("NFR-803 / AC-i049-6: an extension failure (EXTENSION_BLOCKED_BY_NEXT_BOOKING) renders the friendly blocked message, not the raw error code", async () => {
     const onExtend = vi.fn().mockRejectedValue(new Error("EXTENSION_BLOCKED_BY_NEXT_BOOKING"));
     const session: SessionView = {
       bookingId: "bk_1",
@@ -63,13 +81,37 @@ describe("SessionPanel", () => {
       maxHours: 4,
     };
     render(<SessionPanel session={session} onExtend={onExtend} />);
-    fireEvent.click(screen.getByRole("button", { name: /Perpanjang Sesi/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Perpanjang 1 jam/i }));
 
     await waitFor(() =>
-      expect(screen.getByText(/EXTENSION_BLOCKED_BY_NEXT_BOOKING/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(/ada booking setelah ini - tidak bisa diperpanjang/i),
+      ).toBeInTheDocument(),
     );
+    expect(screen.queryByText(/EXTENSION_BLOCKED_BY_NEXT_BOOKING/i)).toBeNull();
     // The extending state resets so the affordance can be retried.
-    expect(screen.getByRole("button", { name: /Perpanjang Sesi/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Perpanjang 1 jam/i })).toBeEnabled();
+  });
+
+  it("AC-i049-6: EXTENSION_LIMIT_REACHED also renders the friendly blocked message", async () => {
+    const onExtend = vi.fn().mockRejectedValue(new Error("EXTENSION_LIMIT_REACHED"));
+    const session: SessionView = {
+      bookingId: "bk_1",
+      facilityName: "Meeting Room A",
+      bookingMode: "SCHEDULED",
+      startAt: iso(-90 * 60_000),
+      endAt: iso(5 * 60_000),
+      ratePerHourRupiah: 150_000,
+      maxHours: 4,
+    };
+    render(<SessionPanel session={session} onExtend={onExtend} />);
+    fireEvent.click(screen.getByRole("button", { name: /Perpanjang 1 jam/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/ada booking setelah ini - tidak bisa diperpanjang/i),
+      ).toBeInTheDocument(),
+    );
   });
 
   it("AC-830: scheduled ACTIVE past end shows a red overtime warning and no completion/extension action", () => {
@@ -86,7 +128,7 @@ describe("SessionPanel", () => {
 
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent(/overtime|melebihi waktu/i);
-    expect(screen.queryByRole("button", { name: /Perpanjang Sesi/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Perpanjang 1 jam/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Selesai/i })).toBeNull();
   });
 

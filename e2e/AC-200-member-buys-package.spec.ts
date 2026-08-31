@@ -2,14 +2,17 @@
  * AC-200 — A member buys a time-credit package and their balance increases.
  *
  * Given a member is on the top-up page,
- * When the member clicks the "5 Hours" package card,
+ * When the member clicks the "5 Hours" package card and confirms the purchase
+ *   in the confirm dialog,
  * Then the member's time-credit balance increases by 5 hours.
  * (FR for the time-credit vertical — one curated cross-stack money-journey e2e.)
  *
  * Strategy: log in the seeded member → /topup → capture the rendered Time Credits
- * balance → click the "5 Hours" package card (the card click IS the purchase per
- * TopupClient.tsx — no confirm button) → router.refresh() re-renders the RSC →
- * assert the balance increased by exactly 5.
+ * balance → click the "5 Hours" package card (opens a recap confirm dialog per
+ * I-049's TopupClient.tsx — card click no longer purchases directly) → click the
+ * dialog's "Konfirmasi" button → wait through the mock-processing state → the
+ * success dialog auto-closes and router.refresh() re-renders the RSC → assert
+ * the balance increased by exactly 5.
  *
  * The oracle is the GOAL (balance +5 on the rendered balance tile), not
  * incidental DOM. We read the balance before AND after so the test proves a
@@ -74,14 +77,23 @@ test("AC-200 member buys the 5 Hours package and time-credit balance increases b
   const before = await readTimeCredits(page);
   expect(Number.isFinite(before)).toBe(true);
 
-  // ── ACT: click the "5 Hours" package card (card click = purchase) ──
+  // ── ACT: click the "5 Hours" package card, opening the confirm dialog ──
   // TopupClient renders each package card with a <p>{hours} Hours</p> heading.
   // "{exact}" avoids matching "50 Hours" / "10 Hours".
   await page.getByText("5 Hours", { exact: true }).click();
 
+  // ── ACT: confirm the purchase in the recap dialog (I-049: card click no
+  //         longer purchases directly — it opens a Batal/Konfirmasi dialog). ──
+  await expect(
+    page.getByRole("dialog", { name: "Konfirmasi Pembelian" }),
+  ).toBeVisible({ timeout: 5_000 });
+  await page.getByRole("button", { name: "Konfirmasi", exact: true }).click();
+
   // ── ASSERT: time-credit balance increased by exactly PACKAGE_HOURS ──
-  // router.refresh() re-runs the RSC; poll the rendered tile until it reflects
-  // the ledger update (purchasePackage writes COMPLETED → +5 hours).
+  // The dialog runs a mock-processing delay then a success state before
+  // auto-closing; router.refresh() re-runs the RSC. Poll the rendered tile
+  // until it reflects the ledger update (purchasePackage writes COMPLETED →
+  // +5 hours).
   await expect
     .poll(async () => readTimeCredits(page), {
       timeout: 20_000,

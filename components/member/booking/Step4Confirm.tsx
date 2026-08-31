@@ -53,6 +53,18 @@ const TYPE_LABEL: Record<BookingType, { label: string; icon: React.ReactNode; no
   },
 };
 
+/** 8-clause cancellation & usage policy (ported from the captured original's BookingPolicy). */
+const POLICY_CLAUSES = [
+  "Perekaman video atau fotografi komersial di dalam ruang dilarang.",
+  "Akan ada biaya tambahan untuk kursi tambahan.",
+  "Harap batasi konsumsi makanan dan minuman seminimal mungkin.",
+  "Jaga volume suara agar tidak mengganggu orang lain.",
+  "Bersihkan ruangan sebelum Anda meninggalkan ruangan/meja.",
+  "Biaya tambahan akan dikenakan untuk lembur dan kerusakan setelah penggunaan.",
+  "Hindari membawa barang dalam jumlah besar dan hubungi tim lokasi untuk pertanyaan atau bantuan apa pun.",
+  "Untuk Pemesanan Ruang Acara: 1 (satu) jam pemesanan ruang pra-acara dan 1 (satu) jam pemesanan ruang pasca-acara dapat digunakan untuk pengaturan.",
+];
+
 const PAYMENT_OPTIONS: { value: BookingPaymentChoice; label: string; icon: React.ReactNode }[] = [
   { value: "online", label: "Online", icon: <CreditCard className="h-4 w-4" /> },
   { value: "time_credits", label: "Time Credits", icon: <Wallet className="h-4 w-4" /> },
@@ -269,19 +281,30 @@ export function Step4Confirm({
         </fieldset>
       )}
 
-      {/* Policy-acceptance checkbox — gates the confirm button (AC-849) */}
-      <label className="flex items-start gap-2.5 text-sm text-gray-700">
-        <input
-          type="checkbox"
-          checked={policyAccepted}
-          onChange={(e) => onPolicyAcceptedChange(e.target.checked)}
-          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 accent-teal-600 cursor-pointer"
-        />
-        <span>
-          Saya menyetujui kebijakan pembatalan &amp; pembayaran{" "}
-          <span className="font-medium text-gray-900">FlowSpace</span>
-        </span>
-      </label>
+      {/* Booking policy — 8-clause scrollable box + checkbox gates the confirm button (AC-849) */}
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <h4 className="mb-3 text-sm font-semibold text-amber-700">Syarat &amp; Ketentuan Penggunaan</h4>
+        <div className="mb-4 max-h-48 overflow-y-auto rounded-lg border border-amber-100 bg-white p-3 text-sm text-gray-700 space-y-2">
+          {POLICY_CLAUSES.map((clause, i) => (
+            <div key={i} className="flex gap-2">
+              <span className="shrink-0 font-medium text-amber-700">{i + 1}.</span>
+              <span>{clause}</span>
+            </div>
+          ))}
+        </div>
+        <label className="flex items-start gap-2.5 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={policyAccepted}
+            onChange={(e) => onPolicyAcceptedChange(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 accent-teal-600 cursor-pointer"
+          />
+          <span>
+            Saya telah membaca dan menyetujui syarat &amp; ketentuan{" "}
+            <span className="font-medium text-gray-900">FlowSpace</span> di atas
+          </span>
+        </label>
+      </div>
 
       <Button
         variant="primary"

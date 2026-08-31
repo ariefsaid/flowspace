@@ -262,10 +262,11 @@ function CheckoutModal({ cart, total, onClose, onConfirm, error, pending }: Chec
 
 interface SuccessModalProps {
   guestName: string;
+  orderCode: string | null;
   onClose: () => void;
 }
 
-function SuccessModal({ guestName, onClose }: SuccessModalProps) {
+function SuccessModal({ guestName, orderCode, onClose }: SuccessModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
@@ -275,8 +276,15 @@ function SuccessModal({ guestName, onClose }: SuccessModalProps) {
         <p className="mb-1 text-sm text-gray-600">
           Terima kasih, <span className="font-medium text-gray-900">{guestName}</span>!
         </p>
+        {orderCode && (
+          <div className="mb-4 rounded-xl bg-teal-50 p-4">
+            <p className="text-sm text-teal-700">Nomor Pesanan</p>
+            <p className="text-2xl font-bold text-teal-600">{orderCode}</p>
+          </div>
+        )}
         <p className="mb-6 text-sm text-gray-500">
-          Pesanan Anda sedang diproses. Kami akan memanggil nama Anda saat siap.
+          Pesanan Anda sedang diproses. Kami akan memanggil nama Anda saat siap. Pembayaran
+          dilakukan di kasir.
         </p>
         <Button variant="primary" className="w-full" onClick={onClose}>
           Selesai
@@ -319,6 +327,7 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
   const [variantItem, setVariantItem] = useState<GuestMenuItemView | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [successName, setSuccessName] = useState<string | null>(null);
+  const [successOrderCode, setSuccessOrderCode] = useState<string | null>(null);
   const [orderError, setOrderError] = useState<string | null>(null);
   const [orderPending, setOrderPending] = useState(false);
 
@@ -375,8 +384,9 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
       options: l.options,
     }));
 
+    let order;
     try {
-      await placeOrder({ lines, guestName, notes: notes.trim() || undefined });
+      order = await placeOrder({ lines, guestName, notes: notes.trim() || undefined });
     } catch (err) {
       setOrderError(toOrderErrorMessage(err));
       setOrderPending(false);
@@ -387,6 +397,7 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
     setCart([]);
     setCheckoutOpen(false);
     setSuccessName(guestName);
+    setSuccessOrderCode(order.code);
     startTransition(() => {
       router.refresh();
     });
@@ -629,7 +640,11 @@ export function GuestCafeClient({ menu }: GuestCafeClientProps) {
       {successName && (
         <SuccessModal
           guestName={successName}
-          onClose={() => setSuccessName(null)}
+          orderCode={successOrderCode}
+          onClose={() => {
+            setSuccessName(null);
+            setSuccessOrderCode(null);
+          }}
         />
       )}
     </>

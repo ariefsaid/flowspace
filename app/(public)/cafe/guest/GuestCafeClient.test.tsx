@@ -214,6 +214,27 @@ describe("GuestCafeClient (AC-101)", () => {
     expect(call.lines.every((l) => !("price" in l) && !("unitPriceRupiah" in l))).toBe(true);
   });
 
+  it("AC-i049-1: success modal shows the returned order code and pay-at-cashier note", async () => {
+    vi.mocked(placeOrder).mockResolvedValue({ code: "CAFE-A1B2" } as never);
+
+    render(<GuestCafeClient menu={sampleMenu} />);
+
+    const addButtons = screen.getAllByRole("button", { name: /tambah/i });
+    fireEvent.click(addButtons[0]);
+
+    const checkoutBtn = await screen.findByRole("button", { name: /checkout/i });
+    fireEvent.click(checkoutBtn);
+
+    fireEvent.change(screen.getByPlaceholderText(/masukkan nama/i), {
+      target: { value: "Budi" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /pesan sekarang/i }));
+
+    expect(await screen.findByText("CAFE-A1B2")).toBeInTheDocument();
+    expect(screen.getByText(/nomor pesanan/i)).toBeInTheDocument();
+    expect(screen.getByText(/pembayaran dilakukan di kasir/i)).toBeInTheDocument();
+  });
+
   it("no-mock-import gate: guest cafe files do not import lib/mock/cafe", async () => {
     const fs = await import("node:fs/promises");
     const path = await import("node:path");

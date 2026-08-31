@@ -2,10 +2,34 @@
  * AC-101: BaristaClient renders DB-provided orders (unit/RTL).
  * Static gate: barista/ files must not import lib/mock/barista.
  */
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { BaristaClient } from "./BaristaClient";
 import type { BaristaOrderView } from "./BaristaClient";
+
+class MockAudioContext {
+  static instances: MockAudioContext[] = [];
+  currentTime = 0;
+  destination = {};
+  constructor() {
+    MockAudioContext.instances.push(this);
+  }
+  createOscillator() {
+    return {
+      type: "sine",
+      frequency: { value: 0 },
+      connect: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+  }
+  createGain() {
+    return {
+      gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
+      connect: vi.fn(),
+    };
+  }
+}
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
@@ -29,6 +53,11 @@ const newOrder: BaristaOrderView = {
   notes: null,
   lines: [{ name: "Latte", qty: 1, variant: "Temperature: Hot" }],
 };
+
+beforeEach(() => {
+  MockAudioContext.instances = [];
+  vi.stubGlobal("AudioContext", MockAudioContext);
+});
 
 describe("BaristaClient (AC-101)", () => {
   it("AC-101: 'Pesanan Baru' column shows 1 when one NEW order is passed", () => {
@@ -73,6 +102,33 @@ describe("BaristaClient (AC-101)", () => {
   it("does not render a note block when notes is null", () => {
     render(<BaristaClient initialOrders={[newOrder]} orgId="org-test" />);
     expect(screen.queryByLabelText(/catatan pesanan/i)).not.toBeInTheDocument();
+  });
+
+  it("AC-i049-2: does not notify (toast/beep) on first load even with a NEW order already present", () => {
+    render(<BaristaClient initialOrders={[newOrder]} orgId="org-test" />);
+    expect(screen.queryByText(/pesanan baru masuk/i)).not.toBeInTheDocument();
+    expect(MockAudioContext.instances).toHaveLength(0);
+  });
+
+  it("AC-i049-2: new NEW order with sound on shows the toast and plays a beep", () => {
+    const { rerender } = render(<BaristaClient initialOrders={[]} orgId="org-test" />);
+    expect(MockAudioContext.instances).toHaveLength(0);
+
+    rerender(<BaristaClient initialOrders={[newOrder]} orgId="org-test" />);
+
+    expect(screen.getByText(/pesanan baru masuk/i)).toBeInTheDocument();
+    expect(MockAudioContext.instances).toHaveLength(1);
+  });
+
+  it("AC-i049-2: sound toggle off suppresses the new-order notice entirely", () => {
+    const { rerender } = render(<BaristaClient initialOrders={[]} orgId="org-test" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /matikan suara/i }));
+
+    rerender(<BaristaClient initialOrders={[newOrder]} orgId="org-test" />);
+
+    expect(screen.queryByText(/pesanan baru masuk/i)).not.toBeInTheDocument();
+    expect(MockAudioContext.instances).toHaveLength(0);
   });
 
   it("no-mock-import gate: barista files do not import lib/mock/barista", async () => {

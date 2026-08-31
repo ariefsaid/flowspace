@@ -85,7 +85,7 @@ describe("BookingClient (AC-801/842)", () => {
 
     // Choose online payment + accept policy
     fireEvent.click(screen.getByRole("radio", { name: /Online/ }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /menyetujui kebijakan/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /menyetujui syarat/i }));
     expect(confirmBtn).toBeEnabled();
 
     fireEvent.click(confirmBtn);
@@ -106,7 +106,7 @@ describe("BookingClient (AC-801/842)", () => {
     await advanceToConfirm();
 
     fireEvent.click(screen.getByRole("radio", { name: /Online/ }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /menyetujui kebijakan/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /menyetujui syarat/i }));
     fireEvent.click(screen.getByRole("button", { name: /Konfirmasi Booking/ }));
 
     await waitFor(() => expect(createBookingAction).toHaveBeenCalled());
@@ -142,7 +142,7 @@ describe("BookingClient (AC-801/842)", () => {
     await screen.findByText("Konfirmasi Booking");
 
     expect(screen.queryByRole("radio", { name: /Online/ })).toBeNull();
-    fireEvent.click(screen.getByRole("checkbox", { name: /menyetujui kebijakan/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /menyetujui syarat/i }));
     fireEvent.click(screen.getByRole("button", { name: /Konfirmasi Booking/ }));
 
     await waitFor(() => expect(createBookingAction).toHaveBeenCalledTimes(1));

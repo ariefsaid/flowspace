@@ -24,7 +24,7 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="flex items-center justify-center rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-slate-100 active:bg-slate-200"
+      className="flex items-center justify-center rounded-lg p-1.5 text-gray-600 transition-colors hover:bg-slate-100 active:bg-slate-200"
       aria-label="Salin"
     >
       {copied ? (
@@ -52,7 +52,7 @@ export function WifiCard({ wifi }: WifiCardProps) {
         {/* SSID */}
         <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2.5">
           <div>
-            <p className="text-xs text-gray-500">Nama WiFi (SSID)</p>
+            <p className="text-xs text-gray-600">Nama WiFi (SSID)</p>
             <p className="mt-0.5 font-medium text-gray-900">{wifi.ssid}</p>
           </div>
           <CopyButton text={wifi.ssid} />
@@ -61,13 +61,13 @@ export function WifiCard({ wifi }: WifiCardProps) {
         {/* Voucher */}
         <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2.5">
           <div>
-            <p className="text-xs text-gray-500">Kode Voucher</p>
+            <p className="text-xs text-gray-600">Kode Voucher</p>
             {revealed ? (
               <p className="mt-0.5 font-mono font-semibold tracking-widest text-blue-600">
                 {wifi.voucher}
               </p>
             ) : (
-              <p className="mt-0.5 text-sm italic text-gray-500">Voucher belum tersedia</p>
+              <p className="mt-0.5 text-sm italic text-gray-600">Voucher belum tersedia</p>
             )}
           </div>
           {revealed ? (
@@ -85,12 +85,12 @@ export function WifiCard({ wifi }: WifiCardProps) {
       </div>
 
       {revealed ? (
-        <p className="mt-3 text-xs text-gray-500">
+        <p className="mt-3 text-xs text-gray-600">
           💡 Hubungkan ke WiFi &quot;{wifi.ssid}&quot;, lalu masukkan kode voucher
           di halaman login.
         </p>
       ) : (
-        <p className="mt-3 text-xs text-amber-600">
+        <p className="mt-3 text-xs text-amber-700">
           ⚠️ Klik &quot;Get Voucher&quot; untuk mendapatkan kode akses WiFi.
         </p>
       )}

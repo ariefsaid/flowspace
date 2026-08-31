@@ -418,6 +418,11 @@ describe("lib/db/print", () => {
       expect(revenue).toBeGreaterThanOrEqual(12000);
       expect(rows.some((j) => j.totalRupiah === 2500)).toBe(false);
     });
+
+    it("[SEC][I-047 minor] honors a smaller caller-supplied limit — the normalized LIMIT is genuinely wired to the SQL query (the decision math itself is unit-tested — lib/db/print.test.ts)", async () => {
+      const rows = await listPrintJobsForAdmin(orgAId, {}, 1);
+      expect(rows).toHaveLength(1);
+    });
   });
 
   // -------------------------------------------------------------------------

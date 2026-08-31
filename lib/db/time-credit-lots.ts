@@ -286,6 +286,19 @@ export async function adjustTimeCreditsForAdmin(opts: {
 }): Promise<number> {
   const { orgId, userId, deltaHours, tx } = opts;
 
+  // [SEC][I-047 minor] Defense-in-depth: `adjustCredits` (users.ts) already
+  // resolves the target WITHIN its own org before ever calling this
+  // function, but this function is itself exported and directly callable —
+  // never trust a caller-supplied (orgId, userId) pair to actually be
+  // related without checking here too. A cross-org userId (or one that
+  // doesn't exist) is rejected before any lot/cache write.
+  const [target] = await tx
+    .select({ id: appUsers.id })
+    .from(appUsers)
+    .where(and(eq(appUsers.id, userId), eq(appUsers.orgId, orgId)))
+    .limit(1);
+  if (!target) throw new Error("NOT_FOUND");
+
   if (deltaHours === 0) {
     return recomputeCreditCache({ orgId, userId, tx });
   }

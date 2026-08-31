@@ -290,4 +290,19 @@ describe("lib/db/time-credit-lots — spendTimeCredits [SEC][MONEY]", () => {
       expect(await getUserTimeCredits(userAId)).toBe(before);
     });
   });
+
+  describe("adjustTimeCreditsForAdmin [SEC] — defense-in-depth cross-org guard", () => {
+    it("rejects a userId that belongs to a DIFFERENT org than orgId, even when called directly (not only via users.ts's adjustCredits) — no lot/cache write", async () => {
+      await testSql`TRUNCATE TABLE "time_credit_lots" RESTART IDENTITY CASCADE`;
+
+      await expect(
+        db.transaction((tx) =>
+          adjustTimeCreditsForAdmin({ orgId: orgAId, userId: userBId, deltaHours: 5, tx }),
+        ),
+      ).rejects.toThrow(/NOT_FOUND/);
+
+      const lots = await testDb.select().from(timeCreditLots).where(eq(timeCreditLots.userId, userBId));
+      expect(lots).toHaveLength(0);
+    });
+  });
 });
